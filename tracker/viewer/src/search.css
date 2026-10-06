@@ -1,0 +1,201 @@
+.global-search-trigger {
+  width: 100%;
+  min-height: 38px;
+  justify-content: flex-start;
+  color: var(--muted-foreground);
+  background: var(--surface-quiet);
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.global-search-trigger:hover {
+  color: var(--foreground);
+  background: var(--surface-soft);
+}
+
+.global-search-trigger-label {
+  flex: 1;
+  text-align: left;
+}
+
+.global-search-trigger-shortcut,
+.global-search-footer kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 21px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-family: inherit;
+  font-size: 0.66rem;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.global-search-dialog {
+  width: min(42rem, calc(100vw - 2rem));
+  max-width: 42rem;
+  max-height: min(80vh, 42rem);
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+  border-color: var(--border);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: 0 28px 80px color-mix(in srgb, var(--foreground) 22%, transparent);
+}
+
+.global-search-command {
+  min-height: 0;
+  background: var(--card);
+}
+
+.global-search-command [data-slot="command-input-wrapper"] {
+  height: 60px;
+  padding: 0 54px 0 18px;
+  border-bottom-color: var(--border);
+}
+
+.global-search-command [data-slot="command-input"] {
+  height: 58px;
+  color: var(--foreground);
+  font-size: 0.95rem;
+}
+
+.global-search-command [data-slot="command-list"] {
+  max-height: min(58vh, 31rem);
+  padding: 8px;
+  overscroll-behavior: contain;
+}
+
+.global-search-command [cmdk-group-heading] {
+  padding: 9px 10px 5px;
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.global-search-command [data-slot="command-item"] {
+  min-height: 54px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.global-search-no-results {
+  padding: 0;
+}
+
+.global-search-result-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.global-search-result-title {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 0.82rem;
+  font-weight: 680;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.global-search-result-subtitle {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.global-search-shortcut-icon {
+  color: var(--muted-foreground);
+}
+
+.global-search-empty {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  padding: 30px 18px;
+  color: var(--muted-foreground);
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.global-search-empty-query {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-weight: 650;
+}
+
+.global-search-clear-button {
+  min-height: 30px;
+  padding: 0 10px;
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.global-search-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 15px;
+  min-height: 42px;
+  padding: 0 14px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 0.66rem;
+}
+
+.global-search-footer span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tracker-search-field {
+  background: var(--card);
+}
+
+.tracker-search-field input[type="search"]::-webkit-search-cancel-button {
+  display: none;
+}
+
+.tracker-search-field-icon {
+  color: var(--muted-foreground);
+}
+
+.tracker-search-field-clear-addon {
+  padding-right: 6px;
+}
+
+.tracker-search-field-clear-addon [data-slot="button"] {
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 760px) {
+  .global-search-dialog {
+    width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem);
+  }
+
+  .global-search-command [data-slot="command-list"] {
+    max-height: min(58vh, 27rem);
+  }
+
+  .global-search-footer {
+    justify-content: center;
+    gap: 10px;
+  }
+}

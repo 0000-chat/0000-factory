@@ -1,0 +1,76 @@
+.person-link {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 0.375rem;
+  color: var(--foreground);
+  text-decoration: none;
+  vertical-align: middle;
+}
+
+.person-link:hover {
+  color: var(--primary);
+}
+
+.person-link:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--ring) 65%, transparent);
+  outline-offset: 2px;
+}
+
+.person-link-plain {
+  display: inline;
+  color: var(--muted-foreground);
+}
+
+.person-link-label {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.person-link-avatar,
+.person-pill-avatar {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.person-link-avatar {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.person-link-pill {
+  min-height: 2rem;
+  max-width: 100%;
+  border-color: var(--border);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+
+.person-link-pill:hover {
+  border-color: var(--ring);
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.person-link-pill .person-link-label {
+  white-space: normal;
+}
+
+.pill-button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .person-link,
+  .person-link-pill,
+  .pill-button {
+    transition: none;
+  }
+}

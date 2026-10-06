@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "example-root",
+  "branding": {
+    "name": "Synthetic example-root",
+    "title": "Synthetic example-root tracker",
+    "description": "Authored synthetic tracker fixture data.",
+    "markText": "SYN",
+    "homeLabel": "Synthetic example-root tracker home",
+    "loadingLabel": "Loading synthetic tracker data…",
+    "faviconPath": "assets/favicon.svg"
+  },
+  "github": {
+    "owner": "fixture-example-root",
+    "repo": "tracker-example-root",
+    "branch": "synthetic-main"
+  },
+  "data": {
+    "folderPath": "",
+    "layout": "tracker-v1",
+    "evidence": {
+      "kind": "none"
+    }
+  },
+  "model": {
+    "approvalProtocol": "don-v1"
+  },
+  "browser": {
+    "namespace": "example-root",
+    "storeId": "example-root-fixture-store",
+    "themeKey": "example-root-fixture-theme",
+    "editLockPrefix": "example-root-fixture-edit-lock",
+    "publishLockName": "example-root-fixture-publish-lock",
+    "unscheduledCollapsedKey": "example-root.fixture.unscheduledCollapsed",
+    "activityPausedKey": "example-root.fixture.activityPaused"
+  },
+  "access": {
+    "kind": "unconfigured"
+  },
+  "publish": {
+    "kind": "disabled"
+  },
+  "deployment": {
+    "accountBinding": "fixture-account-example-root",
+    "workerName": "tracker-example-root",
+    "customDomain": "tracker-example-root.fixture.test",
+    "compatibilityDate": "2026-09-30",
+    "compatibilityFlags": [
+      "nodejs_compat"
+    ]
+  }
+}

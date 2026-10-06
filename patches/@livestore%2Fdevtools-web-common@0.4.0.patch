@@ -1,0 +1,25 @@
+diff --git a/dist/web-channel/index.d.ts b/dist/web-channel/index.d.ts
+index 059f62c358221175c84da23dbc07857975a8fc8b..adb4c25a6214cad8e83644de59717994849cc982 100644
+--- a/dist/web-channel/index.d.ts
++++ b/dist/web-channel/index.d.ts
+@@ -48,6 +48,6 @@ export declare const makeStaticClientSessionChannel: {
+ export declare const connectViaWorker: ({ node, target, worker, }: {
+     node: MeshNode;
+     target: string;
+-    worker: Worker.SerializedWorkerPool<typeof WorkerSchema.Request.Type>;
++    worker: Pick<Worker.SerializedWorkerPool<typeof WorkerSchema.Request.Type>, 'execute'>;
+ }) => Effect.Effect<void, UnknownError, Scope.Scope>;
+ //# sourceMappingURL=index.d.ts.map
+diff --git a/src/web-channel/index.ts b/src/web-channel/index.ts
+index a4b91a07445dc7849e9d9fd653b8aef65837bbaf..742402d2072a7c3f0cc56c955776921a037db682 100644
+--- a/src/web-channel/index.ts
++++ b/src/web-channel/index.ts
+@@ -72,7 +72,7 @@ export const connectViaWorker = ({
+ }: {
+   node: MeshNode
+   target: string
+-  worker: Worker.SerializedWorkerPool<typeof WorkerSchema.Request.Type>
++  worker: Pick<Worker.SerializedWorkerPool<typeof WorkerSchema.Request.Type>, 'execute'>
+ }) =>
+   Effect.gen(function* () {
+     const mc = new MessageChannel()

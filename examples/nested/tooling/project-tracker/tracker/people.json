@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "organizations": [
+    {
+      "id": "fixture-organization",
+      "name": "Synthetic Fixture Organization"
+    }
+  ],
+  "people": [
+    {
+      "id": "fixture-don",
+      "name": "Fixture Don",
+      "fullName": "Fixture Don Synthetic",
+      "email": "fixture.don@fixture.test",
+      "status": "active",
+      "aliases": [
+        "owner",
+        "don"
+      ],
+      "githubHandle": "fixture-don",
+      "organizationIds": [
+        "fixture-organization"
+      ]
+    },
+    {
+      "id": "fixture-builder",
+      "name": "Fixture Builder",
+      "fullName": "Fixture Builder Synthetic",
+      "email": "fixture.builder@fixture.test",
+      "status": "active",
+      "aliases": [
+        "builder"
+      ],
+      "githubHandle": "fixture-builder",
+      "organizationIds": [
+        "fixture-organization"
+      ]
+    }
+  ]
+}

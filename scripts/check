@@ -1,0 +1,189 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+ROOT_REAL=$ROOT
+TMP_PARENT=${TMPDIR:-"${XDG_CACHE_HOME:-/tmp}/0000-factory-check"}
+case "$TMP_PARENT" in
+  /*) ;;
+  *) echo "check: TMPDIR must be an absolute path outside the engine" >&2; exit 1 ;;
+esac
+case "$TMP_PARENT" in
+  "$ROOT_REAL"|"$ROOT_REAL"/*)
+    echo "check: temporary parent must be outside the engine" >&2
+    exit 1
+    ;;
+esac
+if ! command -v setsid >/dev/null 2>&1; then
+  echo "check: setsid is required for process-group cleanup" >&2
+  exit 1
+fi
+mkdir -p "$TMP_PARENT"
+TMP_PARENT=$(CDPATH= cd -- "$TMP_PARENT" && pwd -P)
+case "$TMP_PARENT" in
+  "$ROOT_REAL"|"$ROOT_REAL"/*)
+    echo "check: temporary parent must be outside the engine" >&2
+    exit 1
+    ;;
+esac
+CHECK_ROOT=$(mktemp -d "$TMP_PARENT/factory-check.XXXXXX")
+case "$CHECK_ROOT" in
+  "$TMP_PARENT"/factory-check.*) ;;
+  *) echo "check: temporary child escaped TMPDIR" >&2; exit 1 ;;
+esac
+
+CURRENT_CHILD=0
+CURRENT_GROUP=0
+CLEANUP_FAILED=0
+stop_current() {
+  child=$CURRENT_CHILD
+  group=$CURRENT_GROUP
+  if [ "$child" -eq 0 ]; then return 0; fi
+
+  if [ "$group" -ne 0 ]; then
+    kill -TERM -"$group" 2>/dev/null || true
+  else
+    kill -TERM "$child" 2>/dev/null || true
+  fi
+
+  attempts=0
+  while kill -0 "$child" 2>/dev/null; do
+    if [ "$attempts" -ge 20 ]; then
+      if [ "$group" -ne 0 ]; then
+        kill -KILL -"$group" 2>/dev/null || true
+      else
+        kill -KILL "$child" 2>/dev/null || true
+      fi
+      break
+    fi
+    sleep 0.1
+    attempts=$((attempts + 1))
+  done
+  if wait "$child" 2>/dev/null; then :; else :; fi
+
+  if [ "$group" -ne 0 ]; then
+    attempts=0
+    while kill -0 -"$group" 2>/dev/null; do
+      if [ "$attempts" -ge 20 ]; then
+        kill -KILL -"$group" 2>/dev/null || true
+        break
+      fi
+      sleep 0.1
+      attempts=$((attempts + 1))
+    done
+    if kill -0 -"$group" 2>/dev/null; then
+      echo "check: owned process group did not exit; preserving temporary evidence" >&2
+      return 1
+    fi
+  fi
+  CURRENT_CHILD=0
+  CURRENT_GROUP=0
+}
+
+cleanup() {
+  status=$?
+  trap - EXIT INT TERM
+  if ! stop_current; then
+    CLEANUP_FAILED=1
+  fi
+  if [ "$CLEANUP_FAILED" -ne 0 ]; then
+    echo "check: preserving temporary evidence after process cleanup failure" >&2
+    exit 1
+  fi
+  rm -rf -- "$CHECK_ROOT"
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+run_command() {
+  setsid "$@" &
+  CURRENT_GROUP=$!
+  CURRENT_CHILD=$!
+  if wait "$CURRENT_CHILD"; then
+    status=0
+  else
+    status=$?
+  fi
+  if ! stop_current; then
+    CLEANUP_FAILED=1
+    status=1
+  fi
+  return "$status"
+}
+
+export TMPDIR="$CHECK_ROOT"
+export TRACKER_FIXTURE_TMP="$CHECK_ROOT/fixture-commands"
+export TRACKER_BROWSER_FIXTURE_ROOT="$CHECK_ROOT/browser-fixtures"
+export TRACKER_BROWSER_PROJECTS_FILE="$CHECK_ROOT/browser-projects.json"
+export TRACKER_PLAYWRIGHT_OUTPUT="$CHECK_ROOT/playwright-output"
+mkdir -p "$TRACKER_FIXTURE_TMP" "$TRACKER_BROWSER_FIXTURE_ROOT" "$TRACKER_PLAYWRIGHT_OUTPUT"
+
+cd "$ROOT"
+
+run_command ./scripts/privacy-check
+run_command node --test tooling/tracker/test.mjs
+run_command bun test --preload ./tests/helpers/browser-instance-preload.mjs --timeout 120000 \
+  tests/*.test.mjs tests/tracker-hosting tracker/viewer/tests
+
+run_command bun tracker/viewer/tooling/routes.mjs check
+run_command bun x tsc --project tracker/viewer/tsconfig.json --noEmit --allowJs --checkJs false
+
+build_example() {
+  layout=$1
+  data_root="$CHECK_ROOT/example-$layout"
+  output_root="$CHECK_ROOT/output-$layout"
+  mkdir -p "$data_root"
+  cp -R "$ROOT/examples/$layout/." "$data_root/"
+  if [ "$layout" = nested ]; then
+    settings="$data_root/tooling/project-tracker/settings.json"
+  else
+    settings="$data_root/settings.json"
+  fi
+  run_command node tooling/tracker/cli.mjs build \
+    --engine-root "$ROOT" --data-root "$data_root" \
+    --settings "$settings" --out "$output_root"
+  run_command node tooling/tracker/cli.mjs check \
+    --engine-root "$ROOT" --data-root "$data_root" \
+    --settings "$settings" --out "$output_root"
+  run_command bun tracker/viewer/tooling/build.mjs \
+    --engine-root "$ROOT" --data-root "$data_root" \
+    --settings "$settings" --out "$output_root"
+}
+
+build_example root
+build_example nested
+
+BROWSER_PORT=$(node --input-type=module <<'NODE'
+import net from 'node:net';
+
+function listen(port) {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => resolve(server));
+  });
+}
+
+for (let start = 41000; start < 60000; start += 17) {
+  const servers = [];
+  try {
+    for (let offset = 0; offset < 4; offset += 1) servers.push(await listen(start + offset));
+    for (const server of servers) await new Promise(resolve => server.close(resolve));
+    console.log(start);
+    process.exit(0);
+  } catch {
+    for (const server of servers) server.close();
+  }
+}
+console.error('check: no four-port localhost range was available');
+process.exit(1);
+NODE
+)
+
+TRACKER_BROWSER_PORT="$BROWSER_PORT" \
+  run_command bun x playwright test --config tests/tracker-browser/playwright.config.ts \
+  --project=empty-0000 --project=populated-root --project=populated-nested
+
+echo "check: complete"

@@ -1,0 +1,220 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+PRIVACY_ROOT=${PRIVACY_ROOT:-$ROOT} node --input-type=module <<'NODE'
+import { join, relative, resolve, sep } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+
+const root = resolve(process.env.PRIVACY_ROOT || process.cwd());
+const ignoredDirectories = new Set(['.git', 'node_modules']);
+const findings = [];
+let scannedFiles = 0;
+let skippedFiles = 0;
+
+function relativePath(path) {
+  return relative(root, path).split(sep).join('/');
+}
+
+function add(rule, path, count) {
+  if (count > 0) findings.push({ rule, path: relativePath(path), count });
+}
+
+function reviewedCredential(pathName, value) {
+  const normalized = String(value).trim();
+  return ((pathName === 'tests/shared-engine-contract.test.mjs'
+      || pathName === 'tests/synthetic-github.test.mjs')
+    && normalized === 'synthetic-installation-token-108')
+    || (pathName === 'tests/tracker-hosting/github-client.test.mjs'
+      && normalized === 'ghs_test-installation-token-not-for-errors')
+    || (pathName === 'tests/tracker-hosting/worker-settings.test.mjs'
+      && normalized === 'ambient-private-key');
+}
+
+const emailPattern = /\b[A-Z0-9.!#$&'*+?^_{|}~-]+@([A-Z][A-Z0-9-]*(?:\.[A-Z0-9-]+)+)\b/giu;
+const credentialPattern = /(?:^|[^A-Z0-9])(?:[A-Z0-9]+[_-])*(?:token|secret|password|api[_-]?key|private[_-]?key)\s*[:=]\s*(['"])(.*?)\1/giu;
+const privateKeyPattern = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/gu;
+const bearerPattern = /\bBearer\s+[A-Z0-9._~+/=-]{20,}\b/giu;
+const githubTokenPattern = /(?:^|[^A-Z0-9_])(?:gh[pousr]_|github_pat_)[A-Z0-9_]{20,}(?![A-Z0-9_])/giu;
+const awsAccessKeyPattern = /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/gu;
+const slackTokenPattern = /(?:^|[^A-Z0-9_])xox[baprs]-[A-Z0-9-]{10,}(?![A-Z0-9-])/giu;
+const openAiKeyPattern = /(?:^|[^A-Z0-9_])sk-(?:proj-|live-|admin-|svcacct-)?[A-Z0-9_-]{20,}(?![A-Z0-9_-])/giu;
+const operatorPathPattern = new RegExp('/' + 'home' + '/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+', 'gu');
+const userPathPattern = new RegExp('/' + 'Users' + '/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+', 'gu');
+const accessSuffix = ['cloudflare', 'access.com'].join('');
+const hostedSuffix = ['0000', '.chat'].join('');
+const productionHostPatterns = [
+  new RegExp('(?:^|[^A-Za-z0-9-])(?:[A-Za-z0-9-]+\\.)*' + accessSuffix.replace('.', '\\.') + '(?:$|[^A-Za-z0-9-])', 'giu'),
+  new RegExp('(?:^|[^A-Za-z0-9-])(?:[A-Za-z0-9-]+\\.)*' + hostedSuffix.replace('.', '\\.') + '(?:$|[^A-Za-z0-9-])', 'giu'),
+];
+
+const syntheticIdentityPattern = /^(?:fixture|synthetic|example|tracker)(?:[-_ ]|$)/iu;
+const syntheticPersonLiteralPattern = /^(?:fixture|synthetic)/iu;
+const reservedExampleEmailPattern = /@(?:[A-Z0-9-]+\.)*(?:test|invalid|example|localhost)$/iu;
+const personIdentityLiteralPattern = /(?:['"]?(?:fullName|displayName)['"]?\s*(?::|=)\s*['"])([^'"\n]+)['"]/giu;
+const genericDisplayLabels = new Set(['CalendarItem', 'GanttMarker']);
+
+function parseExampleJson(path, pathName, text, rule) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    add(rule + '-json', path, 1);
+    return null;
+  }
+}
+
+function inspectExampleSettings(path, pathName, text) {
+  const match = /^examples\/([^/]+)\/(.+)$/u.exec(pathName);
+  if (!match || !match[2].endsWith('settings.json')) return;
+  const layout = match[1];
+  const settingsPath = match[2];
+  const expectedPath = layout === 'nested' ? 'tooling/project-tracker/settings.json' : 'settings.json';
+  const settings = parseExampleJson(path, pathName, text, 'example-settings');
+  if (settings === null) return;
+
+  let pathIssues = settingsPath === expectedPath ? 0 : 1;
+  add('example-settings-path', path, pathIssues);
+
+  let defaultIssues = 0;
+  if (settings.schemaVersion !== 1) defaultIssues += 1;
+  if (!syntheticIdentityPattern.test(String(settings.id ?? ''))) defaultIssues += 1;
+  if (settings.data?.folderPath !== (layout === 'nested' ? 'tooling/project-tracker' : '')) defaultIssues += 1;
+  if (settings.data?.layout !== 'tracker-v1') defaultIssues += 1;
+  if (settings.access?.kind !== 'unconfigured') defaultIssues += 1;
+  if (settings.publish?.kind !== 'disabled') defaultIssues += 1;
+  add('example-settings-defaults', path, defaultIssues);
+
+  let identityIssues = 0;
+  for (const value of [
+    settings.github?.owner,
+    settings.github?.repo,
+    settings.github?.branch,
+    settings.deployment?.accountBinding,
+    settings.deployment?.workerName,
+  ]) {
+    if (!syntheticIdentityPattern.test(String(value ?? ''))) identityIssues += 1;
+  }
+  add('example-settings-identities', path, identityIssues);
+
+  const customDomain = String(settings.deployment?.customDomain ?? '').toLowerCase();
+  add('example-settings-domain', path, customDomain.endsWith('.fixture.test') ? 0 : 1);
+}
+
+function inspectExampleRoster(path, pathName, text) {
+  const match = /^examples\/([^/]+)\/(?:(tooling\/project-tracker)\/)?tracker\/people\.json$/u.exec(pathName);
+  if (!match) return;
+  const roster = parseExampleJson(path, pathName, text, 'example-roster');
+  if (roster === null) return;
+
+  let shapeIssues = Array.isArray(roster.people) && roster.people.length > 0 ? 0 : 1;
+  if (!Array.isArray(roster.organizations) || roster.organizations.length === 0) shapeIssues += 1;
+  add('example-roster-shape', path, shapeIssues);
+
+  let identityIssues = 0;
+  for (const organization of Array.isArray(roster.organizations) ? roster.organizations : []) {
+    if (!syntheticIdentityPattern.test(String(organization?.id ?? ''))) identityIssues += 1;
+    if (!syntheticIdentityPattern.test(String(organization?.name ?? ''))) identityIssues += 1;
+  }
+  for (const person of Array.isArray(roster.people) ? roster.people : []) {
+    for (const value of [person?.id, person?.name, person?.fullName, person?.githubHandle]) {
+      if (!syntheticIdentityPattern.test(String(value ?? ''))) identityIssues += 1;
+    }
+  }
+  add('example-roster-identities', path, identityIssues);
+
+  let emailIssues = 0;
+  for (const person of Array.isArray(roster.people) ? roster.people : []) {
+    const email = String(person?.email ?? '').toLowerCase();
+    if (!email || !reservedExampleEmailPattern.test(email)) emailIssues += 1;
+  }
+  add('example-roster-email', path, emailIssues);
+}
+
+function inspectPersonIdentityLiterals(path, text) {
+  let issues = 0;
+  for (const match of text.matchAll(personIdentityLiteralPattern)) {
+    if (!syntheticPersonLiteralPattern.test(match[1]) && !genericDisplayLabels.has(match[1])) issues += 1;
+  }
+  add('person-identity-literal', path, issues);
+}
+
+function inspectFile(path) {
+  const text = readFileSync(path, 'utf8');
+  const pathName = relativePath(path);
+  scannedFiles += 1;
+
+  let matches = [...text.matchAll(privateKeyPattern)].length;
+  add('private-key-header', path, matches);
+  matches = [...text.matchAll(bearerPattern)].length;
+  add('bearer-token', path, matches);
+  matches = [...text.matchAll(githubTokenPattern)].length;
+  add('github-token', path, matches);
+  matches = [...text.matchAll(awsAccessKeyPattern)].length;
+  add('aws-access-key', path, matches);
+  matches = [...text.matchAll(slackTokenPattern)].length;
+  add('slack-token', path, matches);
+  matches = [...text.matchAll(openAiKeyPattern)].length;
+  add('openai-key', path, matches);
+  matches = [...text.matchAll(operatorPathPattern)].length + [...text.matchAll(userPathPattern)].length;
+  add('absolute-operator-path', path, matches);
+  matches = productionHostPatterns.reduce((total, pattern) => total + [...text.matchAll(pattern)].length, 0);
+  add('production-hostname', path, matches);
+
+  let credentialMatches = 0;
+  for (const match of text.matchAll(credentialPattern)) {
+    if (!reviewedCredential(pathName, match[2])) credentialMatches += 1;
+  }
+  add('credential-assignment', path, credentialMatches);
+
+  let nonSyntheticEmails = 0;
+  for (const match of text.matchAll(emailPattern)) {
+    const domain = match[1].toLowerCase();
+    const exactReviewedTransportEmail = pathName === 'tests/synthetic-github.test.mjs'
+      && match[0].toLowerCase() === 'synthetic-password' + '@' + 'api.github.com';
+    if (!exactReviewedTransportEmail && !/(?:\.test|\.invalid|\.example|\.localhost)$/u.test(domain)) nonSyntheticEmails += 1;
+  }
+  add('non-synthetic-email-domain', path, nonSyntheticEmails);
+
+  inspectExampleSettings(path, pathName, text);
+  inspectExampleRoster(path, pathName, text);
+  inspectPersonIdentityLiterals(path, text);
+}
+
+function walk(directory, rootDirectory = false) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (rootDirectory && ignoredDirectories.has(entry.name)) continue;
+    if (entry.isSymbolicLink()) {
+      add('unexpected-symlink', path, 1);
+      continue;
+    }
+    if (entry.isDirectory()) {
+      if (ignoredDirectories.has(entry.name)) {
+        add('nested-private-directory', path, 1);
+      } else {
+        walk(path);
+      }
+      continue;
+    }
+    if (!entry.isFile()) {
+      add('unexpected-file-type', path, 1);
+      continue;
+    }
+    try {
+      inspectFile(path);
+    } catch {
+      skippedFiles += 1;
+      add('unreadable-file', path, 1);
+    }
+  }
+}
+
+walk(root, true);
+if (findings.length > 0) {
+  console.error('privacy-check: FAIL (' + findings.length + ' finding(s), ' + scannedFiles + ' file(s) scanned)');
+  for (const finding of findings) console.error(finding.rule + ': ' + finding.path + ' (' + finding.count + ')');
+  process.exitCode = 1;
+} else {
+  console.log('privacy-check: PASS (' + scannedFiles + ' file(s) scanned' + (skippedFiles ? ', ' + skippedFiles + ' skipped' : '') + ')');
+}
+NODE

@@ -1,0 +1,39 @@
+diff --git a/dist/web-worker/shared-worker/make-shared-worker.js b/dist/web-worker/shared-worker/make-shared-worker.js
+index fa8936f17ecc68f7c6618164548251d246ba9c0e..deadf60781b583ce3d40679a921d3f3b882750a1 100644
+--- a/dist/web-worker/shared-worker/make-shared-worker.js
++++ b/dist/web-worker/shared-worker/make-shared-worker.js
+@@ -113,9 +113,7 @@ const makeWorkerRunner = Effect.gen(function* () {
+                 const shutdownChannel = yield* makeShutdownChannel(initial.storeId);
+                 yield* shutdownChannel.listen.pipe(Stream.flatten(), Stream.tap(() => reset), Stream.runDrain, Effect.tapCauseLogPretty, Effect.forkScoped);
+                 const workerLayer = yield* Layer.build(BrowserWorker.layer(() => port));
+-                const worker = yield* Worker.makePoolSerialized({
+-                    size: 1,
+-                    concurrency: 100,
++                const worker = yield* Worker.makeSerialized({
+                     initialMessage: () => initial,
+                 }).pipe(Effect.provide(workerLayer), Effect.withSpan('@livestore/adapter-web:shared-worker:makeWorkerProxyFromPort'));
+                 // Prepare the web mesh connection for leader worker to be able to connect to the devtools
+diff --git a/src/web-worker/shared-worker/make-shared-worker.ts b/src/web-worker/shared-worker/make-shared-worker.ts
+index 6072d55bbd108f925e3572af9d7552790f98ac21..ece288f6336eaf733867c604f398437598e910bd 100644
+--- a/src/web-worker/shared-worker/make-shared-worker.ts
++++ b/src/web-worker/shared-worker/make-shared-worker.ts
+@@ -51,7 +51,7 @@ if (isDevEnv() === true) {
+ const makeWorkerRunner = Effect.gen(function* () {
+   const leaderWorkerContextSubRef = yield* SubscriptionRef.make<
+     | {
+-        worker: Worker.SerializedWorkerPool<WorkerSchema.LeaderWorkerInnerRequest>
++        worker: Worker.SerializedWorker<WorkerSchema.LeaderWorkerInnerRequest>
+         scope: Scope.CloseableScope
+       }
+     | undefined
+@@ -189,9 +189,7 @@ const makeWorkerRunner = Effect.gen(function* () {
+ 
+           const workerLayer = yield* Layer.build(BrowserWorker.layer(() => port))
+ 
+-          const worker = yield* Worker.makePoolSerialized<WorkerSchema.LeaderWorkerInnerRequest>({
+-            size: 1,
+-            concurrency: 100,
++          const worker = yield* Worker.makeSerialized<WorkerSchema.LeaderWorkerInnerRequest>({
+             initialMessage: () => initial,
+           }).pipe(
+             Effect.provide(workerLayer),

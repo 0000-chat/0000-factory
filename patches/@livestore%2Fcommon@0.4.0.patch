@@ -1,0 +1,247 @@
+diff --git a/dist/leader-thread/LeaderSyncProcessor.js b/dist/leader-thread/LeaderSyncProcessor.js
+index 8ca7faac90ebc602269e1ea6601c209ffc3e78c3..7cc094cd70b16dbfccf5810c3d071884e43707b4 100644
+--- a/dist/leader-thread/LeaderSyncProcessor.js
++++ b/dist/leader-thread/LeaderSyncProcessor.js
+@@ -4,7 +4,7 @@ import { UnknownError } from "../adapter-types.js";
+ import { IntentionalShutdownCause } from "../errors.js";
+ import { makeMaterializerHash } from "../materializer-helper.js";
+ import { EventSequenceNumber, LiveStoreEvent, resolveEventDef, SystemTables } from "../schema/mod.js";
+-import { EVENTLOG_META_TABLE, SYNC_STATUS_TABLE } from "../schema/state/sqlite/system-tables/eventlog-tables.js";
++import { EVENTLOG_META_TABLE, eventlogMetaTable, SYNC_STATUS_TABLE } from "../schema/state/sqlite/system-tables/eventlog-tables.js";
+ import { isRejectedPushError, LeaderAheadError, NonMonotonicBatchError, StaleRebaseGenerationError } from "./RejectedPushError.js";
+ import * as SyncState from "../sync/syncstate.js";
+ import { sql } from "../util.js";
+@@ -49,14 +49,14 @@ export const makeLeaderSyncProcessor = ({ schema, dbState, initialBlockingSyncCo
+     const backendPushBatchSize = params.backendPushBatchSize ?? 50;
+     const syncStateSref = yield* SubscriptionRef.make(undefined);
+     const isClientEvent = (eventEncoded) => schema.eventsDefsMap.get(eventEncoded.name)?.options.clientOnly ?? false;
+-    const connectedClientSessionPullQueues = yield* makePullQueueSet;
++    const localPushesQueue = yield* BucketQueue.make();
++    // Ensures mutual exclusion between local push and backend pull processing.
++    const localPushBackendPullMutex = yield* Effect.makeSemaphore(1);
++    const connectedClientSessionPullQueues = yield* makePullQueueSet(localPushBackendPullMutex);
+     // This context depends on data from `boot`, we should find a better implementation to avoid this ref indirection.
+     const ctxRef = {
+         current: undefined,
+     };
+-    const localPushesQueue = yield* BucketQueue.make();
+-    // Ensures mutual exclusion between local push and backend pull processing.
+-    const localPushBackendPullMutex = yield* Effect.makeSemaphore(1);
+     /**
+      * Additionally to the `syncStateSref` we also need the `pushHeadRef` in order to prevent old/duplicate
+      * events from being pushed in a scenario like this:
+@@ -555,7 +555,7 @@ const trimChangesetRows = (db, newHead) => {
+     // we're keeping at least one row for the current head, and thus are using `<` instead of `<=`
+     db.execute(sql `DELETE FROM ${SystemTables.SESSION_CHANGESET_META_TABLE} WHERE seqNumGlobal < ${newHead.global}`);
+ };
+-const makePullQueueSet = Effect.gen(function* () {
++const makePullQueueSet = (localPushBackendPullMutex) => Effect.gen(function* () {
+     const set = new Set();
+     // NOTE this could grow unbounded for long running sessions
+     const cachedPayloads = new Map();
+@@ -566,6 +566,52 @@ const makePullQueueSet = Effect.gen(function* () {
+         set.clear();
+     }));
+     const makeQueue = (cursor) => Effect.gen(function* () {
++        const { dbEventlog, dbState, schema, syncBackend } = yield* LeaderThreadCtx;
++        const canReplayPersistedClientOnlyEvents = syncBackend === undefined
++            && Array.from(schema.eventsDefsMap.values()).every((eventDef) => eventDef.options.clientOnly === true);
++        if (canReplayPersistedClientOnlyEvents) {
++            return yield* localPushBackendPullMutex.withPermits(1)(Effect.gen(function* () {
++                const leaderHead = Eventlog.getClientHeadFromDb(dbEventlog);
++                const cursorVsHead = EventSequenceNumber.Client.compare(cursor, leaderHead);
++                if (cursorVsHead > 0) {
++                    return yield* Effect.die(new Error(`Cannot replay local-only LiveStore events: pull cursor ${EventSequenceNumber.Client.toString(cursor)} is ahead of leader head ${EventSequenceNumber.Client.toString(leaderHead)}.`));
++                }
++                const cursorIsRoot = EventSequenceNumber.Client.compare(cursor, EventSequenceNumber.Client.ROOT) === 0;
++                if (!cursorIsRoot) {
++                    const exactCursorRows = dbEventlog.select(eventlogMetaTable.where({
++                        seqNumGlobal: cursor.global,
++                        seqNumClient: cursor.client,
++                        seqNumRebaseGeneration: cursor.rebaseGeneration,
++                    }));
++                    if (exactCursorRows.length !== 1) {
++                        return yield* Effect.die(new Error(`Cannot replay local-only LiveStore events: pull cursor ${EventSequenceNumber.Client.toString(cursor)} is not an exact eventlog ancestor.`));
++                    }
++                }
++                const eventsSinceCursor = Eventlog.getEventsSince({ dbEventlog, dbState, since: cursor });
++                let expectedParent = cursor;
++                for (const event of eventsSinceCursor) {
++                    if (schema.eventsDefsMap.get(event.name)?.options.clientOnly !== true) {
++                        return yield* Effect.die(new Error(`Cannot replay local-only LiveStore events: event ${event.name} is not a known client-only event.`));
++                    }
++                    if (EventSequenceNumber.Client.compare(event.parentSeqNum, expectedParent) !== 0) {
++                        return yield* Effect.die(new Error(`Cannot replay local-only LiveStore events: eventlog suffix after ${EventSequenceNumber.Client.toString(cursor)} is discontinuous at ${EventSequenceNumber.Client.toString(event.seqNum)}.`));
++                    }
++                    expectedParent = event.seqNum;
++                }
++                if (EventSequenceNumber.Client.compare(expectedParent, leaderHead) !== 0) {
++                    return yield* Effect.die(new Error(`Cannot replay local-only LiveStore events: eventlog suffix after ${EventSequenceNumber.Client.toString(cursor)} does not reach leader head ${EventSequenceNumber.Client.toString(leaderHead)}.`));
++                }
++                const queue = yield* Queue.unbounded().pipe(Effect.acquireRelease(Queue.shutdown));
++                yield* Effect.addFinalizer(() => Effect.sync(() => set.delete(queue)));
++                set.add(queue);
++                if (eventsSinceCursor.length > 0) {
++                    yield* Queue.offer(queue, {
++                        payload: SyncState.PayloadUpstreamAdvance.make({ newEvents: eventsSinceCursor }),
++                    });
++                }
++                return queue;
++            }));
++        }
+         const queue = yield* Queue.unbounded().pipe(Effect.acquireRelease(Queue.shutdown));
+         yield* Effect.addFinalizer(() => Effect.sync(() => set.delete(queue)));
+         const payloadsSinceCursor = Array.from(cachedPayloads.entries())
+@@ -585,33 +631,6 @@ const makePullQueueSet = Effect.gen(function* () {
+                 return { payload };
+             }
+         });
+-        // console.debug(
+-        //   'seeding new queue',
+-        //   {
+-        //     cursor,
+-        //   },
+-        //   '\n  mergePayloads',
+-        //   ...Array.from(cachedPayloads.entries())
+-        //     .flatMap(([seqNumStr, payloads]) =>
+-        //       payloads.map((payload) => ({ payload, seqNum: EventSequenceNumber.fromString(seqNumStr) })),
+-        //     )
+-        //     .map(({ payload, seqNum }) => [
+-        //       seqNum,
+-        //       payload._tag,
+-        //       'newEvents',
+-        //       ...payload.newEvents.map((_) => _.toJSON()),
+-        //       'rollbackEvents',
+-        //       ...(payload._tag === 'upstream-rebase' ? payload.rollbackEvents.map((_) => _.toJSON()) : []),
+-        //     ]),
+-        //   '\n  payloadsSinceCursor',
+-        //   ...payloadsSinceCursor.map(({ payload }) => [
+-        //     payload._tag,
+-        //     'newEvents',
+-        //     ...payload.newEvents.map((_) => _.toJSON()),
+-        //     'rollbackEvents',
+-        //     ...(payload._tag === 'upstream-rebase' ? payload.rollbackEvents.map((_) => _.toJSON()) : []),
+-        //   ]),
+-        // )
+         yield* queue.offerAll(payloadsSinceCursor);
+         set.add(queue);
+         return queue;
+diff --git a/src/leader-thread/LeaderSyncProcessor.ts b/src/leader-thread/LeaderSyncProcessor.ts
+index 3f5a6a50d734e46c3f6f8d88cadce115c2c52f2e..a2920be6e8cc41269307c249974fbb1f8889b87f 100644
+--- a/src/leader-thread/LeaderSyncProcessor.ts
++++ b/src/leader-thread/LeaderSyncProcessor.ts
+@@ -24,7 +24,7 @@ import { IntentionalShutdownCause } from '../errors.ts'
+ import { makeMaterializerHash } from '../materializer-helper.ts'
+ import type { LiveStoreSchema } from '../schema/mod.ts'
+ import { EventSequenceNumber, LiveStoreEvent, resolveEventDef, SystemTables } from '../schema/mod.ts'
+-import { EVENTLOG_META_TABLE, SYNC_STATUS_TABLE } from '../schema/state/sqlite/system-tables/eventlog-tables.ts'
++import { EVENTLOG_META_TABLE, eventlogMetaTable, SYNC_STATUS_TABLE } from '../schema/state/sqlite/system-tables/eventlog-tables.ts'
+ import type { BackendIdMismatchError, IsOfflineError, SyncBackend } from '../sync/sync.ts'
+ import { isRejectedPushError, LeaderAheadError, NonMonotonicBatchError, StaleRebaseGenerationError } from './RejectedPushError.ts'
+ import * as SyncState from '../sync/syncstate.ts'
+@@ -168,7 +168,10 @@ export const makeLeaderSyncProcessor = ({
+     const isClientEvent = (eventEncoded: LiveStoreEvent.Client.EncodedWithMeta) =>
+       schema.eventsDefsMap.get(eventEncoded.name)?.options.clientOnly ?? false
+ 
+-    const connectedClientSessionPullQueues = yield* makePullQueueSet
++    const localPushesQueue = yield* BucketQueue.make<LocalPushQueueItem>()
++    // Ensures mutual exclusion between local push and backend pull processing.
++    const localPushBackendPullMutex = yield* Effect.makeSemaphore(1)
++    const connectedClientSessionPullQueues = yield* makePullQueueSet(localPushBackendPullMutex)
+ 
+     // This context depends on data from `boot`, we should find a better implementation to avoid this ref indirection.
+     const ctxRef = {
+@@ -181,10 +184,6 @@ export const makeLeaderSyncProcessor = ({
+           },
+     }
+ 
+-    const localPushesQueue = yield* BucketQueue.make<LocalPushQueueItem>()
+-    // Ensures mutual exclusion between local push and backend pull processing.
+-    const localPushBackendPullMutex = yield* Effect.makeSemaphore(1)
+-
+     /**
+      * Additionally to the `syncStateSref` we also need the `pushHeadRef` in order to prevent old/duplicate
+      * events from being pushed in a scenario like this:
+@@ -945,7 +944,7 @@ interface PullQueueSet {
+   }) => Effect.Effect<void, never>
+ }
+ 
+-const makePullQueueSet = Effect.gen(function* () {
++const makePullQueueSet = (localPushBackendPullMutex: Effect.Semaphore) => Effect.gen(function* () {
+   const set = new Set<Queue.Queue<{ payload: typeof SyncState.PayloadUpstream.Type }>>()
+ 
+   type StringifiedSeqNum = string
+@@ -964,6 +963,73 @@ const makePullQueueSet = Effect.gen(function* () {
+ 
+   const makeQueue: PullQueueSet['makeQueue'] = (cursor) =>
+     Effect.gen(function* () {
++      const { dbEventlog, dbState, schema, syncBackend } = yield* LeaderThreadCtx
++      const canReplayPersistedClientOnlyEvents = syncBackend === undefined
++        && Array.from(schema.eventsDefsMap.values()).every((eventDef) => eventDef.options.clientOnly === true)
++
++      if (canReplayPersistedClientOnlyEvents) {
++        return yield* localPushBackendPullMutex.withPermits(1)(Effect.gen(function* () {
++          const leaderHead = Eventlog.getClientHeadFromDb(dbEventlog)
++          const cursorVsHead = EventSequenceNumber.Client.compare(cursor, leaderHead)
++          if (cursorVsHead > 0) {
++            return yield* Effect.die(new Error(
++              `Cannot replay local-only LiveStore events: pull cursor ${EventSequenceNumber.Client.toString(cursor)} is ahead of leader head ${EventSequenceNumber.Client.toString(leaderHead)}.`,
++            ))
++          }
++
++          const cursorIsRoot = EventSequenceNumber.Client.compare(cursor, EventSequenceNumber.Client.ROOT) === 0
++          if (!cursorIsRoot) {
++            const exactCursorRows = dbEventlog.select(eventlogMetaTable.where({
++              seqNumGlobal: cursor.global,
++              seqNumClient: cursor.client,
++              seqNumRebaseGeneration: cursor.rebaseGeneration,
++            }))
++            if (exactCursorRows.length !== 1) {
++              return yield* Effect.die(new Error(
++                `Cannot replay local-only LiveStore events: pull cursor ${EventSequenceNumber.Client.toString(cursor)} is not an exact eventlog ancestor.`,
++              ))
++            }
++          }
++
++          const eventsSinceCursor = Eventlog.getEventsSince({
++            dbEventlog,
++            dbState,
++            since: cursor,
++          })
++          let expectedParent = cursor
++          for (const event of eventsSinceCursor) {
++            if (schema.eventsDefsMap.get(event.name)?.options.clientOnly !== true) {
++              return yield* Effect.die(new Error(
++                `Cannot replay local-only LiveStore events: event ${event.name} is not a known client-only event.`,
++              ))
++            }
++            if (EventSequenceNumber.Client.compare(event.parentSeqNum, expectedParent) !== 0) {
++              return yield* Effect.die(new Error(
++                `Cannot replay local-only LiveStore events: eventlog suffix after ${EventSequenceNumber.Client.toString(cursor)} is discontinuous at ${EventSequenceNumber.Client.toString(event.seqNum)}.`,
++              ))
++            }
++            expectedParent = event.seqNum
++          }
++          if (EventSequenceNumber.Client.compare(expectedParent, leaderHead) !== 0) {
++            return yield* Effect.die(new Error(
++              `Cannot replay local-only LiveStore events: eventlog suffix after ${EventSequenceNumber.Client.toString(cursor)} does not reach leader head ${EventSequenceNumber.Client.toString(leaderHead)}.`,
++            ))
++          }
++
++          const queue = yield* Queue.unbounded<{
++            payload: typeof SyncState.PayloadUpstream.Type
++          }>().pipe(Effect.acquireRelease(Queue.shutdown))
++          yield* Effect.addFinalizer(() => Effect.sync(() => set.delete(queue)))
++          set.add(queue)
++          if (eventsSinceCursor.length > 0) {
++            yield* Queue.offer(queue, {
++              payload: SyncState.PayloadUpstreamAdvance.make({ newEvents: eventsSinceCursor }),
++            })
++          }
++          return queue
++        }))
++      }
++
+       const queue = yield* Queue.unbounded<{
+         payload: typeof SyncState.PayloadUpstream.Type
+       }>().pipe(Effect.acquireRelease(Queue.shutdown))

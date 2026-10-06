@@ -1,0 +1,18 @@
+node_modules/
+coverage/
+test-results/
+playwright-report/
+dist/
+build/
+out/
+*.log
+tracker/viewer/src/routeTree.gen.ts
+
+# Local check and fixture roots are supplied outside the engine when possible.
+.cache/
+cache/
+*.pem
+*.key
+.env
+.env.*
+.DS_Store

@@ -1,0 +1,710 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "mappings": [
+    {
+      "sourceId": "fixture-project",
+      "sourcePath": "tracker/items/fixture/fixture-project.md",
+      "targetId": "fixture-project",
+      "targetPath": "tracker/items/fixture/fixture-project.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-foundation-task",
+      "sourcePath": "tracker/active/fixture-foundation-task.md",
+      "targetId": "fixture-foundation-task",
+      "targetPath": "tracker/items/fixture/fixture-foundation-task.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-dependent-task",
+      "sourcePath": "tracker/active/fixture-dependent-task.md",
+      "targetId": "fixture-dependent-task",
+      "targetPath": "tracker/items/fixture/fixture-dependent-task.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-delivery-task",
+      "sourcePath": "tracker/active/fixture-delivery-task.md",
+      "targetId": "fixture-delivery-task",
+      "targetPath": "tracker/items/fixture/fixture-delivery-task.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-review-task",
+      "sourcePath": "tracker/active/fixture-review-task.md",
+      "targetId": "fixture-review-task",
+      "targetPath": "tracker/items/fixture/fixture-review-task.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-draft-task",
+      "sourcePath": "tracker/items/fixture/fixture-draft-task.md",
+      "targetId": "fixture-draft-task",
+      "targetPath": "tracker/items/fixture/fixture-draft-task.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-planned-task",
+      "sourcePath": "tracker/items/fixture/fixture-planned-task.md",
+      "targetId": "fixture-planned-task",
+      "targetPath": "tracker/items/fixture/fixture-planned-task.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-unassigned-task",
+      "sourcePath": "tracker/items/fixture/fixture-unassigned-task.md",
+      "targetId": "fixture-unassigned-task",
+      "targetPath": "tracker/items/fixture/fixture-unassigned-task.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-009",
+      "sourcePath": "tracker/items/fixture/fixture-support-009.md",
+      "targetId": "fixture-support-009",
+      "targetPath": "tracker/items/fixture/fixture-support-009.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-010",
+      "sourcePath": "tracker/items/fixture/fixture-support-010.md",
+      "targetId": "fixture-support-010",
+      "targetPath": "tracker/items/fixture/fixture-support-010.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-011",
+      "sourcePath": "tracker/items/fixture/fixture-support-011.md",
+      "targetId": "fixture-support-011",
+      "targetPath": "tracker/items/fixture/fixture-support-011.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-012",
+      "sourcePath": "tracker/items/fixture/fixture-support-012.md",
+      "targetId": "fixture-support-012",
+      "targetPath": "tracker/items/fixture/fixture-support-012.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-013",
+      "sourcePath": "tracker/items/fixture/fixture-support-013.md",
+      "targetId": "fixture-support-013",
+      "targetPath": "tracker/items/fixture/fixture-support-013.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-014",
+      "sourcePath": "tracker/items/fixture/fixture-support-014.md",
+      "targetId": "fixture-support-014",
+      "targetPath": "tracker/items/fixture/fixture-support-014.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-015",
+      "sourcePath": "tracker/items/fixture/fixture-support-015.md",
+      "targetId": "fixture-support-015",
+      "targetPath": "tracker/items/fixture/fixture-support-015.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-016",
+      "sourcePath": "tracker/items/fixture/fixture-support-016.md",
+      "targetId": "fixture-support-016",
+      "targetPath": "tracker/items/fixture/fixture-support-016.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-017",
+      "sourcePath": "tracker/items/fixture/fixture-support-017.md",
+      "targetId": "fixture-support-017",
+      "targetPath": "tracker/items/fixture/fixture-support-017.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-018",
+      "sourcePath": "tracker/items/fixture/fixture-support-018.md",
+      "targetId": "fixture-support-018",
+      "targetPath": "tracker/items/fixture/fixture-support-018.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-019",
+      "sourcePath": "tracker/items/fixture/fixture-support-019.md",
+      "targetId": "fixture-support-019",
+      "targetPath": "tracker/items/fixture/fixture-support-019.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-020",
+      "sourcePath": "tracker/items/fixture/fixture-support-020.md",
+      "targetId": "fixture-support-020",
+      "targetPath": "tracker/items/fixture/fixture-support-020.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-021",
+      "sourcePath": "tracker/items/fixture/fixture-support-021.md",
+      "targetId": "fixture-support-021",
+      "targetPath": "tracker/items/fixture/fixture-support-021.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-022",
+      "sourcePath": "tracker/items/fixture/fixture-support-022.md",
+      "targetId": "fixture-support-022",
+      "targetPath": "tracker/items/fixture/fixture-support-022.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-023",
+      "sourcePath": "tracker/items/fixture/fixture-support-023.md",
+      "targetId": "fixture-support-023",
+      "targetPath": "tracker/items/fixture/fixture-support-023.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-024",
+      "sourcePath": "tracker/items/fixture/fixture-support-024.md",
+      "targetId": "fixture-support-024",
+      "targetPath": "tracker/items/fixture/fixture-support-024.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-025",
+      "sourcePath": "tracker/items/fixture/fixture-support-025.md",
+      "targetId": "fixture-support-025",
+      "targetPath": "tracker/items/fixture/fixture-support-025.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-026",
+      "sourcePath": "tracker/items/fixture/fixture-support-026.md",
+      "targetId": "fixture-support-026",
+      "targetPath": "tracker/items/fixture/fixture-support-026.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-027",
+      "sourcePath": "tracker/items/fixture/fixture-support-027.md",
+      "targetId": "fixture-support-027",
+      "targetPath": "tracker/items/fixture/fixture-support-027.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-028",
+      "sourcePath": "tracker/items/fixture/fixture-support-028.md",
+      "targetId": "fixture-support-028",
+      "targetPath": "tracker/items/fixture/fixture-support-028.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-029",
+      "sourcePath": "tracker/items/fixture/fixture-support-029.md",
+      "targetId": "fixture-support-029",
+      "targetPath": "tracker/items/fixture/fixture-support-029.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-030",
+      "sourcePath": "tracker/items/fixture/fixture-support-030.md",
+      "targetId": "fixture-support-030",
+      "targetPath": "tracker/items/fixture/fixture-support-030.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-031",
+      "sourcePath": "tracker/items/fixture/fixture-support-031.md",
+      "targetId": "fixture-support-031",
+      "targetPath": "tracker/items/fixture/fixture-support-031.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-032",
+      "sourcePath": "tracker/items/fixture/fixture-support-032.md",
+      "targetId": "fixture-support-032",
+      "targetPath": "tracker/items/fixture/fixture-support-032.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-033",
+      "sourcePath": "tracker/items/fixture/fixture-support-033.md",
+      "targetId": "fixture-support-033",
+      "targetPath": "tracker/items/fixture/fixture-support-033.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-034",
+      "sourcePath": "tracker/items/fixture/fixture-support-034.md",
+      "targetId": "fixture-support-034",
+      "targetPath": "tracker/items/fixture/fixture-support-034.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-035",
+      "sourcePath": "tracker/items/fixture/fixture-support-035.md",
+      "targetId": "fixture-support-035",
+      "targetPath": "tracker/items/fixture/fixture-support-035.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-036",
+      "sourcePath": "tracker/items/fixture/fixture-support-036.md",
+      "targetId": "fixture-support-036",
+      "targetPath": "tracker/items/fixture/fixture-support-036.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-037",
+      "sourcePath": "tracker/items/fixture/fixture-support-037.md",
+      "targetId": "fixture-support-037",
+      "targetPath": "tracker/items/fixture/fixture-support-037.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-038",
+      "sourcePath": "tracker/items/fixture/fixture-support-038.md",
+      "targetId": "fixture-support-038",
+      "targetPath": "tracker/items/fixture/fixture-support-038.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-039",
+      "sourcePath": "tracker/items/fixture/fixture-support-039.md",
+      "targetId": "fixture-support-039",
+      "targetPath": "tracker/items/fixture/fixture-support-039.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-040",
+      "sourcePath": "tracker/items/fixture/fixture-support-040.md",
+      "targetId": "fixture-support-040",
+      "targetPath": "tracker/items/fixture/fixture-support-040.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-041",
+      "sourcePath": "tracker/items/fixture/fixture-support-041.md",
+      "targetId": "fixture-support-041",
+      "targetPath": "tracker/items/fixture/fixture-support-041.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-042",
+      "sourcePath": "tracker/items/fixture/fixture-support-042.md",
+      "targetId": "fixture-support-042",
+      "targetPath": "tracker/items/fixture/fixture-support-042.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-043",
+      "sourcePath": "tracker/items/fixture/fixture-support-043.md",
+      "targetId": "fixture-support-043",
+      "targetPath": "tracker/items/fixture/fixture-support-043.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-044",
+      "sourcePath": "tracker/items/fixture/fixture-support-044.md",
+      "targetId": "fixture-support-044",
+      "targetPath": "tracker/items/fixture/fixture-support-044.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-045",
+      "sourcePath": "tracker/items/fixture/fixture-support-045.md",
+      "targetId": "fixture-support-045",
+      "targetPath": "tracker/items/fixture/fixture-support-045.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-046",
+      "sourcePath": "tracker/items/fixture/fixture-support-046.md",
+      "targetId": "fixture-support-046",
+      "targetPath": "tracker/items/fixture/fixture-support-046.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-047",
+      "sourcePath": "tracker/items/fixture/fixture-support-047.md",
+      "targetId": "fixture-support-047",
+      "targetPath": "tracker/items/fixture/fixture-support-047.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-048",
+      "sourcePath": "tracker/items/fixture/fixture-support-048.md",
+      "targetId": "fixture-support-048",
+      "targetPath": "tracker/items/fixture/fixture-support-048.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-049",
+      "sourcePath": "tracker/items/fixture/fixture-support-049.md",
+      "targetId": "fixture-support-049",
+      "targetPath": "tracker/items/fixture/fixture-support-049.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-050",
+      "sourcePath": "tracker/items/fixture/fixture-support-050.md",
+      "targetId": "fixture-support-050",
+      "targetPath": "tracker/items/fixture/fixture-support-050.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-051",
+      "sourcePath": "tracker/items/fixture/fixture-support-051.md",
+      "targetId": "fixture-support-051",
+      "targetPath": "tracker/items/fixture/fixture-support-051.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-052",
+      "sourcePath": "tracker/items/fixture/fixture-support-052.md",
+      "targetId": "fixture-support-052",
+      "targetPath": "tracker/items/fixture/fixture-support-052.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-053",
+      "sourcePath": "tracker/items/fixture/fixture-support-053.md",
+      "targetId": "fixture-support-053",
+      "targetPath": "tracker/items/fixture/fixture-support-053.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-054",
+      "sourcePath": "tracker/items/fixture/fixture-support-054.md",
+      "targetId": "fixture-support-054",
+      "targetPath": "tracker/items/fixture/fixture-support-054.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-055",
+      "sourcePath": "tracker/items/fixture/fixture-support-055.md",
+      "targetId": "fixture-support-055",
+      "targetPath": "tracker/items/fixture/fixture-support-055.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-056",
+      "sourcePath": "tracker/items/fixture/fixture-support-056.md",
+      "targetId": "fixture-support-056",
+      "targetPath": "tracker/items/fixture/fixture-support-056.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-057",
+      "sourcePath": "tracker/items/fixture/fixture-support-057.md",
+      "targetId": "fixture-support-057",
+      "targetPath": "tracker/items/fixture/fixture-support-057.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-058",
+      "sourcePath": "tracker/items/fixture/fixture-support-058.md",
+      "targetId": "fixture-support-058",
+      "targetPath": "tracker/items/fixture/fixture-support-058.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-059",
+      "sourcePath": "tracker/items/fixture/fixture-support-059.md",
+      "targetId": "fixture-support-059",
+      "targetPath": "tracker/items/fixture/fixture-support-059.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-060",
+      "sourcePath": "tracker/items/fixture/fixture-support-060.md",
+      "targetId": "fixture-support-060",
+      "targetPath": "tracker/items/fixture/fixture-support-060.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-061",
+      "sourcePath": "tracker/items/fixture/fixture-support-061.md",
+      "targetId": "fixture-support-061",
+      "targetPath": "tracker/items/fixture/fixture-support-061.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-062",
+      "sourcePath": "tracker/items/fixture/fixture-support-062.md",
+      "targetId": "fixture-support-062",
+      "targetPath": "tracker/items/fixture/fixture-support-062.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-063",
+      "sourcePath": "tracker/items/fixture/fixture-support-063.md",
+      "targetId": "fixture-support-063",
+      "targetPath": "tracker/items/fixture/fixture-support-063.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-064",
+      "sourcePath": "tracker/items/fixture/fixture-support-064.md",
+      "targetId": "fixture-support-064",
+      "targetPath": "tracker/items/fixture/fixture-support-064.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-065",
+      "sourcePath": "tracker/items/fixture/fixture-support-065.md",
+      "targetId": "fixture-support-065",
+      "targetPath": "tracker/items/fixture/fixture-support-065.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-066",
+      "sourcePath": "tracker/items/fixture/fixture-support-066.md",
+      "targetId": "fixture-support-066",
+      "targetPath": "tracker/items/fixture/fixture-support-066.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-067",
+      "sourcePath": "tracker/items/fixture/fixture-support-067.md",
+      "targetId": "fixture-support-067",
+      "targetPath": "tracker/items/fixture/fixture-support-067.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-068",
+      "sourcePath": "tracker/items/fixture/fixture-support-068.md",
+      "targetId": "fixture-support-068",
+      "targetPath": "tracker/items/fixture/fixture-support-068.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-069",
+      "sourcePath": "tracker/items/fixture/fixture-support-069.md",
+      "targetId": "fixture-support-069",
+      "targetPath": "tracker/items/fixture/fixture-support-069.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-070",
+      "sourcePath": "tracker/items/fixture/fixture-support-070.md",
+      "targetId": "fixture-support-070",
+      "targetPath": "tracker/items/fixture/fixture-support-070.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-071",
+      "sourcePath": "tracker/items/fixture/fixture-support-071.md",
+      "targetId": "fixture-support-071",
+      "targetPath": "tracker/items/fixture/fixture-support-071.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-072",
+      "sourcePath": "tracker/items/fixture/fixture-support-072.md",
+      "targetId": "fixture-support-072",
+      "targetPath": "tracker/items/fixture/fixture-support-072.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-073",
+      "sourcePath": "tracker/items/fixture/fixture-support-073.md",
+      "targetId": "fixture-support-073",
+      "targetPath": "tracker/items/fixture/fixture-support-073.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-074",
+      "sourcePath": "tracker/items/fixture/fixture-support-074.md",
+      "targetId": "fixture-support-074",
+      "targetPath": "tracker/items/fixture/fixture-support-074.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-075",
+      "sourcePath": "tracker/items/fixture/fixture-support-075.md",
+      "targetId": "fixture-support-075",
+      "targetPath": "tracker/items/fixture/fixture-support-075.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-076",
+      "sourcePath": "tracker/items/fixture/fixture-support-076.md",
+      "targetId": "fixture-support-076",
+      "targetPath": "tracker/items/fixture/fixture-support-076.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-077",
+      "sourcePath": "tracker/items/fixture/fixture-support-077.md",
+      "targetId": "fixture-support-077",
+      "targetPath": "tracker/items/fixture/fixture-support-077.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-078",
+      "sourcePath": "tracker/items/fixture/fixture-support-078.md",
+      "targetId": "fixture-support-078",
+      "targetPath": "tracker/items/fixture/fixture-support-078.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-079",
+      "sourcePath": "tracker/items/fixture/fixture-support-079.md",
+      "targetId": "fixture-support-079",
+      "targetPath": "tracker/items/fixture/fixture-support-079.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-080",
+      "sourcePath": "tracker/items/fixture/fixture-support-080.md",
+      "targetId": "fixture-support-080",
+      "targetPath": "tracker/items/fixture/fixture-support-080.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-081",
+      "sourcePath": "tracker/items/fixture/fixture-support-081.md",
+      "targetId": "fixture-support-081",
+      "targetPath": "tracker/items/fixture/fixture-support-081.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-082",
+      "sourcePath": "tracker/items/fixture/fixture-support-082.md",
+      "targetId": "fixture-support-082",
+      "targetPath": "tracker/items/fixture/fixture-support-082.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-083",
+      "sourcePath": "tracker/items/fixture/fixture-support-083.md",
+      "targetId": "fixture-support-083",
+      "targetPath": "tracker/items/fixture/fixture-support-083.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-084",
+      "sourcePath": "tracker/items/fixture/fixture-support-084.md",
+      "targetId": "fixture-support-084",
+      "targetPath": "tracker/items/fixture/fixture-support-084.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-085",
+      "sourcePath": "tracker/items/fixture/fixture-support-085.md",
+      "targetId": "fixture-support-085",
+      "targetPath": "tracker/items/fixture/fixture-support-085.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-086",
+      "sourcePath": "tracker/items/fixture/fixture-support-086.md",
+      "targetId": "fixture-support-086",
+      "targetPath": "tracker/items/fixture/fixture-support-086.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-087",
+      "sourcePath": "tracker/items/fixture/fixture-support-087.md",
+      "targetId": "fixture-support-087",
+      "targetPath": "tracker/items/fixture/fixture-support-087.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-088",
+      "sourcePath": "tracker/items/fixture/fixture-support-088.md",
+      "targetId": "fixture-support-088",
+      "targetPath": "tracker/items/fixture/fixture-support-088.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-089",
+      "sourcePath": "tracker/items/fixture/fixture-support-089.md",
+      "targetId": "fixture-support-089",
+      "targetPath": "tracker/items/fixture/fixture-support-089.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-090",
+      "sourcePath": "tracker/items/fixture/fixture-support-090.md",
+      "targetId": "fixture-support-090",
+      "targetPath": "tracker/items/fixture/fixture-support-090.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-091",
+      "sourcePath": "tracker/items/fixture/fixture-support-091.md",
+      "targetId": "fixture-support-091",
+      "targetPath": "tracker/items/fixture/fixture-support-091.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-092",
+      "sourcePath": "tracker/items/fixture/fixture-support-092.md",
+      "targetId": "fixture-support-092",
+      "targetPath": "tracker/items/fixture/fixture-support-092.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-093",
+      "sourcePath": "tracker/items/fixture/fixture-support-093.md",
+      "targetId": "fixture-support-093",
+      "targetPath": "tracker/items/fixture/fixture-support-093.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-support-094",
+      "sourcePath": "tracker/items/fixture/fixture-support-094.md",
+      "targetId": "fixture-support-094",
+      "targetPath": "tracker/items/fixture/fixture-support-094.md",
+      "historyPath": null
+    },
+    {
+      "sourceId": "fixture-legacy-001",
+      "sourcePath": "tracker/archive/fixture-legacy-001.md",
+      "targetId": "fixture-foundation-task",
+      "targetPath": "tracker/items/fixture/fixture-foundation-task.md",
+      "historyPath": "tracker/history/fixture-legacy-001.md"
+    },
+    {
+      "sourceId": "fixture-legacy-002",
+      "sourcePath": "tracker/archive/fixture-legacy-002.md",
+      "targetId": "fixture-dependent-task",
+      "targetPath": "tracker/items/fixture/fixture-dependent-task.md",
+      "historyPath": "tracker/history/fixture-legacy-002.md"
+    },
+    {
+      "sourceId": "fixture-legacy-003",
+      "sourcePath": "tracker/archive/fixture-legacy-003.md",
+      "targetId": "fixture-delivery-task",
+      "targetPath": "tracker/items/fixture/fixture-delivery-task.md",
+      "historyPath": "tracker/history/fixture-legacy-003.md"
+    },
+    {
+      "sourceId": "fixture-legacy-004",
+      "sourcePath": "tracker/archive/fixture-legacy-004.md",
+      "targetId": "fixture-review-task",
+      "targetPath": "tracker/items/fixture/fixture-review-task.md",
+      "historyPath": "tracker/history/fixture-legacy-004.md"
+    }
+  ],
+  "legacyApprovals": {
+    "fixture-foundation-task": {
+      "digest": "7bde86883861c8b89b582690539374aae796e6571ab6d996cd854dea14a67aa5",
+      "decision": "project-alpha-delivery-schedule-2026-09-30"
+    },
+    "fixture-dependent-task": {
+      "digest": "5b894ac1fc1ea46f67499b0535a6e45d611ac7eb2f037d26518fa03fe290a64c",
+      "decision": "project-alpha-delivery-schedule-2026-09-30"
+    },
+    "fixture-delivery-task": {
+      "digest": "9321417e6b85b97669fd3975f45ac16495adf8b328d7d6102f3091c20a24fe18",
+      "decision": "project-alpha-delivery-schedule-2026-09-30"
+    },
+    "fixture-review-task": {
+      "digest": "73b477c9f7c615b7503d72e6956ed41b47a54b38ea583673f09763beccc5c977",
+      "decision": "project-alpha-delivery-schedule-2026-09-30"
+    }
+  }
+}

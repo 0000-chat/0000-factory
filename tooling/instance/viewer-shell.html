@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <meta name="description" content="__TRACKER_DESCRIPTION__">
+    <title>__TRACKER_TITLE__</title>
+    <script>
+      globalThis.__TRACKER_PUBLIC_INSTANCE__ = __TRACKER_PUBLIC_INSTANCE_JSON__;
+      (() => {
+        const instance = globalThis.__TRACKER_PUBLIC_INSTANCE__;
+        const storageKey = instance?.browser?.themeKey;
+        let preference = 'system';
+        try {
+          const stored = storageKey ? window.localStorage.getItem(storageKey) : null;
+          if (stored === 'light' || stored === 'dark' || stored === 'system') preference = stored;
+        } catch {}
+
+        let theme = preference;
+        if (preference === 'system') {
+          try {
+            theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          } catch {
+            theme = 'light';
+          }
+        }
+
+        const root = document.documentElement;
+        root.dataset.theme = theme;
+        root.dataset.themePreference = preference;
+        root.classList.toggle('dark', theme === 'dark');
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

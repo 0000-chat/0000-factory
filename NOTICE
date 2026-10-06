@@ -1,0 +1,43 @@
+0000 Factory first-party source is licensed under AGPL-3.0-only; see LICENSE.
+The authoritative license text source is:
+https://raw.githubusercontent.com/spdx/license-list-data/main/text/AGPL-3.0-only.txt
+
+This export preserves the reviewed engine source, the resolved dependency
+lockfile, and these three pinned LiveStore patches:
+
+- @livestore/adapter-web 0.4.0, patch file
+  patches/@livestore%2Fadapter-web@0.4.0.patch
+- @livestore/common 0.4.0, patch file
+  patches/@livestore%2Fcommon@0.4.0.patch
+- @livestore/devtools-web-common 0.4.0, patch file
+  patches/@livestore%2Fdevtools-web-common@0.4.0.patch
+
+Third-party license texts are complete copies of the installed pinned package
+files or the named upstream source files under third-party/licenses/:
+
+- @livestore/adapter-web 0.4.0, Apache-2.0:
+  https://unpkg.com/@livestore/adapter-web@0.4.0/LICENSE
+- @livestore/common 0.4.0, Apache-2.0:
+  https://unpkg.com/@livestore/common@0.4.0/LICENSE
+- @livestore/devtools-web-common 0.4.0, Apache-2.0:
+  https://unpkg.com/@livestore/devtools-web-common@0.4.0/LICENSE
+- @livestore/wa-sqlite 0.4.0, MIT:
+  https://unpkg.com/@livestore/wa-sqlite@0.4.0/LICENSE
+- esbuild 0.28.2, MIT:
+  https://unpkg.com/esbuild@0.28.2/LICENSE.md
+- Kibo UI source, MIT:
+  https://raw.githubusercontent.com/shadcnblocks/kibo/main/license.md
+- shadcn/ui source, MIT:
+  https://raw.githubusercontent.com/shadcn-ui/ui/main/LICENSE.md
+
+The installed @livestore/adapter-web, @livestore/common,
+@livestore/devtools-web-common, @livestore/wa-sqlite, and esbuild package
+directories contained license files and no separate NOTICE file. The three
+LiveStore Apache-2.0 files are retained separately because each package was
+reviewed individually. The Kibo and shadcn source-attribution comments remain
+in the adapted viewer components.
+
+The exported application source did not include a separate upstream
+application license file. This notice records that provenance without
+inventing an additional grant and without including private repository paths,
+people, records, or operational metadata.
