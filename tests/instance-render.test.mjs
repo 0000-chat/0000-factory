@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
+import { build } from 'esbuild';
 import { parseInstanceConfig, publicInstanceConfig } from '../tooling/instance/config.mjs';
 import { renderInstanceArtifacts, safeJsonForHtml } from '../tooling/instance/render.mjs';
 
@@ -38,7 +39,7 @@ function settings(overrides = {}) {
   });
 }
 
-test('HTML projection is escaped and runtime policy stays outside assets', () => {
+test('HTML projection is escaped and runtime policy stays outside assets', async () => {
   const root = mkdtempSync(join(process.env.TMPDIR ?? '/tmp', 'instance-render-'));
   mkdirSync(join(root, 'assets'), { recursive: true });
   writeFileSync(join(root, 'assets/favicon.svg'), '<svg>fixture</svg>\n');
@@ -65,7 +66,17 @@ test('HTML projection is escaped and runtime policy stays outside assets', () =>
   assert.equal(html.includes('synthetic-account'), false);
   assert.equal(readFileSync(join(output, 'runtime-config.mjs'), 'utf8').includes('team.synthetic.test'), true);
   assert.equal(readFileSync(join(output, 'assets/data.json'), 'utf8'), '{\n  "synthetic": true\n}\n');
-  assert.match(readFileSync(join(output, 'worker-entry.mjs'), 'utf8'), new RegExp(pathToFileURL(join(engine, 'worker/access-gate.mjs')).href.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')));
+  const workerEntry = readFileSync(join(output, 'worker-entry.mjs'), 'utf8');
+  assert.doesNotMatch(workerEntry, /file:\/\//u);
+  assert.match(workerEntry, /from "\.\.\/[^"]+\/worker\/access-gate\.mjs";/);
+  const generatedWorker = await import(`${pathToFileURL(join(output, 'worker-entry.mjs')).href}?relative-worker`);
+  assert.equal(typeof generatedWorker.default.fetch, 'function');
+  const bundle = globalThis.Bun
+    ? await globalThis.Bun.build({ entrypoints: [join(output, 'worker-entry.mjs')], target: 'bun', format: 'esm', splitting: false })
+    : await build({ entryPoints: [join(output, 'worker-entry.mjs')], bundle: true, format: 'esm', platform: 'node', write: false });
+  assert.equal(bundle.success ?? true, true);
+  const bundleText = globalThis.Bun ? await bundle.outputs[0].text() : bundle.outputFiles[0].text;
+  assert.match(bundleText, /createTrackerWorker/u);
   const wrangler = JSON.parse(readFileSync(join(output, 'wrangler.json'), 'utf8'));
   assert.equal(wrangler.name, 'tracker-render-test');
   assert.equal(wrangler.workers_dev, false);

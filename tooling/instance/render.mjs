@@ -20,7 +20,7 @@ import {
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { parseInstanceConfig, publicInstanceConfig } from './config.mjs';
 
 const FORMAT_VERSION = 1;
@@ -176,7 +176,10 @@ export function renderInstanceArtifacts({ instance, manifestDir, engineRoot, out
     'export default Object.freeze({ instance });',
     '',
   ].join('\n');
-  const engineWorker = pathToFileURL(join(engine, 'worker', 'access-gate.mjs')).href;
+  const engineWorkerPath = join(engine, 'worker', 'access-gate.mjs');
+  const relativeEngineWorker = relative(outputPath, engineWorkerPath).split('\\').join('/');
+  if (isAbsolute(relativeEngineWorker)) throw new Error('engine worker must be reachable from the output root');
+  const engineWorker = relativeEngineWorker.startsWith('.') ? relativeEngineWorker : `./${relativeEngineWorker}`;
   const workerEntry = [
     '// Generated Worker entry. The engine is deliberately resolved from the selected engine root.',
     `import { createTrackerWorker } from ${JSON.stringify(engineWorker)};`,
