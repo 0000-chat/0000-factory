@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useRouteContext } from '@tanstack/react-router';
 import type { PlanningArchiveEntry } from './planning-archive';
 
-function statusLabel(status: PlanningArchiveEntry['status']): string {
+function statusLabel(status: PlanningArchiveEntry['reviewStatus']): string {
   return status === 'draft' ? 'Current draft'
     : status === 'approved' ? 'Approved'
       : status === 'superseded' ? 'Superseded' : 'Blocked';
@@ -78,7 +78,7 @@ function planningPartLabel(key: 'queues' | 'proposals' | 'gaps', value: unknown)
 function EntryRow({ entry, selected, marker, onSelect }: { entry: PlanningArchiveEntry; selected: boolean; marker: string | null; onSelect: () => void }) {
   return <button type="button" className={`weekly-planning-entry${selected ? ' weekly-planning-entry-selected' : ''}`} onClick={onSelect} aria-pressed={selected}>
     <span className="weekly-planning-entry-heading"><strong>{entry.week}</strong><span>{entry.revision}</span></span>
-    <span className="weekly-planning-entry-meta"><span className={`weekly-planning-status weekly-planning-status-${entry.status}`}>{statusLabel(entry.status)}</span>{marker === null ? null : <span className="weekly-planning-marker">{marker}</span>}</span>
+    <span className="weekly-planning-entry-meta"><span className={`weekly-planning-status weekly-planning-status-${entry.reviewStatus}`}>{statusLabel(entry.reviewStatus)}</span>{marker === null ? null : <span className="weekly-planning-marker">{marker}</span>}</span>
     <span className="weekly-planning-entry-coverage">Coverage: {coverageLabel(entry.coverage)}</span>
   </button>;
 }
@@ -87,8 +87,8 @@ function EntryDetail({ entry }: { entry: PlanningArchiveEntry }) {
   const refs = taskRefs(entry);
   return <div className="weekly-planning-detail">
     <div className="weekly-planning-detail-heading">
-      <div><p className="eyebrow">Saved weekly presentation</p><h2>{entry.week} · {entry.revision}</h2><p className="weekly-planning-detail-subtitle">{statusLabel(entry.status)} · immutable archive revision</p></div>
-      <span className={`weekly-planning-status weekly-planning-status-${entry.status}`}>{statusLabel(entry.status)}</span>
+      <div><p className="eyebrow">Saved weekly presentation</p><h2>{entry.week} · {entry.revision}</h2><p className="weekly-planning-detail-subtitle">{statusLabel(entry.reviewStatus)} · immutable archive revision</p></div>
+      <span className={`weekly-planning-status weekly-planning-status-${entry.reviewStatus}`}>{statusLabel(entry.reviewStatus)}</span>
     </div>
     <dl className="weekly-planning-facts">
       <div><dt>Episode</dt><dd>{entry.id}</dd></div>

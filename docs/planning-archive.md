@@ -8,11 +8,23 @@ from the selected data repository. The optional archive is rooted at
 The archive contract is schema version `1`. Weeks use ISO `YYYY-Www` values;
 statuses are `draft`, `approved`, `superseded`, or `blocked`. Core-generated
 manifests bind the week, revision, immutable artifact paths, and `sha256:`
-digests for the plan and presentation. The loader rejects traversal, absolute,
+digests for the plan and presentation. The duplicate `planDigest` and
+`htmlDigest` fields must equal their corresponding `artifactDigests` values.
+`artifactDigests.manifest` is the SHA-256 of canonical JSON for the manifest
+with that field set to `null`, followed by one newline. Manifest source and
+input fields must exactly match the corresponding `plan.source` fields. The
+loader rejects traversal, absolute,
 encoded, symlinked, executable, or out-of-root artifacts, mismatched digests,
 duplicate revisions, and active or externally navigable HTML. Missing
 `planning/index.json` is an explicit empty archive; malformed present data
 fails the build and browser archive boundary with a clear error.
+
+When a planning index entry includes episode metadata, Factory reads the
+referenced immutable file under `episodes/` and verifies its file digest,
+canonical plan digest, approval-receipts digest, generated timestamp, and
+controlled parts against the immutable plan before deriving its review status.
+The episode review status is kept separate from the plan status, so approving
+an episode does not rewrite the saved draft plan.
 
 Factory reads this archive separately from the canonical tracker snapshot. The
 build writes the validated browser projection to `assets/planning/archive.json`

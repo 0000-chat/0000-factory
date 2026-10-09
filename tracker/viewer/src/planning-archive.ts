@@ -4,6 +4,7 @@ export interface PlanningArchiveEntry {
   readonly date: string | null;
   readonly revision: string;
   readonly status: 'draft' | 'approved' | 'superseded' | 'blocked';
+  readonly reviewStatus: 'draft' | 'approved' | 'superseded' | 'blocked';
   readonly coverage: unknown;
   readonly hash: string | null;
   readonly paths: Record<string, string>;
@@ -64,14 +65,14 @@ function validatePlanAndManifest(candidate: Record<string, unknown>, path: strin
   if (!isRecord(plan.source) || !Array.isArray(plan.outcomes) || !Array.isArray(plan.queues) || !Array.isArray(plan.gaps) || !Array.isArray(plan.proposals)) {
     throw new Error(`${path}.plan: invalid planning fields`);
   }
-  for (const field of ['sourceCommit', 'contentRevision', 'policyRevision', 'generatorVersion']) text(plan.source[field], `${path}.plan.source.${field}`);
+  for (const field of ['sourceCommit', 'contentRevision', 'policyRevision', 'generatorVersion', 'producerRevision']) text(plan.source[field], `${path}.plan.source.${field}`);
   digest(plan.source.inputDigest, `${path}.plan.source.inputDigest`);
 
   const manifest = candidate.manifest;
   if (!isRecord(manifest)) throw new Error(`${path}.manifest: required`);
   if (manifest.schemaVersion !== 1 || manifest.kind !== 'weekly-plan-manifest') throw new Error(`${path}.manifest: invalid schema`);
   if (manifest.week !== week || manifest.revision !== revision || manifest.status !== status) throw new Error(`${path}.manifest: identity does not match entry`);
-  for (const field of ['generatorVersion', 'sourceCommit', 'sourceContentRevision', 'policyRevision']) text(manifest[field], `${path}.manifest.${field}`);
+  for (const field of ['generatorVersion', 'producerRevision', 'sourceCommit', 'sourceContentRevision', 'policyRevision']) text(manifest[field], `${path}.manifest.${field}`);
   for (const field of ['inputDigest', 'planDigest', 'htmlDigest']) digest(manifest[field], `${path}.manifest.${field}`);
   if (manifest.immutable !== true) throw new Error(`${path}.manifest.immutable: must be true`);
   if (!isRecord(manifest.artifactPaths) || !isRecord(manifest.artifactDigests)) throw new Error(`${path}.manifest: artifact bindings are missing`);
@@ -81,6 +82,16 @@ function validatePlanAndManifest(candidate: Record<string, unknown>, path: strin
     throw new Error(`${path}.manifest.artifactPaths: do not match entry`);
   }
   for (const field of ['manifest', 'plan', 'html']) digest(manifest.artifactDigests[field], `${path}.manifest.artifactDigests.${field}`);
+  if (manifest.planDigest !== manifest.artifactDigests.plan) throw new Error(`${path}.manifest: plan digest bindings disagree`);
+  if (manifest.htmlDigest !== manifest.artifactDigests.html) throw new Error(`${path}.manifest: presentation digest bindings disagree`);
+  if (manifest.sourceCommit !== plan.source.sourceCommit ||
+      manifest.sourceContentRevision !== plan.source.contentRevision ||
+      manifest.policyRevision !== plan.source.policyRevision ||
+      manifest.generatorVersion !== plan.source.generatorVersion ||
+      manifest.producerRevision !== plan.source.producerRevision ||
+      manifest.inputDigest !== plan.source.inputDigest) {
+    throw new Error(`${path}.manifest: provenance does not match plan source`);
+  }
   if (!Array.isArray(manifest.outcomeTaskIds)) throw new Error(`${path}.manifest.outcomeTaskIds: must be an array`);
 }
 
@@ -123,6 +134,8 @@ export function parsePlanningArchive(value: unknown): PlanningArchive {
     if (id !== derivedId) throw new Error(`${path}.id: must identify week/revision`);
     const status = text(candidate.status, `${path}.status`, 16);
     if (!STATUSES.has(status)) throw new Error(`${path}.status: unsupported status`);
+    const reviewStatus = candidate.reviewStatus === undefined ? status : text(candidate.reviewStatus, `${path}.reviewStatus`, 16);
+    if (!STATUSES.has(reviewStatus)) throw new Error(`${path}.reviewStatus: unsupported status`);
     const identity = `${week}/${revision}`;
     if (identities.has(identity)) throw new Error(`${path}: duplicate week/revision`);
     identities.add(identity);
@@ -142,6 +155,7 @@ export function parsePlanningArchive(value: unknown): PlanningArchive {
       date: candidate.date === null || candidate.date === undefined ? null : text(candidate.date, `${path}.date`, 64),
       revision,
       status: status as PlanningArchiveEntry['status'],
+      reviewStatus: reviewStatus as PlanningArchiveEntry['reviewStatus'],
       coverage: candidate.coverage,
       hash,
       paths,
@@ -155,8 +169,8 @@ export function parsePlanningArchive(value: unknown): PlanningArchive {
   const ids = new Set(entries.map(entry => entry.id));
   if (currentDraftId !== null && !ids.has(currentDraftId)) throw new Error('planning archive.currentDraftId: unknown entry');
   if (latestApprovedId !== null && !ids.has(latestApprovedId)) throw new Error('planning archive.latestApprovedId: unknown entry');
-  if (currentDraftId !== null && entries.find(entry => entry.id === currentDraftId)?.status !== 'draft') throw new Error('planning archive.currentDraftId: entry is not draft');
-  if (latestApprovedId !== null && entries.find(entry => entry.id === latestApprovedId)?.status !== 'approved') throw new Error('planning archive.latestApprovedId: entry is not approved');
+  if (currentDraftId !== null && entries.find(entry => entry.id === currentDraftId)?.reviewStatus !== 'draft') throw new Error('planning archive.currentDraftId: entry is not draft');
+  if (latestApprovedId !== null && entries.find(entry => entry.id === latestApprovedId)?.reviewStatus !== 'approved') throw new Error('planning archive.latestApprovedId: entry is not approved');
   return { schemaVersion: 1, entries, currentDraftId, latestApprovedId };
 }
 

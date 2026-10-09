@@ -50,6 +50,64 @@ function isolatedGitEnvironment() {
   };
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return JSON.stringify(value.map(canonicalJsonValue));
+  return JSON.stringify(canonicalJsonValue(value));
+}
+
+function canonicalJsonValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalJsonValue);
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalJsonValue(value[key])]));
+  return value;
+}
+
+function digest(value) {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+}
+
+function episodeReceiptDigest(receipt) {
+  const fields = ['episodeId', 'revision', 'partId', 'valueDigest', 'approvedBy', 'approvedAt', 'approvalRef', 'approvalSource', 'approvedRevision', 'reviewedDetail'];
+  return digest(canonicalJson(Object.fromEntries(fields.map(field => [field, receipt[field]]))));
+}
+
+function episodeFor(plan, reviewStatus) {
+  const parts = plan.outcomes.flatMap(outcome => ['task', 'assignment', 'schedule'].map(kind => ({
+    partId: `${kind}:${outcome.taskId}`,
+    kind,
+    taskId: outcome.taskId,
+    valueDigest: digest(canonicalJson({ kind, outcome })),
+    approved: reviewStatus === 'approved',
+  })));
+  const approvalReceipts = reviewStatus === 'approved'
+    ? parts.map((part, index) => {
+      const receipt = {
+        episodeId: `${plan.week}:${plan.revision}`,
+        revision: plan.revision,
+        partId: part.partId,
+        valueDigest: part.valueDigest,
+        approvedBy: 'synthetic-reviewer',
+        approvedAt: `2026-10-12T0${index + 1}:00:00Z`,
+        approvalRef: `synthetic-review-${index + 1}`,
+        approvalSource: 'synthetic-review',
+        approvedRevision: plan.revision,
+        reviewedDetail: `Approve this exact ${part.kind} part.`,
+      };
+      return { ...receipt, approvalDigest: episodeReceiptDigest(receipt) };
+    })
+    : [];
+  return {
+    schemaVersion: 1,
+    kind: 'weekly-episode',
+    week: plan.week,
+    revision: plan.revision,
+    planDigest: digest(canonicalJson(plan)),
+    generatedAt: '2026-10-12T03:00:00Z',
+    status: reviewStatus,
+    parts,
+    approvalReceipts,
+  };
+}
+
 function runGit(dataRepo, args) {
   execFileSync('git', ['-C', dataRepo, ...args], {
     env: isolatedGitEnvironment(),
@@ -61,10 +119,11 @@ function writePlanningFixtures(dataRepo, folderPath) {
   const root = join(dataRepo, folderPath);
   const week = '2026-W42';
   const episodes = [
-    { revision: 'r1', status: 'approved', title: 'Synthetic approved presentation' },
-    { revision: 'r2', status: 'draft', title: 'Synthetic current draft presentation' },
+    { revision: 'r1', reviewStatus: 'approved', title: 'Synthetic approved presentation' },
+    { revision: 'r2', reviewStatus: 'draft', title: 'Synthetic current draft presentation' },
   ];
   const entries = [];
+  mkdirSync(join(root, 'episodes'), { recursive: true });
   for (const episode of episodes) {
     const base = `planning/weeks/${week}/${episode.revision}`;
     const planPath = `${base}/plan.json`;
@@ -72,33 +131,40 @@ function writePlanningFixtures(dataRepo, folderPath) {
     const presentationPath = `${base}/presentation.html`;
     const plan = {
       schemaVersion: 1, kind: 'weekly-plan', week, revision: episode.revision,
-      status: episode.status, timezone: 'Asia/Manila', asOf: '2026-10-12T00:00:00Z',
-      source: { sourceCommit: 'synthetic-planning-source', contentRevision: 'synthetic', inputDigest: `sha256:${'1'.repeat(64)}`, policyRevision: 'sharing-v1', generatorVersion: 'synthetic' },
+      status: 'draft', timezone: 'Asia/Manila', asOf: '2026-10-12T00:00:00Z',
+      source: { sourceCommit: 'synthetic-planning-source', contentRevision: 'synthetic', inputDigest: `sha256:${'1'.repeat(64)}`, policyRevision: 'sharing-v1', generatorVersion: 'synthetic', producerRevision: 'synthetic-producer' },
       coverage: { kind: 'synthetic', complete: true },
       outcomes: [{ taskId: 'fixture-foundation-task', title: 'Synthetic foundation outcome', status: 'queued', owner: { personId: 'fixture-owner', confirmation: 'unknown' }, nextStep: 'Review synthetic evidence', completionCondition: 'Synthetic evidence recorded', forecastDate: '2026-10-18' }],
       queues: [{ personId: 'fixture-owner', primaryTaskId: 'fixture-foundation-task', startedTaskIds: [], queuedSlices: [], capacity: { state: 'unknown' } }],
       gaps: [], proposals: [{ kind: 'review', summary: 'Confirm synthetic weekly priority', taskIds: ['fixture-foundation-task'] }],
     };
-    const planBytes = `${JSON.stringify(plan)}\n`;
+    const planBytes = `${canonicalJson(plan)}\n`;
     const presentation = `<article><h1>${episode.title}</h1><p>Coverage is synthetic and bounded.</p></article>`;
     const presentationBytes = `${presentation}\n`;
     const manifest = {
-      schemaVersion: 1, kind: 'weekly-plan-manifest', week, revision: episode.revision, status: episode.status,
-      generatedAt: '2026-10-12T00:00:00Z', generatorVersion: 'synthetic', sourceCommit: 'synthetic-planning-source', sourceContentRevision: 'synthetic', inputDigest: `sha256:${'1'.repeat(64)}`,
+      schemaVersion: 1, kind: 'weekly-plan-manifest', week, revision: episode.revision, status: 'draft',
+      generatedAt: '2026-10-12T00:00:00Z', generatorVersion: 'synthetic', producerRevision: 'synthetic-producer', sourceCommit: 'synthetic-planning-source', sourceContentRevision: 'synthetic', inputDigest: `sha256:${'1'.repeat(64)}`,
       planDigest: `sha256:${createHash('sha256').update(planBytes).digest('hex')}`,
       htmlDigest: `sha256:${createHash('sha256').update(presentationBytes).digest('hex')}`,
       policyRevision: 'sharing-v1', coverage: plan.coverage,
       artifactPaths: { manifest: manifestPath, plan: planPath, html: presentationPath },
-      artifactDigests: { manifest: `sha256:${'0'.repeat(64)}`, plan: `sha256:${createHash('sha256').update(planBytes).digest('hex')}`, html: `sha256:${createHash('sha256').update(presentationBytes).digest('hex')}` },
+      artifactDigests: { manifest: null, plan: `sha256:${createHash('sha256').update(planBytes).digest('hex')}`, html: `sha256:${createHash('sha256').update(presentationBytes).digest('hex')}` },
       outcomeTaskIds: [], immutable: true,
     };
+    manifest.artifactDigests.manifest = `sha256:${createHash('sha256').update(`${canonicalJson(manifest)}\n`).digest('hex')}`;
     mkdirSync(join(root, base), { recursive: true });
     writeFileSync(join(root, planPath), planBytes);
-    const manifestBytes = `${JSON.stringify(manifest)}\n`;
+    const manifestBytes = `${canonicalJson(manifest)}\n`;
     writeFileSync(join(root, manifestPath), manifestBytes);
     writeFileSync(join(root, presentationPath), presentationBytes);
-    entries.push({ week, revision: episode.revision, status: episode.status, coverage: plan.coverage, manifestPath, planPath, htmlPath: presentationPath,
-      manifestDigest: `sha256:${createHash('sha256').update(manifestBytes).digest('hex')}`, planDigest: manifest.planDigest, htmlDigest: manifest.htmlDigest });
+    const episodeValue = episodeFor(plan, episode.reviewStatus);
+    const episodePath = `episodes/${week}-${episode.revision}${episode.reviewStatus === 'approved' ? '-approved' : ''}.json`;
+    const episodeBytes = `${canonicalJson(episodeValue)}\n`;
+    writeFileSync(join(root, episodePath), episodeBytes);
+    entries.push({ week, revision: episode.revision, status: 'draft', coverage: plan.coverage, manifestPath, planPath, htmlPath: presentationPath,
+      manifestDigest: `sha256:${createHash('sha256').update(manifestBytes).digest('hex')}`, planDigest: manifest.planDigest, htmlDigest: manifest.htmlDigest,
+      episodePath, episodeDigest: digest(episodeBytes), episodeStatus: episodeValue.status, episodePlanDigest: episodeValue.planDigest,
+      episodeApprovalDigest: digest(canonicalJson(episodeValue.approvalReceipts)), episodeGeneratedAt: episodeValue.generatedAt });
   }
   mkdirSync(join(root, 'planning'), { recursive: true });
   writeFileSync(join(root, 'planning/index.json'), `${JSON.stringify({ schemaVersion: 1, kind: 'weekly-plan-index', currentDraft: `${week}/r2`, latestApproved: `${week}/r1`, entries })}\n`);

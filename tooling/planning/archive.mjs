@@ -27,6 +27,7 @@ export const PLANNING_ARCHIVE_LIMITS = Object.freeze({
 });
 
 const STATUSES = new Set(['draft', 'approved', 'superseded', 'blocked']);
+const EPISODE_STATUSES = new Set(['draft', 'approved']);
 const DIGEST = /^sha256:[a-f0-9]{64}$/u;
 const WEEK = /^\d{4}-W(?:0[1-9]|[1-4]\d|5[0-3])$/u;
 const REVISION = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
@@ -130,6 +131,21 @@ function normalizeRepositoryPath(value, path) {
   return segments.join('/');
 }
 
+function normalizeEpisodePath(value, path) {
+  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) {
+    fail(`${path}: must be a non-empty repository-relative episode path`);
+  }
+  if (value.includes('\\') || value.includes('%') || value.includes('\u0000') || isAbsolute(value)) {
+    fail(`${path}: must use unencoded POSIX relative path segments`);
+  }
+  const segments = value.split('/');
+  if (segments.some(segment => segment.length === 0 || segment === '.' || segment === '..')) {
+    fail(`${path}: contains an unsafe path segment`);
+  }
+  if (!value.startsWith('episodes/')) fail(`${path}: must be under episodes`);
+  return segments.join('/');
+}
+
 function revisionNumber(value, path) {
   const normalized = text(value, path, { max: 128, pattern: REVISION });
   const numeric = /^r(0|[1-9]\d{0,5})$/u.exec(normalized);
@@ -177,27 +193,55 @@ function nestedDigest(value, names) {
   return undefined;
 }
 
-function declaredArtifactDigest(manifest, kind) {
+function declaredArtifactDigests(manifest, kind) {
+  const declarations = [];
   const names = kind === 'plan'
     ? ['planDigest', 'planHash', 'plan_sha256']
     : ['presentationDigest', 'presentationHash', 'presentation_sha256', 'htmlDigest', 'htmlHash'];
-  for (const name of names) if (typeof manifest[name] === 'string') return { value: manifest[name], path: `manifest.${name}` };
+  for (const name of names) {
+    if (typeof manifest[name] === 'string') declarations.push({ value: manifest[name], path: `manifest.${name}` });
+  }
   for (const containerName of ['hashes', 'digests', 'artifacts', 'files']) {
     const container = manifest[containerName];
     if (container === null || typeof container !== 'object' || Array.isArray(container)) continue;
     const candidates = kind === 'plan' ? ['plan', 'plan.json'] : ['presentation', 'presentation.html', 'html'];
     for (const name of candidates) {
       const candidate = container[name];
-      if (typeof candidate === 'string') return { value: candidate, path: `manifest.${containerName}.${name}` };
+      if (typeof candidate === 'string') declarations.push({ value: candidate, path: `manifest.${containerName}.${name}` });
       const nested = nestedDigest(candidate, ['sha256', 'digest', 'hash']);
-      if (nested !== undefined) return { value: nested, path: `manifest.${containerName}.${name}` };
+      if (nested !== undefined) declarations.push({ value: nested, path: `manifest.${containerName}.${name}` });
     }
   }
   if (manifest.artifactDigests !== undefined && manifest.artifactDigests !== null && typeof manifest.artifactDigests === 'object' && !Array.isArray(manifest.artifactDigests)) {
     const field = kind === 'plan' ? 'plan' : 'html';
-    if (typeof manifest.artifactDigests[field] === 'string') return { value: manifest.artifactDigests[field], path: `manifest.artifactDigests.${field}` };
+    if (typeof manifest.artifactDigests[field] === 'string') declarations.push({ value: manifest.artifactDigests[field], path: `manifest.artifactDigests.${field}` });
   }
-  return undefined;
+  return declarations;
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return JSON.stringify(value.map(canonicalJsonValue));
+  return JSON.stringify(canonicalJsonValue(value));
+}
+
+function canonicalJsonValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalJsonValue);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalJsonValue(value[key])]));
+  }
+  return value;
+}
+
+function manifestSelfDigest(manifest) {
+  const withoutSelfDigest = {
+    ...manifest,
+    artifactDigests: { ...manifest.artifactDigests, manifest: null },
+  };
+  return `sha256:${createHash('sha256').update(`${canonicalJson(withoutSelfDigest)}\n`).digest('hex')}`;
+}
+
+function canonicalDigest(value) {
+  return `sha256:${createHash('sha256').update(canonicalJson(value)).digest('hex')}`;
 }
 
 function declaredArchiveDigest(manifest) {
@@ -273,7 +317,25 @@ function validateEpisodeMetadata(entry, path) {
   for (const field of ['hash', 'manifestDigest', 'planDigest', 'htmlDigest']) {
     if (value[field] !== undefined) digest(value[field], `${path}.${field}`);
   }
-  return { id: episodeId, week: weekValue, revision, revisionNumber: revisionNumber(revision, `${path}.revision`), status: episodeStatus, coverage: value.coverage };
+  const episodeFields = ['episodePath', 'episodeDigest', 'episodeStatus', 'episodePlanDigest', 'episodeApprovalDigest', 'episodeGeneratedAt'];
+  const episodeFieldPresence = episodeFields.map(field => value[field] !== undefined);
+  const hasEpisode = episodeFieldPresence.some(Boolean);
+  if (hasEpisode && !episodeFieldPresence.every(Boolean)) fail(`${path}: episode metadata must be complete`);
+  const episode = hasEpisode
+    ? {
+      path: normalizeEpisodePath(value.episodePath, `${path}.episodePath`),
+      digest: digest(value.episodeDigest, `${path}.episodeDigest`),
+      status: (() => {
+        const normalized = text(value.episodeStatus, `${path}.episodeStatus`, { max: 16 });
+        if (!EPISODE_STATUSES.has(normalized)) fail(`${path}.episodeStatus: unsupported status ${JSON.stringify(normalized)}`);
+        return normalized;
+      })(),
+      planDigest: digest(value.episodePlanDigest, `${path}.episodePlanDigest`),
+      approvalDigest: digest(value.episodeApprovalDigest, `${path}.episodeApprovalDigest`),
+      generatedAt: utcTimestamp(value.episodeGeneratedAt, `${path}.episodeGeneratedAt`),
+    }
+    : null;
+  return { id: episodeId, week: weekValue, revision, revisionNumber: revisionNumber(revision, `${path}.revision`), status: episodeStatus, coverage: value.coverage, episode };
 }
 
 function validatePlan(plan, metadata, path) {
@@ -287,7 +349,7 @@ function validatePlan(plan, metadata, path) {
   if (value.timezone !== 'Asia/Manila') fail(`${path}.timezone: must be Asia/Manila`);
   utcTimestamp(value.asOf, `${path}.asOf`);
   const source = record(value.source, `${path}.source`);
-  for (const field of ['sourceCommit', 'contentRevision', 'policyRevision', 'generatorVersion']) text(source[field], `${path}.source.${field}`, { max: 512 });
+  for (const field of ['sourceCommit', 'contentRevision', 'policyRevision', 'generatorVersion', 'producerRevision']) text(source[field], `${path}.source.${field}`, { max: 512 });
   digest(source.inputDigest, `${path}.source.inputDigest`);
   if (value.coverage === undefined) fail(`${path}.coverage: is required`);
   jsonDepth(value.coverage, `${path}.coverage`);
@@ -313,7 +375,7 @@ function validateManifest(manifest, metadata, paths, path) {
   if (value.revision !== metadata.revision) fail(`${path}.revision: does not match index entry`);
   if (value.status !== metadata.status) fail(`${path}.status: does not match index entry`);
   utcTimestamp(value.generatedAt, `${path}.generatedAt`);
-  for (const field of ['generatorVersion', 'sourceCommit', 'sourceContentRevision', 'policyRevision']) text(value[field], `${path}.${field}`, { max: 512 });
+  for (const field of ['generatorVersion', 'producerRevision', 'sourceCommit', 'sourceContentRevision', 'policyRevision']) text(value[field], `${path}.${field}`, { max: 512 });
   for (const field of ['inputDigest', 'planDigest', 'htmlDigest']) digest(value[field], `${path}.${field}`);
   const expectedPaths = { manifest: paths.manifest, plan: paths.plan, html: paths.presentation };
   for (const [field, expected] of Object.entries(expectedPaths)) {
@@ -348,6 +410,86 @@ function validateManifest(manifest, metadata, paths, path) {
   return value;
 }
 
+function validateEpisode(episode, metadata, plan, episodeBytes, metadataPath) {
+  const value = record(episode, metadataPath);
+  if (value.schemaVersion !== PLANNING_ARCHIVE_SCHEMA_VERSION) fail(`${metadataPath}.schemaVersion: must be ${PLANNING_ARCHIVE_SCHEMA_VERSION}`);
+  if (value.kind !== 'weekly-episode') fail(`${metadataPath}.kind: must be weekly-episode`);
+  if (value.week !== metadata.week || value.revision !== metadata.revision) fail(`${metadataPath}: does not match the indexed plan identity`);
+  const episodeStatus = text(value.status, `${metadataPath}.status`, { max: 16 });
+  if (!EPISODE_STATUSES.has(episodeStatus)) fail(`${metadataPath}.status: unsupported status ${JSON.stringify(episodeStatus)}`);
+  if (episodeStatus !== metadata.episode.status) fail(`${metadataPath}.status: does not match planning index episodeStatus`);
+  utcTimestamp(value.generatedAt, `${metadataPath}.generatedAt`);
+  if (value.generatedAt !== metadata.episode.generatedAt) fail(`${metadataPath}.generatedAt: does not match planning index episodeGeneratedAt`);
+  const planDigest = canonicalDigest(plan);
+  if (value.planDigest !== planDigest || value.planDigest !== metadata.episode.planDigest) fail(`${metadataPath}.planDigest: does not match the immutable plan`);
+  if (!Array.isArray(value.parts) || value.parts.length > 4096) fail(`${metadataPath}.parts: must be a bounded array`);
+  if (!Array.isArray(value.approvalReceipts) || value.approvalReceipts.length > 4096) fail(`${metadataPath}.approvalReceipts: must be a bounded array`);
+  const expected = [];
+  if (!Array.isArray(plan.outcomes) || plan.outcomes.length > 4096) fail(`${metadataPath}: plan outcomes are not bounded`);
+  for (const [outcomeIndex, rawOutcome] of plan.outcomes.entries()) {
+    const outcome = record(rawOutcome, `${metadataPath}.plan.outcomes[${outcomeIndex}]`);
+    const taskId = id(outcome.taskId, `${metadataPath}.plan.outcomes[${outcomeIndex}].taskId`);
+    for (const kind of ['task', 'assignment', 'schedule']) {
+      expected.push({
+        partId: `${kind}:${taskId}`,
+        kind,
+        taskId,
+        valueDigest: canonicalDigest({ kind, outcome }),
+      });
+    }
+  }
+  if (value.parts.length !== expected.length) fail(`${metadataPath}.parts: must contain exactly one controlled part per plan outcome and approval kind`);
+  const expectedById = new Map(expected.map(part => [part.partId, part]));
+  const partsById = new Map();
+  for (const [partIndex, rawPart] of value.parts.entries()) {
+    const part = record(rawPart, `${metadataPath}.parts[${partIndex}]`);
+    const partId = text(part.partId, `${metadataPath}.parts[${partIndex}].partId`, { max: 256 });
+    const reference = expectedById.get(partId);
+    if (!reference) fail(`${metadataPath}.parts[${partIndex}]: unknown controlled part`);
+    if (partsById.has(partId)) fail(`${metadataPath}.parts[${partIndex}]: duplicate controlled part`);
+    if (part.kind !== reference.kind || part.taskId !== reference.taskId || part.valueDigest !== reference.valueDigest) fail(`${metadataPath}.parts[${partIndex}]: controlled part does not match the immutable plan value`);
+    if (typeof part.approved !== 'boolean') fail(`${metadataPath}.parts[${partIndex}].approved: must be boolean`);
+    partsById.set(partId, part);
+  }
+  const receiptsByPart = new Map();
+  for (const [receiptIndex, rawReceipt] of value.approvalReceipts.entries()) {
+    const receipt = record(rawReceipt, `${metadataPath}.approvalReceipts[${receiptIndex}]`);
+    const partId = text(receipt.partId, `${metadataPath}.approvalReceipts[${receiptIndex}].partId`, { max: 256 });
+    const part = expectedById.get(partId);
+    if (!part) fail(`${metadataPath}.approvalReceipts[${receiptIndex}]: references an unknown controlled part`);
+    if (receiptsByPart.has(partId)) fail(`${metadataPath}.approvalReceipts[${receiptIndex}]: more than one receipt for a controlled part`);
+    if (receipt.episodeId !== `${metadata.week}:${metadata.revision}` || receipt.revision !== metadata.revision) fail(`${metadataPath}.approvalReceipts[${receiptIndex}]: does not bind to episode revision`);
+    text(receipt.approvedBy, `${metadataPath}.approvalReceipts[${receiptIndex}].approvedBy`, { max: 128 });
+    utcTimestamp(receipt.approvedAt, `${metadataPath}.approvalReceipts[${receiptIndex}].approvedAt`);
+    id(receipt.approvalRef, `${metadataPath}.approvalReceipts[${receiptIndex}].approvalRef`);
+    text(receipt.approvalSource, `${metadataPath}.approvalReceipts[${receiptIndex}].approvalSource`, { max: 128 });
+    if (receipt.approvedRevision !== metadata.revision) fail(`${metadataPath}.approvalReceipts[${receiptIndex}].approvedRevision: does not match episode revision`);
+    text(receipt.reviewedDetail, `${metadataPath}.approvalReceipts[${receiptIndex}].reviewedDetail`, { max: 4096 });
+    if (receipt.valueDigest !== part.valueDigest) fail(`${metadataPath}.approvalReceipts[${receiptIndex}].valueDigest: does not match the immutable plan part`);
+    const receiptCore = {
+      episodeId: receipt.episodeId,
+      revision: receipt.revision,
+      partId: receipt.partId,
+      valueDigest: receipt.valueDigest,
+      approvedBy: receipt.approvedBy,
+      approvedAt: receipt.approvedAt,
+      approvalRef: receipt.approvalRef,
+      approvalSource: receipt.approvalSource,
+      approvedRevision: receipt.approvedRevision,
+      reviewedDetail: receipt.reviewedDetail,
+    };
+    if (receipt.approvalDigest !== canonicalDigest(receiptCore)) fail(`${metadataPath}.approvalReceipts[${receiptIndex}].approvalDigest: does not match the exact receipt`);
+    receiptsByPart.set(partId, receipt);
+  }
+  for (const [partId, part] of partsById) {
+    if (part.approved !== receiptsByPart.has(partId)) fail(`${metadataPath}.parts.${partId}.approved: does not match its receipt`);
+  }
+  if (episodeStatus === 'approved' && (!expected.length || expected.some(part => !partsById.get(part.partId)?.approved))) fail(`${metadataPath}: approved episode must have every controlled part approved`);
+  if (metadata.episode.approvalDigest !== canonicalDigest(value.approvalReceipts)) fail(`${metadataPath}.approvalReceipts: does not match planning index episodeApprovalDigest`);
+  artifactDigest(metadata.episode.digest, `${metadataPath}.artifactDigest`, episodeBytes);
+  return value;
+}
+
 function validateIndex(index) {
   const value = record(index, 'planning/index.json');
   if (value.schemaVersion !== PLANNING_ARCHIVE_SCHEMA_VERSION) fail(`planning/index.json.schemaVersion: must be ${PLANNING_ARCHIVE_SCHEMA_VERSION}`);
@@ -358,13 +500,14 @@ function validateIndex(index) {
   return value;
 }
 
-function resolveArtifact(root, relativePath, label) {
+function resolveArtifact(root, relativePath, label, maxBytes) {
   const absolute = resolve(root, relativePath);
   if (!absolute.startsWith(`${resolve(root)}${sep}`)) fail(`${label}: escapes the data root`);
   const stat = lstatSync(absolute, { throwIfNoEntry: false });
   if (!stat || !stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o111) !== 0) {
     fail(`${label}: must be a non-executable regular file`);
   }
+  if (stat.size > maxBytes) fail(`${label}: exceeds the archive file-size limit`);
   const rootReal = realpathSync(root);
   const artifactReal = realpathSync(absolute);
   if (artifactReal !== rootReal && !artifactReal.startsWith(`${rootReal}${sep}`)) fail(`${label}: escapes the data root`);
@@ -390,7 +533,7 @@ export function loadPlanningArchive({ dataRoot, instance }) {
     fail('planning/index.json: must be a non-executable regular file');
   }
 
-  const indexArtifact = resolveArtifact(root, 'planning/index.json', 'planning/index.json');
+  const indexArtifact = resolveArtifact(root, 'planning/index.json', 'planning/index.json', PLANNING_ARCHIVE_LIMITS.indexBytes);
   const index = validateIndex(parseJson(indexArtifact.bytes, 'planning/index.json', PLANNING_ARCHIVE_LIMITS.indexBytes));
   const entries = [];
   const snapshots = [{ path: 'planning/index.json', digest: createHash('sha256').update(indexArtifact.bytes).digest('hex'), bytes: indexArtifact.bytes.byteLength }];
@@ -410,27 +553,40 @@ export function loadPlanningArchive({ dataRoot, instance }) {
       presentation: pathField(entry, ['htmlPath', 'html', 'presentationPath', 'presentation', 'presentationHtml'], path),
     };
     const artifacts = {
-      manifest: resolveArtifact(root, paths.manifest, `${path}.manifest`),
-      plan: resolveArtifact(root, paths.plan, `${path}.plan`),
-      presentation: resolveArtifact(root, paths.presentation, `${path}.presentation`),
+      manifest: resolveArtifact(root, paths.manifest, `${path}.manifest`, PLANNING_ARCHIVE_LIMITS.artifactBytes),
+      plan: resolveArtifact(root, paths.plan, `${path}.plan`, PLANNING_ARCHIVE_LIMITS.artifactBytes),
+      presentation: resolveArtifact(root, paths.presentation, `${path}.presentation`, PLANNING_ARCHIVE_LIMITS.artifactBytes),
     };
-    totalBytes += artifacts.manifest.bytes.byteLength + artifacts.plan.bytes.byteLength + artifacts.presentation.bytes.byteLength;
+    if (metadata.episode) artifacts.episode = resolveArtifact(root, metadata.episode.path, `${path}.episode`, PLANNING_ARCHIVE_LIMITS.artifactBytes);
+    totalBytes += Object.values(artifacts).reduce((sum, artifact) => sum + artifact.bytes.byteLength, 0);
     if (totalBytes > PLANNING_ARCHIVE_LIMITS.totalBytes) fail('planning archive exceeds the total size limit');
     const plan = validatePlan(parseJson(artifacts.plan.bytes, paths.plan, PLANNING_ARCHIVE_LIMITS.artifactBytes), metadata, paths.plan);
     const manifest = validateManifest(parseJson(artifacts.manifest.bytes, paths.manifest, PLANNING_ARCHIVE_LIMITS.artifactBytes), metadata, paths, paths.manifest);
     const presentationHtml = safePresentationHtml(Buffer.from(artifacts.presentation.bytes).toString('utf8'), paths.presentation);
+    if (metadata.episode) validateEpisode(parseJson(artifacts.episode.bytes, metadata.episode.path, PLANNING_ARCHIVE_LIMITS.artifactBytes), metadata, plan, artifacts.episode.bytes, metadata.episode.path);
     if (entry.manifestDigest !== undefined) artifactDigest(entry.manifestDigest, `${path}.manifestDigest`, artifacts.manifest.bytes);
     if (entry.planDigest !== undefined) artifactDigest(entry.planDigest, `${path}.planDigest`, artifacts.plan.bytes);
     if (entry.htmlDigest !== undefined) artifactDigest(entry.htmlDigest, `${path}.htmlDigest`, artifacts.presentation.bytes);
-    const planDeclared = declaredArtifactDigest(manifest, 'plan');
-    if (planDeclared) artifactDigest(planDeclared.value, planDeclared.path, artifacts.plan.bytes);
-    const presentationDeclared = declaredArtifactDigest(manifest, 'presentation');
-    if (presentationDeclared) artifactDigest(presentationDeclared.value, presentationDeclared.path, artifacts.presentation.bytes);
+    for (const declaration of declaredArtifactDigests(manifest, 'plan')) artifactDigest(declaration.value, declaration.path, artifacts.plan.bytes);
+    for (const declaration of declaredArtifactDigests(manifest, 'presentation')) artifactDigest(declaration.value, declaration.path, artifacts.presentation.bytes);
+    if (manifest.artifactDigests.manifest !== manifestSelfDigest(manifest)) {
+      fail(`${paths.manifest}.artifactDigests.manifest: does not match the canonical manifest self-digest`);
+    }
+    for (const [manifestField, planField] of [
+      ['sourceCommit', 'sourceCommit'],
+      ['sourceContentRevision', 'contentRevision'],
+      ['policyRevision', 'policyRevision'],
+      ['generatorVersion', 'generatorVersion'],
+      ['producerRevision', 'producerRevision'],
+    ]) {
+      if (manifest[manifestField] !== plan.source[planField]) fail(`${paths.manifest}.${manifestField}: does not match ${paths.plan}.source.${planField}`);
+    }
+    if (manifest.inputDigest !== plan.source.inputDigest) fail(`${paths.manifest}.inputDigest: does not match ${paths.plan}.source.inputDigest`);
     const archiveDeclared = declaredArchiveDigest(manifest);
     if (archiveDeclared) digest(archiveDeclared.value, archiveDeclared.path);
     for (const [kind, artifact] of Object.entries(artifacts)) {
       snapshots.push({
-        path: paths[kind],
+        path: kind === 'episode' ? metadata.episode.path : paths[kind],
         digest: createHash('sha256').update(artifact.bytes).digest('hex'),
         bytes: artifact.bytes.byteLength,
       });
@@ -441,6 +597,7 @@ export function loadPlanningArchive({ dataRoot, instance }) {
       date: typeof entry.date === 'string' ? entry.date : null,
       revision: metadata.revision,
       status: metadata.status,
+      reviewStatus: metadata.episode?.status ?? metadata.status,
       coverage: metadata.coverage,
       hash: typeof entry.hash === 'string' ? entry.hash : null,
       paths: Object.freeze(paths),
@@ -460,12 +617,13 @@ export function loadPlanningArchive({ dataRoot, instance }) {
     if (!resolved) fail(`planning/index.json.${field}: references an unknown entry`);
     return resolved.id;
   };
-  const drafts = entries.filter(entry => entry.status === 'draft').sort((left, right) => right.revisionNumber - left.revisionNumber);
-  const approved = entries.filter(entry => entry.status === 'approved').sort((left, right) => right.revisionNumber - left.revisionNumber);
+  const newestFirst = (left, right) => right.revisionNumber - left.revisionNumber || entries.indexOf(right) - entries.indexOf(left);
+  const drafts = entries.filter(entry => entry.reviewStatus === 'draft').sort(newestFirst);
+  const approved = entries.filter(entry => entry.reviewStatus === 'approved').sort(newestFirst);
   const currentDraftId = reference('currentDraft') ?? drafts[0]?.id ?? null;
   const latestApprovedId = reference('latestApproved') ?? approved[0]?.id ?? null;
-  if (currentDraftId !== null && byId.get(currentDraftId)?.status !== 'draft') fail('planning/index.json.currentDraft: must reference a draft entry');
-  if (latestApprovedId !== null && byId.get(latestApprovedId)?.status !== 'approved') fail('planning/index.json.latestApproved: must reference an approved entry');
+  if (currentDraftId !== null && byId.get(currentDraftId)?.reviewStatus !== 'draft') fail('planning/index.json.currentDraft: must reference a draft entry');
+  if (latestApprovedId !== null && byId.get(latestApprovedId)?.reviewStatus !== 'approved') fail('planning/index.json.latestApproved: must reference an approved entry');
 
   return {
     archive: Object.freeze({
