@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -56,6 +57,53 @@ function runGit(dataRepo, args) {
   });
 }
 
+function writePlanningFixtures(dataRepo, folderPath) {
+  const root = join(dataRepo, folderPath);
+  const week = '2026-W42';
+  const episodes = [
+    { revision: 'r1', status: 'approved', title: 'Synthetic approved presentation' },
+    { revision: 'r2', status: 'draft', title: 'Synthetic current draft presentation' },
+  ];
+  const entries = [];
+  for (const episode of episodes) {
+    const base = `planning/weeks/${week}/${episode.revision}`;
+    const planPath = `${base}/plan.json`;
+    const manifestPath = `${base}/manifest.json`;
+    const presentationPath = `${base}/presentation.html`;
+    const plan = {
+      schemaVersion: 1, kind: 'weekly-plan', week, revision: episode.revision,
+      status: episode.status, timezone: 'Asia/Manila', asOf: '2026-10-12T00:00:00Z',
+      source: { sourceCommit: 'synthetic-planning-source', contentRevision: 'synthetic', inputDigest: `sha256:${'1'.repeat(64)}`, policyRevision: 'sharing-v1', generatorVersion: 'synthetic' },
+      coverage: { kind: 'synthetic', complete: true },
+      outcomes: [{ taskId: 'fixture-foundation-task', title: 'Synthetic foundation outcome', status: 'queued', owner: { personId: 'fixture-owner', confirmation: 'unknown' }, nextStep: 'Review synthetic evidence', completionCondition: 'Synthetic evidence recorded', forecastDate: '2026-10-18' }],
+      queues: [{ personId: 'fixture-owner', primaryTaskId: 'fixture-foundation-task', startedTaskIds: [], queuedSlices: [], capacity: { state: 'unknown' } }],
+      gaps: [], proposals: [{ kind: 'review', summary: 'Confirm synthetic weekly priority', taskIds: ['fixture-foundation-task'] }],
+    };
+    const planBytes = `${JSON.stringify(plan)}\n`;
+    const presentation = `<article><h1>${episode.title}</h1><p>Coverage is synthetic and bounded.</p></article>`;
+    const presentationBytes = `${presentation}\n`;
+    const manifest = {
+      schemaVersion: 1, kind: 'weekly-plan-manifest', week, revision: episode.revision, status: episode.status,
+      generatedAt: '2026-10-12T00:00:00Z', generatorVersion: 'synthetic', sourceCommit: 'synthetic-planning-source', sourceContentRevision: 'synthetic', inputDigest: `sha256:${'1'.repeat(64)}`,
+      planDigest: `sha256:${createHash('sha256').update(planBytes).digest('hex')}`,
+      htmlDigest: `sha256:${createHash('sha256').update(presentationBytes).digest('hex')}`,
+      policyRevision: 'sharing-v1', coverage: plan.coverage,
+      artifactPaths: { manifest: manifestPath, plan: planPath, html: presentationPath },
+      artifactDigests: { manifest: `sha256:${'0'.repeat(64)}`, plan: `sha256:${createHash('sha256').update(planBytes).digest('hex')}`, html: `sha256:${createHash('sha256').update(presentationBytes).digest('hex')}` },
+      outcomeTaskIds: [], immutable: true,
+    };
+    mkdirSync(join(root, base), { recursive: true });
+    writeFileSync(join(root, planPath), planBytes);
+    const manifestBytes = `${JSON.stringify(manifest)}\n`;
+    writeFileSync(join(root, manifestPath), manifestBytes);
+    writeFileSync(join(root, presentationPath), presentationBytes);
+    entries.push({ week, revision: episode.revision, status: episode.status, coverage: plan.coverage, manifestPath, planPath, htmlPath: presentationPath,
+      manifestDigest: `sha256:${createHash('sha256').update(manifestBytes).digest('hex')}`, planDigest: manifest.planDigest, htmlDigest: manifest.htmlDigest });
+  }
+  mkdirSync(join(root, 'planning'), { recursive: true });
+  writeFileSync(join(root, 'planning/index.json'), `${JSON.stringify({ schemaVersion: 1, kind: 'weekly-plan-index', currentDraft: `${week}/r2`, latestApproved: `${week}/r1`, entries })}\n`);
+}
+
 function createOwnedRunRoot() {
   const configured = process.env.TRACKER_BROWSER_FIXTURE_ROOT;
   const parent = resolve(configured ?? process.env.TMPDIR ?? tmpdir());
@@ -70,6 +118,7 @@ function makeProject({ id, folderPath, mode, accessKind, publishKind, port, root
   mkdirSync(dataRepo, { recursive: true });
   const instance = fixtureInstance({ id, folderPath, accessKind, publishKind });
   const fixture = writeFixtureData({ repositoryPath: dataRepo, instance, mode });
+  if (mode === 'populated') writePlanningFixtures(dataRepo, folderPath);
   runGit(dataRepo, ['init', '--quiet', '--initial-branch=main']);
   runGit(dataRepo, ['config', 'user.name', 'Fixture Browser']);
   runGit(dataRepo, ['config', 'user.email', 'fixture-browser@fixture.test']);
@@ -101,7 +150,11 @@ function startDevServer(project) {
   });
   // Keep the child pipes drained without copying build output into test logs.
   child.stdout?.resume();
-  child.stderr?.resume();
+  project.stderrTail = [];
+  child.stderr?.on('data', chunk => {
+    project.stderrTail.push(String(chunk));
+    if (project.stderrTail.join('').length > 4_000) project.stderrTail.splice(0, project.stderrTail.length - 1);
+  });
   project.spawnError = null;
   child.once('error', () => { project.spawnError = true; });
   project.child = child;
@@ -113,7 +166,7 @@ async function waitForHealth(project) {
   while (Date.now() < deadline) {
     if (project.spawnError) throw new Error(`fixture server failed to start: ${project.id}`);
     if (project.child?.exitCode != null || project.child?.signalCode != null) {
-      throw new Error(`fixture server stopped before becoming healthy: ${project.id}`);
+      throw new Error(`fixture server stopped before becoming healthy: ${project.id}\n${project.stderrTail?.join('') ?? ''}`);
     }
     try {
       const response = await fetch(`http://127.0.0.1:${project.port}/__health`);

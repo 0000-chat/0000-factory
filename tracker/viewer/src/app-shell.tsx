@@ -150,9 +150,10 @@ function Sidebar({
       : route.kind === 'plans' ? 'plans'
         : route.kind === 'team' ? 'team'
           : route.kind === 'reports' ? 'reports'
+          : route.kind === 'weekly-planning' ? 'weekly-planning'
           : null;
-  const active = (family: 'today' | 'work' | 'plans' | 'team' | 'reports') => activeFamily === family;
-  const navClass = (family: 'today' | 'work' | 'plans' | 'team' | 'reports') => `app-nav-link${active(family) ? ' app-nav-link-active' : ''}`;
+  const active = (family: 'today' | 'work' | 'plans' | 'team' | 'reports' | 'weekly-planning') => activeFamily === family;
+  const navClass = (family: 'today' | 'work' | 'plans' | 'team' | 'reports' | 'weekly-planning') => `app-nav-link${active(family) ? ' app-nav-link-active' : ''}`;
   const workSearch = parseWorkSearch(sessionBrowseFilters.restoreWork(projectOptions), projectOptions);
   const todaySearch = parseTodaySearch(sessionBrowseFilters.restoreToday(projectOptions), projectOptions);
   const plansSearch = parsePlansSearch(sessionBrowseFilters.restorePlans());
@@ -169,6 +170,7 @@ function Sidebar({
         <Link className={navClass('today')} data-slot="tabs-trigger" data-state={active('today') ? 'active' : 'inactive'} to="/today" search={todaySearch} aria-current={active('today') ? 'page' : undefined}><CalendarDays size={16} aria-hidden="true" />Today</Link>
         <Link className={navClass('work')} data-slot="tabs-trigger" data-state={active('work') ? 'active' : 'inactive'} to="/work" search={workSearch} aria-current={active('work') ? 'page' : undefined}><LayoutDashboard size={16} aria-hidden="true" />Work</Link>
         <Link className={navClass('plans')} data-slot="tabs-trigger" data-state={active('plans') ? 'active' : 'inactive'} to="/plans" search={plansSearch} aria-current={active('plans') ? 'page' : undefined}><ClipboardList size={16} aria-hidden="true" />Plans</Link>
+        <Link className={navClass('weekly-planning')} data-slot="tabs-trigger" data-state={active('weekly-planning') ? 'active' : 'inactive'} to="/weekly-planning" aria-current={active('weekly-planning') ? 'page' : undefined}><ClipboardList size={16} aria-hidden="true" />Weekly planning</Link>
         <Link className={navClass('team')} data-slot="tabs-trigger" data-state={active('team') ? 'active' : 'inactive'} to="/team" search={teamSearch} aria-current={active('team') ? 'page' : undefined}><Users size={16} aria-hidden="true" />Team</Link>
         <Link className={navClass('reports')} data-slot="tabs-trigger" data-state={active('reports') ? 'active' : 'inactive'} to="/reports" search={reportsSearch} aria-current={active('reports') ? 'page' : undefined}><BarChart3 size={16} aria-hidden="true" />Reports</Link>
       </div>
@@ -302,6 +304,9 @@ export function AppShell() {
       case 'decision':
         void navigate({ to: '/decisions/$decisionId', params: { decisionId: targetRoute.decisionId } });
         break;
+      case 'weekly-planning':
+        void navigate({ to: '/weekly-planning' });
+        break;
       case 'root':
       case 'invalid':
       case 'unknown':
@@ -431,6 +436,9 @@ export function AppShell() {
         break;
       case 'decision':
         void navigate({ to: '/decisions/$decisionId', params: { decisionId: targetRoute.decisionId } });
+        break;
+      case 'weekly-planning':
+        void navigate({ to: '/weekly-planning' });
         break;
       case 'root':
       case 'invalid':

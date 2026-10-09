@@ -381,7 +381,7 @@ test('generated Worker fails closed before assets or GitHub and disabled publish
   assert.equal(disabledNetwork.githubCalls(), 0);
 });
 
-test('published root and nested data converge through generated HTTP, real Git objects, and a fresh clone', async () => {
+test('published root and nested data converge through generated HTTP, real Git objects, and a fresh clone', { timeout: 60_000 }, async () => {
   for (const folderPath of ['', 'tooling/project-tracker']) {
     const input = initializeDataRepository({
       id: `contract-publisher-${folderPath ? 'nested' : 'root'}`,

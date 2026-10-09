@@ -19,6 +19,7 @@ import { loadInstanceConfig, publicInstanceConfig } from '../../../tooling/insta
 import { renderInstanceArtifacts } from '../../../tooling/instance/render.mjs';
 import { repositoryPath, selectedDataPaths } from '../../../tooling/instance/paths.mjs';
 import { DataSourceError, SOURCE_READ_LIMITS, validateDataSource } from '../../../tooling/tracker/source-validation.mjs';
+import { loadPlanningArchive } from '../../../tooling/planning/archive.mjs';
 import { buildTrackerData, parseOwnerNames } from './data.mjs';
 
 const TOOLING_DIR = dirname(fileURLToPath(import.meta.url));
@@ -438,6 +439,7 @@ function loadBuildInputs({ engineRoot, instancePath, dataRepo, output } = {}, { 
   }
   const dataMeta = dataGitMetadata(data);
   const engineMeta = engineGitMetadata(engine);
+  const planning = loadPlanningArchive({ dataRoot: data, instance: loaded.instance });
   if (loaded.instance.data.folderPath && !contained(data, realPath(loaded.manifestDir))) {
     throw new Error('selected settings folder escapes dataRepo');
   }
@@ -452,6 +454,9 @@ function loadBuildInputs({ engineRoot, instancePath, dataRepo, output } = {}, { 
     files,
     records: validated.records,
     validated,
+    planningArchive: planning.archive,
+    planningSnapshots: planning.snapshots,
+    planningPresent: planning.present,
     dataSnapshots: captured.snapshots,
     settingsDigest: loaded.configDigest,
     assetDigest,
@@ -481,6 +486,10 @@ function inputFingerprint(inputs) {
       digest: inputs.assetDigest,
     },
     data: selected,
+    planning: inputs.planningSnapshots.map(selection => ({
+      path: selection.path,
+      digest: selection.digest,
+    })),
   };
   return digestText(JSON.stringify(fingerprintInput));
 }
@@ -523,6 +532,12 @@ function assertBuildInputsUnchanged(inputs) {
   }
   if (digestEngineSource(inputs.engineRoot) !== inputs.engineMeta.sourceDigest) {
     throw new Error('engine source changed during build');
+  }
+  const currentPlanning = loadPlanningArchive({ dataRoot: inputs.dataRepo, instance: inputs.instance });
+  const capturedPlanning = inputs.planningSnapshots.map(({ path, digest }) => ({ path, digest }));
+  const currentPlanningSnapshots = currentPlanning.snapshots.map(({ path, digest }) => ({ path, digest }));
+  if (JSON.stringify(currentPlanningSnapshots) !== JSON.stringify(capturedPlanning)) {
+    throw new Error('planning archive inputs changed during build');
   }
 }
 
@@ -631,7 +646,7 @@ function renderStagedOutput(inputs, outputPath, data, provenance) {
     manifestDir: inputs.manifestDir,
     engineRoot: inputs.engineRoot,
     output: outputPath,
-    provenance: { ...provenance, data },
+    provenance: { ...provenance, data, planningArchive: inputs.planningArchive },
   });
   runFrontendBuild(join(outputPath, 'assets'), inputs.instance);
   return updateManifest(outputPath);
@@ -712,6 +727,7 @@ export function buildSnapshot({ engineRoot, instancePath, dataRepo, output, buil
     manifest,
     engineRoot: inputs.engineRoot,
     dataRepo: inputs.dataRepo,
+    planningArchive: inputs.planningArchive,
     settings: inputs.instancePath,
   };
 }
@@ -726,6 +742,7 @@ export function validateOnly({ engineRoot, instancePath, dataRepo, engineCommit 
     guide: inputs.validated.guide,
     teamProfiles: inputs.validated.teamProfiles,
     files: inputs.files,
+    planningArchive: inputs.planningArchive,
     engineRoot: inputs.engineRoot,
     dataRepo: inputs.dataRepo,
     instancePath: inputs.instancePath,

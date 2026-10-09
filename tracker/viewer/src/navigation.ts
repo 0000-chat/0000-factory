@@ -19,6 +19,7 @@ export type SupportedPath =
   | { readonly kind: 'today' }
   | { readonly kind: 'work'; readonly itemId?: string }
   | { readonly kind: 'plans'; readonly planId?: string }
+  | { readonly kind: 'weekly-planning' }
   | { readonly kind: 'team'; readonly memberSlug?: string }
   | { readonly kind: 'reports' }
   | { readonly kind: 'decision'; readonly decisionId: string }
@@ -60,6 +61,7 @@ export function classifySupportedPath(pathname: string): SupportedPath {
   if (path === '/today') return { kind: 'today' };
   if (path === '/work') return { kind: 'work' };
   if (path === '/plans') return { kind: 'plans' };
+  if (path === '/weekly-planning') return { kind: 'weekly-planning' };
   if (path === '/team') return { kind: 'team' };
   if (path === '/reports') return { kind: 'reports' };
 

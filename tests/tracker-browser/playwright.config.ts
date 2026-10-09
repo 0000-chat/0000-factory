@@ -38,12 +38,12 @@ export default defineConfig({
     },
     {
       name: 'populated-root',
-      testMatch: /(?:populated-state|isolation)\.spec\.ts/,
+      testMatch: /(?:populated-state|isolation|planning-archive)\.spec\.ts/,
       use: { baseURL: `http://127.0.0.1:${port + 2}` },
     },
     {
       name: 'populated-nested',
-      testMatch: /(?:populated-state|isolation)\.spec\.ts/,
+      testMatch: /(?:populated-state|isolation|planning-archive)\.spec\.ts/,
       use: { baseURL: `http://127.0.0.1:${port + 3}` },
     },
   ],

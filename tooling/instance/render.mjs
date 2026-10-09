@@ -223,12 +223,16 @@ export function renderInstanceArtifacts({ instance, manifestDir, engineRoot, out
     if (Object.hasOwn(provenanceRecord, 'data')) {
       writeText(join(stage, 'assets/data.json'), `${JSON.stringify(provenanceRecord.data, null, 2)}\n`);
     }
+    if (Object.hasOwn(provenanceRecord, 'planningArchive')) {
+      writeText(join(stage, 'assets/planning/archive.json'), `${JSON.stringify(provenanceRecord.planningArchive, null, 2)}\n`);
+    }
 
     const generatedFiles = [
       'assets/index.html', 'assets/favicon.svg', 'runtime-config.mjs',
       'worker-entry.mjs', 'wrangler.json',
     ];
     if (existsSync(join(stage, 'assets/data.json'))) generatedFiles.push('assets/data.json');
+    if (existsSync(join(stage, 'assets/planning/archive.json'))) generatedFiles.push('assets/planning/archive.json');
     const manifest = {
       ...manifestBase,
       artifactHashes: artifactHashes(stage, generatedFiles),

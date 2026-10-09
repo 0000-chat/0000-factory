@@ -67,6 +67,10 @@ The viewer build writes generated browser assets, a data snapshot, generated
 Worker entry/configuration, and non-served provenance files under OUTPUT.
 Settings and source records remain in DATA.
 
+Weekly planning archives are optional, validated presentation inputs kept
+separate from the canonical tracker snapshot. See [the archive contract](planning-archive.md)
+for the generic schema, validation boundary, and route behavior.
+
 ## Synthetic fixture helper
 
 Use tests/helpers/fixture-data.mjs when authoring test data. It writes only

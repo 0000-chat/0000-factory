@@ -22,6 +22,7 @@ import {
   trackerEvents,
 } from './livestore-schema';
 import { parseTrackerSnapshot } from './snapshot';
+import { fetchPlanningArchive, type PlanningArchive } from './planning-archive';
 import { refreshCanonicalSnapshot, SnapshotAcknowledgementTimeout, waitForStoreAcknowledgement, type TrackerStore } from './snapshot-sync';
 import { trackerInstanceConfig } from './instance-config';
 import { legacyLocationPath } from './navigation';
@@ -217,7 +218,7 @@ function transactionPayloadJson(transaction: TaskPublishTransactionPayload): str
 
 const publishingDisabledMessage = 'Publishing is unavailable for this tracker. Local drafts remain saved on this device.';
 
-function StoredSnapshot({ store }: { store: TrackerStore }) {
+function StoredSnapshot({ store, planningArchive }: { store: TrackerStore; planningArchive: PlanningArchive }) {
   const saved = store.useQuery(canonicalSnapshotTable.select().first());
   const draftOverlays = store.useQuery(draftOverlayTable.select());
   const taskEditSessionRows = store.useQuery(taskEditSessionTable.select());
@@ -865,6 +866,7 @@ function StoredSnapshot({ store }: { store: TrackerStore }) {
   if (effectiveSnapshot !== null && routerRef.current === null) {
     routerRef.current = createTrackerRouter(effectiveSnapshot, {
       canonicalData: snapshot ?? effectiveSnapshot,
+      planningArchive,
       draftOverlays,
       taskDrafts: projection?.drafts ?? [],
       taskDraftSaveState,
@@ -998,6 +1000,7 @@ function StoredSnapshot({ store }: { store: TrackerStore }) {
     <RouterProvider router={router} context={{
       data: effectiveSnapshot,
       canonicalData: snapshot ?? effectiveSnapshot,
+      planningArchive,
       draftOverlays,
       taskDrafts: projection.drafts,
       taskDraftSaveState,
@@ -1023,7 +1026,20 @@ class StoreErrorBoundary extends Component<{ readonly children: ReactNode }, { r
 
 function TrackerApplication() {
   const store = useStore(trackerStoreOptions);
-  return <StoredSnapshot store={store} />;
+  const [planningArchive, setPlanningArchive] = useState<PlanningArchive | null>(null);
+  const [planningArchiveError, setPlanningArchiveError] = useState<Error | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchPlanningArchive(controller.signal)
+      .then(setPlanningArchive)
+      .catch(error => {
+        if (error?.name !== 'AbortError') setPlanningArchiveError(error instanceof Error ? error : new Error(String(error)));
+      });
+    return () => controller.abort();
+  }, []);
+  if (planningArchiveError !== null) return <SnapshotError error={planningArchiveError} />;
+  if (planningArchive === null) return <SnapshotLoading />;
+  return <StoredSnapshot store={store} planningArchive={planningArchive} />;
 }
 
 function mountTracker() {
