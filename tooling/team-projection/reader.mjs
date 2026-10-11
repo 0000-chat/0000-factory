@@ -37,7 +37,7 @@ const FULL_TASK_COPY_TOP_LEVEL_KEYS = [
 ];
 const FULL_TASK_COPY_AUDIT_KEYS = [
   'mode', 'scope', 'sourceTaskKind', 'includesDonOwned', 'includesUnassigned',
-  'privateRule', 'fieldsDigest', 'scopeDigest', 'taskIdsDigest', 'taskCount',
+  'privateRule', 'fieldsDigest', 'scopeDigest', 'policyDigest', 'selectionDigest', 'taskIdsDigest', 'taskCount',
   'contextNodeCount', 'approvalState', 'decisionId',
 ];
 const FULL_TASK_COPY_PUBLISH_KEYS = ['initialProjectionDigest', 'reviewed', 'activationEnabled'];
@@ -50,6 +50,18 @@ const FULL_TASK_COPY_FIELDS = Object.freeze([
   'nextStep', 'completionCriteria', 'deadline',
 ]);
 const FULL_TASK_COPY_SCOPE = 'all-current-canonical-task-records';
+const FULL_TASK_COPY_POLICY_DESCRIPTOR = Object.freeze({
+  mode: 'one-time-current-task-copy',
+  policyRevision: FULL_TASK_COPY_POLICY_REVISION,
+  scope: FULL_TASK_COPY_SCOPE,
+  sourceTaskKind: 'task',
+  includesDonOwned: true,
+  includesUnassigned: true,
+  privateRule: 'private-true-excluded',
+  hierarchyVersion: FULL_TASK_COPY_HIERARCHY_VERSION,
+  hierarchyContextFields: ['id', 'kind', 'title', 'parentId'],
+  fields: [...FULL_TASK_COPY_FIELDS].sort(),
+});
 // Context nodes are deliberately structural-only. They use the viewer's
 // generic node names so an omitted parent can be shown in a breadcrumb/tree
 // without importing any task fields.
@@ -228,6 +240,17 @@ function validateFullTaskMetadata(value) {
     privateRule: 'private-true-excluded',
   };
   if (value.audit.scopeDigest !== canonicalDigest(scopeInput)) fail('audit.scopeDigest', 'does not match the full-copy scope');
+  if (value.audit.policyDigest !== canonicalDigest(FULL_TASK_COPY_POLICY_DESCRIPTOR)) fail('audit.policyDigest', 'does not match the full-copy policy');
+  const selectionInput = {
+    mode: 'one-time-current-task-copy',
+    scope: FULL_TASK_COPY_SCOPE,
+    sourceTaskKind: 'task',
+    includesDonOwned: true,
+    includesUnassigned: true,
+    privateRule: 'private-true-excluded',
+    taskIds: [...value.tasks].map(task => task.taskId).sort(),
+  };
+  if (value.audit.selectionDigest !== canonicalDigest(selectionInput)) fail('audit.selectionDigest', 'does not match the exact current task selection');
   if (value.audit.taskIdsDigest !== canonicalDigest([...value.tasks].map(task => task.taskId).sort())) fail('audit.taskIdsDigest', 'does not match task IDs');
 
   exactKeys(value.publish, FULL_TASK_COPY_PUBLISH_KEYS, 'publish');
