@@ -177,12 +177,12 @@ function createOwnedRunRoot() {
   return mkdtempSync(join(parent, 'tracker-browser-run-'));
 }
 
-function makeProject({ id, folderPath, mode, accessKind, publishKind, port, root }) {
+function makeProject({ id, folderPath, mode, accessKind, publishKind, weeklyPlanning = true, port, root }) {
   const projectRoot = join(root, id);
   const dataRepo = join(projectRoot, 'data');
   const output = join(projectRoot, 'output');
   mkdirSync(dataRepo, { recursive: true });
-  const instance = fixtureInstance({ id, folderPath, accessKind, publishKind });
+  const instance = fixtureInstance({ id, folderPath, accessKind, publishKind, weeklyPlanning });
   const fixture = writeFixtureData({ repositoryPath: dataRepo, instance, mode });
   if (mode === 'populated') writePlanningFixtures(dataRepo, folderPath);
   runGit(dataRepo, ['init', '--quiet', '--initial-branch=main']);
@@ -317,7 +317,7 @@ async function main() {
   try {
     // Register teardown before any fixture or caller metadata write can fail.
     projects.push(
-      makeProject({ id: 'empty-0000', folderPath: 'tooling/project-tracker', mode: 'empty', accessKind: 'unconfigured', publishKind: 'disabled', port: basePort + 1, root }),
+      makeProject({ id: 'empty-0000', folderPath: 'tooling/project-tracker', mode: 'empty', accessKind: 'unconfigured', publishKind: 'disabled', weeklyPlanning: false, port: basePort + 1, root }),
       makeProject({ id: 'populated-root', folderPath: '', mode: 'populated', accessKind: 'ready', publishKind: 'enabled', port: basePort + 2, root }),
       makeProject({ id: 'populated-nested', folderPath: 'tooling/project-tracker', mode: 'populated', accessKind: 'unconfigured', publishKind: 'disabled', port: basePort + 3, root }),
     );

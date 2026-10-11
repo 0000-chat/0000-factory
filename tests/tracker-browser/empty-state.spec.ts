@@ -91,3 +91,25 @@ for (const route of emptyTopLevelRoutes) {
     expect(pageErrors).toEqual([]);
   });
 }
+
+test('disabled weekly planning hides navigation, skips the archive request, and redirects direct routes', async ({ page }) => {
+  const planningRequests: string[] = [];
+  page.on('request', request => {
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === '/planning/archive.json') planningRequests.push(pathname);
+  });
+
+  await page.goto('/work');
+  await waitForShell(page);
+  await expect(page.getByRole('link', { name: 'Weekly planning', exact: true })).toHaveCount(0);
+
+  await page.goto('/weekly-planning');
+  await waitForShell(page);
+  await expect(page).toHaveURL(/\/work$/u);
+  await expect(page.getByRole('heading', { name: 'Work', exact: true, level: 1 })).toBeVisible();
+
+  await page.goto('/planning/episodes/2026-W42/r1');
+  await waitForShell(page);
+  await expect(page.getByRole('heading', { name: 'Page not found', exact: true, level: 1 })).toBeVisible();
+  expect(planningRequests).toEqual([]);
+});

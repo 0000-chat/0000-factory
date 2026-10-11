@@ -32,6 +32,7 @@ function settings({
   folderPath = 'sites/synthetic',
   readerEmails = [PUBLISHER, READER],
   readerEmailDomains = [],
+  weeklyPlanning = true,
 } = {}) {
   return {
     schemaVersion: 1,
@@ -77,6 +78,7 @@ function settings({
       compatibilityDate: '2026-09-30',
       compatibilityFlags: ['nodejs_compat'],
     },
+    features: { weeklyPlanning },
   };
 }
 
@@ -176,6 +178,40 @@ test('the captured instance ignores contradictory Access and destination binding
   assert.equal(response.status, 200);
   assert.deepEqual(assetCalls, ['/']);
   assert.equal(keyCalls.length, 1);
+});
+
+test('disabled weekly planning blocks direct routes and encoded archive paths before assets', async () => {
+  const keyCalls = [];
+  const assetCalls = [];
+  const worker = createTrackerWorker(settings({ weeklyPlanning: false }), {
+    accessFetch: accessFetch(keyCalls),
+    now: () => FIXED_NOW,
+  });
+  const token = await tokenFor();
+  for (const path of [
+    '/weekly-planning',
+    '/weekly-planning/',
+    '/planning',
+    '/planning/archive.json',
+    '/planning/episodes/2026-W42%2Fr1',
+    '/%70lanning/%65pisodes/id',
+    '/planning/%2Farchive.json',
+    '/planning%ZZ/archive.json',
+    '/%70lanning/%ZZ/archive.json',
+  ]) {
+    const response = await worker.fetch(request(token, path), { ASSETS: assets(assetCalls) });
+    assert.equal(response.status, 404, path);
+  }
+  assert.deepEqual(assetCalls, []);
+
+  const enabledCalls = [];
+  const enabled = createTrackerWorker(settings(), {
+    accessFetch: accessFetch([]),
+    now: () => FIXED_NOW,
+  });
+  const enabledResponse = await enabled.fetch(request(token, '/weekly-planning'), { ASSETS: assets(enabledCalls) });
+  assert.equal(enabledResponse.status, 200);
+  assert.deepEqual(enabledCalls, ['/weekly-planning']);
 });
 
 test('Access rejects issuer, audience, signature, expiry, future, and reader mismatches', async () => {

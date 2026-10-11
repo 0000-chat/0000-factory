@@ -43,6 +43,7 @@ export interface PublicInstanceConfig {
   readonly source: PublicInstanceSource;
   readonly browser: PublicInstanceBrowser;
   readonly publishing: { readonly kind: 'enabled' | 'disabled' };
+  readonly features: { readonly weeklyPlanning: boolean };
 }
 
 export class PublicInstanceConfigError extends TypeError {
@@ -153,6 +154,19 @@ function browserKey(value: unknown, path: string, namespace: string, separator: 
   return result;
 }
 
+function parseFeatures(value: unknown, path: string): { readonly weeklyPlanning: boolean } {
+  if (value === undefined) return { weeklyPlanning: true };
+  const input = object(value, path);
+  exactKeys(input, ['weeklyPlanning'], path);
+  if (!Object.hasOwn(input, 'weeklyPlanning')) {
+    throw new PublicInstanceConfigError(`${path}.weeklyPlanning`, 'required field is missing');
+  }
+  if (typeof input.weeklyPlanning !== 'boolean') {
+    throw new PublicInstanceConfigError(`${path}.weeklyPlanning`, 'must be a boolean');
+  }
+  return { weeklyPlanning: input.weeklyPlanning };
+}
+
 function freezeDeep<T>(value: T): T {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const child of Object.values(value)) freezeDeep(child);
@@ -164,7 +178,7 @@ function freezeDeep<T>(value: T): T {
 /** Validate a browser-safe projection at the application boundary. */
 export function parsePublicInstanceConfig(value: unknown): PublicInstanceConfig {
   const input = object(value, 'publicInstance');
-  exactKeys(input, ['schemaVersion', 'id', 'branding', 'source', 'browser', 'publishing'], 'publicInstance');
+  exactKeys(input, ['schemaVersion', 'id', 'branding', 'source', 'browser', 'publishing', 'features'], 'publicInstance');
   if (input.schemaVersion !== 1) {
     throw new PublicInstanceConfigError('publicInstance.schemaVersion', 'must be 1');
   }
@@ -181,6 +195,7 @@ export function parsePublicInstanceConfig(value: unknown): PublicInstanceConfig 
   if (publishingInput.kind !== 'enabled' && publishingInput.kind !== 'disabled') {
     throw new PublicInstanceConfigError('publicInstance.publishing.kind', 'must be enabled or disabled');
   }
+  const features = parseFeatures(input.features, 'publicInstance.features');
 
   const namespace = identifier(browserInput.namespace, 'publicInstance.browser.namespace');
   if (namespace !== id) {
@@ -215,6 +230,7 @@ export function parsePublicInstanceConfig(value: unknown): PublicInstanceConfig 
       activityPausedKey: browserKey(browserInput.activityPausedKey, 'publicInstance.browser.activityPausedKey', namespace, '.'),
     },
     publishing: { kind: publishingInput.kind },
+    features,
   });
 }
 

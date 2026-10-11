@@ -19,7 +19,10 @@ and OUTPUT must be a separate directory. The engine rejects data roots nested
 inside the engine and rejects output paths that overlap an input.
 
 The settings schema covers branding, repository layout, browser namespaces,
-approval protocol, Access mode, publishing mode, and deployment metadata. A
+approval protocol, optional viewer features, Access mode, publishing mode, and
+deployment metadata. `features.weeklyPlanning` is optional and defaults to
+`true`; set it to `false` to remove the weekly planning view and archive from
+one instance. A
 public example uses access.kind set to unconfigured and publish.kind set to
 disabled. These modes do not request provider credentials or make external
 publish calls. Ready Access and enabled publishing are test-only settings

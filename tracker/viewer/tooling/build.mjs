@@ -19,7 +19,7 @@ import { loadInstanceConfig, publicInstanceConfig } from '../../../tooling/insta
 import { renderInstanceArtifacts } from '../../../tooling/instance/render.mjs';
 import { repositoryPath, selectedDataPaths } from '../../../tooling/instance/paths.mjs';
 import { DataSourceError, SOURCE_READ_LIMITS, validateDataSource } from '../../../tooling/tracker/source-validation.mjs';
-import { loadPlanningArchive } from '../../../tooling/planning/archive.mjs';
+import { emptyPlanningArchive, loadPlanningArchive } from '../../../tooling/planning/archive.mjs';
 import { readTeamProjection } from '../../../tooling/team-projection/reader.mjs';
 import { buildTeamProjectionSnapshot } from '../../../tooling/team-projection/snapshot.mjs';
 import { buildTeamProjectionPlanningArchive } from '../../../tooling/team-projection/presentation.mjs';
@@ -429,7 +429,9 @@ function loadTeamProjectionInputs({ engine, data, settingsPath, outputPath, load
     projection: selectedProjection.projection,
     projectionDigest: selectedProjection.digest,
     projectionBytes: selectedProjection.bytes,
-    planningArchive: buildTeamProjectionPlanningArchive(selectedProjection.projection),
+    planningArchive: instance.features.weeklyPlanning
+      ? buildTeamProjectionPlanningArchive(selectedProjection.projection)
+      : emptyPlanningArchive(),
     planningSnapshots: [],
     planningPresent: false,
     dataSnapshots: [{
@@ -494,7 +496,9 @@ function loadBuildInputs({ engineRoot, instancePath, dataRepo, output } = {}, { 
   }
   const dataMeta = dataGitMetadata(data);
   const engineMeta = engineGitMetadata(engine);
-  const planning = loadPlanningArchive({ dataRoot: data, instance: loaded.instance });
+  const planning = loaded.instance.features.weeklyPlanning
+    ? loadPlanningArchive({ dataRoot: data, instance: loaded.instance })
+    : { archive: emptyPlanningArchive(), snapshots: [], present: false };
   if (loaded.instance.data.folderPath && !contained(data, realPath(loaded.manifestDir))) {
     throw new Error('selected settings folder escapes dataRepo');
   }
@@ -607,11 +611,13 @@ function assertBuildInputsUnchanged(inputs) {
   if (digestEngineSource(inputs.engineRoot) !== inputs.engineMeta.sourceDigest) {
     throw new Error('engine source changed during build');
   }
-  const currentPlanning = loadPlanningArchive({ dataRoot: inputs.dataRepo, instance: inputs.instance });
-  const capturedPlanning = inputs.planningSnapshots.map(({ path, digest }) => ({ path, digest }));
-  const currentPlanningSnapshots = currentPlanning.snapshots.map(({ path, digest }) => ({ path, digest }));
-  if (JSON.stringify(currentPlanningSnapshots) !== JSON.stringify(capturedPlanning)) {
-    throw new Error('planning archive inputs changed during build');
+  if (inputs.instance.features.weeklyPlanning) {
+    const currentPlanning = loadPlanningArchive({ dataRoot: inputs.dataRepo, instance: inputs.instance });
+    const capturedPlanning = inputs.planningSnapshots.map(({ path, digest }) => ({ path, digest }));
+    const currentPlanningSnapshots = currentPlanning.snapshots.map(({ path, digest }) => ({ path, digest }));
+    if (JSON.stringify(currentPlanningSnapshots) !== JSON.stringify(capturedPlanning)) {
+      throw new Error('planning archive inputs changed during build');
+    }
   }
 }
 
@@ -720,7 +726,11 @@ function renderStagedOutput(inputs, outputPath, data, provenance) {
     manifestDir: inputs.manifestDir,
     engineRoot: inputs.engineRoot,
     output: outputPath,
-    provenance: { ...provenance, data, planningArchive: inputs.planningArchive },
+    provenance: {
+      ...provenance,
+      data,
+      ...(inputs.instance.features.weeklyPlanning ? { planningArchive: inputs.planningArchive } : {}),
+    },
   });
   runFrontendBuild(join(outputPath, 'assets'), inputs.instance);
   return updateManifest(outputPath);
