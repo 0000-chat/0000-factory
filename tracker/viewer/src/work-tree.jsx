@@ -123,6 +123,7 @@ function TreeItem({
   const expanded = hasChildren && expandedIds.has(item.id);
   const collapsedForOwnership = entry.childIds.length > 0 && !expandedIds.has(item.id);
   const contextual = contextualIds?.has(item.id) ?? false;
+  const structural = item.contextOnly === true;
   const reasons = attentionFilter
     ? entry.attentionReasons.map(reason => attentionLabel(reason, entry)).filter(Boolean)
     : [];
@@ -196,26 +197,26 @@ function TreeItem({
         <div className={`tracker-tree-label ${contextual ? 'tree-contextual' : ''}`}>
           <span className="work-tree-title">
             <strong>{item.title}</strong>
-            {!isAccepted(item) ? <BadgeChip tone={isDraft(item) ? 'slate' : 'amber'} className="tree-planned-chip">{commitmentLabel(item)}</BadgeChip> : null}
+            {!structural && !isAccepted(item) ? <BadgeChip tone={isDraft(item) ? 'slate' : 'amber'} className="tree-planned-chip">{commitmentLabel(item)}</BadgeChip> : null}
           </span>
           <small>
-            {contextual ? `${commitmentLabel(item)} context` : item.childSummary.total ? `${item.childSummary.done}/${item.childSummary.total} children done` : humanize(item.type)}
-            <span className="work-tree-lifecycle" data-testid={`tree-lifecycle-${item.id}`}> · Status · {humanize(item.status)}</span>
+            {structural ? 'Context' : contextual ? `${commitmentLabel(item)} context` : item.childSummary.total ? `${item.childSummary.done}/${item.childSummary.total} children done` : humanize(item.type)}
+            {structural ? null : <span className="work-tree-lifecycle" data-testid={`tree-lifecycle-${item.id}`}> · Status · {humanize(item.status)}</span>}
           </small>
         </div>
         <span className="tree-row-meta">
-          <WorkOwnership item={item} data={data} entry={entry} collapsed={collapsedForOwnership} showName size="sm" />
-          <BadgeChip className="tree-health-chip" tone={healthTone(item.health?.state)}>{healthLabel(item.health?.state)}</BadgeChip>
-          {progressInline(item)}
-          {scheduleInline(item)}
-          {reasons.length ? (
+          {structural ? null : <WorkOwnership item={item} data={data} entry={entry} collapsed={collapsedForOwnership} showName size="sm" />}
+          {structural ? null : <BadgeChip className="tree-health-chip" tone={healthTone(item.health?.state)}>{healthLabel(item.health?.state)}</BadgeChip>}
+          {structural ? null : progressInline(item)}
+          {structural ? null : scheduleInline(item)}
+          {!structural && reasons.length ? (
             <span className="work-attention-reasons" data-testid={`attention-reasons-${item.id}`}>
               {reasons.map((reason, index) => <BadgeChip key={`${reason.label}-${index}`} tone={reason.tone} className={`work-attention-${reason.tone}`}>{reason.label}</BadgeChip>)}
             </span>
           ) : null}
-          <WorkActivityIndicator entry={entry} projection={workActivity.projection} collapsed={collapsedForOwnership} paused={workActivity.animationsPaused} evidence={data.activityEvidence} />
-          <WorkActivitySummary entry={entry} projection={workActivity.projection} evidence={data.activityEvidence} />
-          <WorkManagerRowMetadata entry={managerProjection?.byId.get(item.id)} people={managerPeople} itemTitle={item.title} enabled={managerEnabled} />
+          {structural ? null : <WorkActivityIndicator entry={entry} projection={workActivity.projection} collapsed={collapsedForOwnership} paused={workActivity.animationsPaused} evidence={data.activityEvidence} />}
+          {structural ? null : <WorkActivitySummary entry={entry} projection={workActivity.projection} evidence={data.activityEvidence} />}
+          {structural ? null : <WorkManagerRowMetadata entry={managerProjection?.byId.get(item.id)} people={managerPeople} itemTitle={item.title} enabled={managerEnabled} />}
         </span>
       </div>
       {hasChildren ? (

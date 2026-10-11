@@ -158,15 +158,22 @@ function validateStandingProjection(value) {
 function validateStandingHierarchy(value) {
   const tasksById = new Map(value.tasks.map(task => [task.taskId, task]));
   const nodesById = new Map();
+  const allIds = new Set();
+  for (const [taskIndex, task] of value.tasks.entries()) {
+    if (allIds.has(task.taskId)) fail(`tasks[${taskIndex}].taskId`, `duplicate ID ${task.taskId}`);
+    allIds.add(task.taskId);
+  }
   if (!Array.isArray(value.contextNodes)) fail('contextNodes', 'must be an array');
   value.contextNodes.forEach((node, nodeIndex) => {
     const path = `contextNodes[${nodeIndex}]`;
     exactKeys(node, CONTEXT_ANCESTOR_KEYS, path);
     if (!isId(node.id)) fail(`${path}.id`, 'must be an ID');
+    if (allIds.has(node.id)) fail(`${path}.id`, `collides with task or context ID ${node.id}`);
     if (nodesById.has(node.id)) fail(`${path}.id`, 'must be unique across context nodes');
     safeText(node.title, `${path}.title`, { nullable: false });
     if (!CONTEXT_ANCESTOR_KINDS.has(node.kind)) fail(`${path}.kind`, 'must be project, workstream, or task');
     if (node.parentId !== null && !isId(node.parentId)) fail(`${path}.parentId`, 'must be an ID or null');
+    allIds.add(node.id);
     nodesById.set(node.id, node);
   });
 
@@ -179,6 +186,9 @@ function validateStandingHierarchy(value) {
   for (const [nodeId, node] of nodesById) {
     if (node.parentId !== null && !knownIds.has(node.parentId)) {
       fail(`contextNodes[${nodeId}].parentId`, 'must reference a task or context ancestor node');
+    }
+    if (node.parentId !== null && tasksById.has(node.parentId)) {
+      fail(`contextNodes[${nodeId}].parentId`, 'must reference a context ancestor node, not a task');
     }
   }
 
@@ -193,6 +203,26 @@ function validateStandingHierarchy(value) {
       const record = tasksById.get(current) ?? nodesById.get(current);
       current = record?.parentId ?? null;
     }
+  }
+
+  // Every exported context node must be on the ancestor chain of at least one
+  // shared task. This rejects unrelated structural rows that could otherwise
+  // appear as team work without a task proving why they are needed.
+  const reachableContextIds = new Set();
+  for (const task of value.tasks) {
+    const visited = new Set();
+    let current = task.parentId;
+    while (current !== null) {
+      if (visited.has(current)) break;
+      visited.add(current);
+      const record = tasksById.get(current) ?? nodesById.get(current);
+      if (!record) break;
+      if (nodesById.has(current)) reachableContextIds.add(current);
+      current = record.parentId;
+    }
+  }
+  for (const nodeId of nodesById.keys()) {
+    if (!reachableContextIds.has(nodeId)) fail(`contextNodes[${nodeId}]`, 'must be an ancestor of a shared task');
   }
 }
 

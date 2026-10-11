@@ -52,6 +52,7 @@ export function workFilterOptions(data: TrackerSnapshot, { teamProjection = fals
   const ownerLabels = new Map<string, string>();
   const statusValues = new Set<string>();
   for (const item of data.items) {
+    if (item.contextOnly === true) continue;
     const ownerValue = ownerFilterValue(item);
     if (ownerValue === UNASSIGNED_OWNER) {
       ownerLabels.set(UNASSIGNED_OWNER, 'Unassigned');
@@ -168,6 +169,28 @@ function rootsFor(
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
+function teamContextForMatches(
+  data: TrackerSnapshot,
+  matchItems: TrackerItem[],
+  scopedItems: TrackerItem[],
+): ReadonlySet<string> {
+  const scopedIds = new Set(scopedItems.map(item => item.id));
+  const contextualIds = new Set<string>();
+  for (const item of matchItems) {
+    const seen = new Set<string>([item.id]);
+    let parentId = item.parent ?? null;
+    while (parentId !== null && !seen.has(parentId)) {
+      seen.add(parentId);
+      if (!scopedIds.has(parentId)) break;
+      const parent = data.itemById.get(parentId);
+      if (!parent) break;
+      contextualIds.add(parent.id);
+      parentId = parent.parent ?? null;
+    }
+  }
+  return contextualIds;
+}
+
 function externalDependenciesFor(
   data: TrackerSnapshot,
   matchItems: TrackerItem[],
@@ -202,7 +225,8 @@ export function projectFilteredWork(
   const baseContextualIds: ReadonlySet<string> = baseVisibility.contextualIds;
   const tokens = queryTokens(parsedWorkSearch.q);
   const matchItems: TrackerItem[] = baseVisibility.items.filter((item: TrackerItem) =>
-    !baseContextualIds.has(item.id)
+    !item.contextOnly
+    && !baseContextualIds.has(item.id)
     && matchesQuery(item, tokens)
     && matchesOwners(item, parsedWorkSearch.owners)
     && matchesStatuses(item, parsedWorkSearch.statuses)
@@ -217,13 +241,14 @@ export function projectFilteredWork(
     : { ...item, commitment: '__filter_context__' });
   const restored = workVisibility(graphItems, '*', parsedWorkSearch.planned, parsedWorkSearch.drafts);
   const originalById = new Map(data.items.map(item => [item.id, item]));
+  const teamContextualIds = teamProjection ? teamContextForMatches(data, matchItems, scopedItems) : new Set<string>();
   const items = teamProjection
-    ? matchItems
+    ? scopedItems.filter(item => matchIds.has(item.id) || teamContextualIds.has(item.id))
     : restored.items
       .map((item: TrackerItem) => originalById.get(item.id))
       .filter((item): item is TrackerItem => item !== undefined);
   const visibleIds: ReadonlySet<string> = new Set(items.map(item => item.id));
-  const contextualIds: ReadonlySet<string> = new Set(restored.contextualIds);
+  const contextualIds: ReadonlySet<string> = teamProjection ? teamContextualIds : new Set(restored.contextualIds);
   return {
     items,
     roots: rootsFor(data, parsedWorkSearch.scope, items, visibleIds),

@@ -104,7 +104,7 @@ export function WorkPage() {
     return entry?.type === 'task' && entry.unfinished;
   }).length;
   const eligibleIds = useMemo(() => new Set(visible.items
-    .filter(item => !visible.contextualIds.has(item.id))
+    .filter(item => !item.contextOnly && !visible.contextualIds.has(item.id))
     .map(item => item.id)), [visible.contextualIds, visible.items]);
   const managerEnabled = !teamProjection && (search.preset !== 'none' || search.people.length > 0);
   const activityMode = search.mode === 'tree' || search.mode === 'gantt';

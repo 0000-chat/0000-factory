@@ -240,6 +240,7 @@ test('standing hierarchy preserves safe ancestor context while keeping task fiel
   const workstreamItem = snapshot.items.find(item => item.id === workstream.id);
   const taskItem = snapshot.items.find(item => item.id === 'task-alpha');
   assert.equal(projectItem.contextOnly, true);
+  assert.equal(projectItem.status, '');
   assert.equal(projectItem.type, 'project');
   assert.equal(projectItem.parent, null);
   assert.deepEqual(projectItem.childIds, [workstream.id]);
@@ -305,6 +306,36 @@ test('standing projection validates its explicit public contract and disabled pu
   };
   const cyclicContextRoot = writeFixture(cyclicContext);
   assert.throws(() => readTeamProjection({ dataRoot: cyclicContextRoot, projectionPath: 'team/projection.json' }), /parent cycle/u);
+
+  const unreferencedContext = {
+    ...standingProjection([standingTask({ taskId: 'task-without-context', parentId: null })]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [{ id: 'unreferenced-context', title: 'Unreferenced Context', kind: 'project', parentId: null }],
+  };
+  const unreferencedContextRoot = writeFixture(unreferencedContext);
+  assert.throws(() => readTeamProjection({ dataRoot: unreferencedContextRoot, projectionPath: 'team/projection.json' }), /must be an ancestor of a shared task/u);
+
+  const taskContextCollision = {
+    ...standingProjection([standingTask({ taskId: 'same-node', parentId: null })]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [{ id: 'same-node', title: 'Same Node', kind: 'project', parentId: null }],
+  };
+  const taskContextCollisionRoot = writeFixture(taskContextCollision);
+  assert.throws(() => readTeamProjection({ dataRoot: taskContextCollisionRoot, projectionPath: 'team/projection.json' }), /collides with task or context ID/u);
+
+  const contextParentTask = {
+    ...standingProjection([standingTask({ taskId: 'task-parent', parentId: null })]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [{ id: 'context-child', title: 'Context Child', kind: 'workstream', parentId: 'task-parent' }],
+  };
+  const contextParentTaskRoot = writeFixture(contextParentTask);
+  assert.throws(() => readTeamProjection({ dataRoot: contextParentTaskRoot, projectionPath: 'team/projection.json' }), /must reference a context ancestor node, not a task/u);
 
   const privateContext = {
     ...standingProjection([standingTask({})]),

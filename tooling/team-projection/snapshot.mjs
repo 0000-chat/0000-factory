@@ -10,7 +10,8 @@ export function buildTeamProjectionSnapshot(projection, source = {}) {
   const contextNodes = new Map();
   for (const node of projection.contextNodes ?? []) {
     const existing = contextNodes.get(node.id);
-    if (!existing) contextNodes.set(node.id, node);
+    if (existing) throw new Error(`duplicate context node ID ${node.id}`);
+    contextNodes.set(node.id, node);
   }
 
   const sharedItem = ({ id, title, type, status, owner = null, parent = null, contextOnly = false }) => ({
@@ -28,7 +29,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}) {
     target: null,
     bucket: 'other',
     archived: false,
-    completed: status === 'done',
+    completed: !contextOnly && status === 'done',
     commitment: null,
     plan: null,
     sourcePath: null,
@@ -123,12 +124,12 @@ export function buildTeamProjectionSnapshot(projection, source = {}) {
 
   const taskIds = new Set(items.map(item => item.id));
   for (const node of contextNodes.values()) {
-    if (taskIds.has(node.id)) continue;
+    if (taskIds.has(node.id)) throw new Error(`context node ID ${node.id} collides with a task ID`);
     items.push(sharedItem({
       id: node.id,
       title: node.title,
       type: node.kind,
-      status: 'unknown',
+      status: '',
       parent: node.parentId,
       contextOnly: true,
     }));
