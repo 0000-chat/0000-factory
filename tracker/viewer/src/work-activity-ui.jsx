@@ -211,7 +211,7 @@ function OwnerAvatar({ owner, data }) {
   );
 }
 
-function DescendantOwners({ owners, data, entry }) {
+function DescendantOwners({ owners, data, entry, assignment = false }) {
   const ids = owners.slice(0, 4);
   const overflow = Math.max(0, owners.length - ids.length);
   const names = owners.map(owner => ownerDetails(owner, data));
@@ -237,7 +237,7 @@ function DescendantOwners({ owners, data, entry }) {
         <ul>{names.map(person => (
           <li key={person.owner}>
             <OwnerAvatar owner={person.owner} data={data} />
-            <PersonLink value={person.owner} name={person.displayName} data={data} className="work-owner-popover-link" />
+            <PersonLink value={person.owner} name={person.displayName} data={data} assignment={assignment} className="work-owner-popover-link" />
           </li>
         ))}</ul>
       </PopoverContent>
@@ -245,8 +245,8 @@ function DescendantOwners({ owners, data, entry }) {
   );
 }
 
-/** @param {{ item: import('./snapshot').TrackerItem, data: import('./snapshot').TrackerSnapshot, entry: import('./work-activity-types').WorkProjectionEntry, collapsed: boolean, showName?: boolean, size?: 'xs'|'sm'|'md'|'lg'|number }} props */
-export function WorkOwnership({ item, data, entry, collapsed, showName = true, size = 'sm' }) {
+/** @param {{ item: import('./snapshot').TrackerItem, data: import('./snapshot').TrackerSnapshot, entry: import('./work-activity-types').WorkProjectionEntry, collapsed: boolean, showName?: boolean, size?: 'xs'|'sm'|'md'|'lg'|number, assignment?: boolean }} props */
+export function WorkOwnership({ item, data, entry, collapsed, showName = true, size = 'sm', assignment = false }) {
   const owner = item?.owner ?? entry?.owner;
   const ownerName = item?.ownerName ?? entry?.ownerName;
   const directOwner = owner && owner !== 'unassigned' ? ownerDetails(owner, data) : null;
@@ -260,9 +260,9 @@ export function WorkOwnership({ item, data, entry, collapsed, showName = true, s
   return (
     <span className="work-ownership" data-testid={`work-ownership-${item.id}`}>
       {owner && owner !== 'unassigned'
-        ? <span className="work-owner-dri"><PersonLink value={owner} name={ownerName} data={data} avatar className={`work-owner-link ${ownerSizeClass}${directOwner?.person && !showName ? ' profile-avatar-only' : ''}`}>{compactOwnerLabel}</PersonLink></span>
+        ? <span className="work-owner-dri"><PersonLink value={owner} name={ownerName} data={data} avatar assignment={assignment} className={`work-owner-link ${ownerSizeClass}${directOwner?.person && !showName ? ' profile-avatar-only' : ''}`}>{compactOwnerLabel}</PersonLink></span>
         : <span className="work-owner-unassigned">Unassigned</span>}
-      {descendantOwners.length ? <DescendantOwners owners={descendantOwners} data={data} entry={entry} /> : null}
+      {descendantOwners.length ? <DescendantOwners owners={descendantOwners} data={data} entry={entry} assignment={assignment} /> : null}
     </span>
   );
 }

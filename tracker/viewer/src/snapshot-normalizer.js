@@ -252,6 +252,7 @@ export function normalizeData(payload) {
     const item = {
       ...raw,
       id: String(raw?.id ?? ''),
+      referenceCode: safeText(raw?.referenceCode),
       title: String(raw?.title ?? raw?.id ?? 'Untitled work'),
       childIds: Array.isArray(raw?.childIds) ? raw.childIds.map(String) : [],
       dependsOn: Array.isArray(raw?.dependsOn) ? raw.dependsOn.map(String) : [],

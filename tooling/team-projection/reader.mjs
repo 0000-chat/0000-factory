@@ -490,6 +490,10 @@ export function readTeamProjection({ dataRoot, projectionPath, linkPolicy } = {}
     : value;
   return Object.freeze({
     projection: Object.freeze(projection),
+    // Keep the validated source shape available to optional companion
+    // consumers. The adapter projection is normalized for the viewer, while
+    // the companion binds to the exact standing projection contract.
+    rawProjection: value.kind === 'standing-team-projection' ? Object.freeze(value) : null,
     path: projectionPath,
     digest: createHash('sha256').update(artifact.bytes).digest('hex'),
     bytes: artifact.bytes.byteLength,

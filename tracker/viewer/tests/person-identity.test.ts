@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  avatarAssetPath,
   normalizePersonIdentity,
   resolvePerson,
   segmentPersonMentions,
@@ -16,6 +17,13 @@ const fixturePerson1 = {
 };
 
 describe('person identity resolution', () => {
+  test('maps only local avatar basenames to public assets', () => {
+    expect(avatarAssetPath('fixture-alpha.png')).toBe('/avatars/fixture-alpha.png');
+    expect(avatarAssetPath('../private.png')).toBeNull();
+    expect(avatarAssetPath('/tmp/private.png')).toBeNull();
+    expect(avatarAssetPath('https://example.test/person.png')).toBeNull();
+  });
+
   test('normalizes stable keys without erasing punctuation', () => {
     expect(normalizePersonIdentity('  @FIXTURE-ALPHA.PERSON  ')).toBe('fixture-alpha.person');
     expect(normalizePersonIdentity('fixtureunknown')).toBe('fixtureunknown');

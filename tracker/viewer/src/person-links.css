@@ -31,6 +31,14 @@
   white-space: normal;
 }
 
+.person-link-assigned {
+  flex: 0 0 auto;
+  color: var(--primary);
+  font-size: 0.64rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
 .person-link-avatar,
 .person-pill-avatar {
   flex: 0 0 auto;

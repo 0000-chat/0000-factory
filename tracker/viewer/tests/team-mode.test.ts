@@ -69,3 +69,17 @@ test('an older snapshot without a layout marker remains private-mode data', () =
   const data = normalizeTrackerSnapshot({ source: { commit: 'private-commit' }, items: [] });
   assert.equal(isTeamProjection(data), false);
 });
+
+test('uses the safe companion directory for names and local avatar assets', () => {
+  const data = projection([item('task-a', 'person-1')]);
+  const profiles = projectedTeamProfiles(data.items, [
+    { id: 'person-1', displayName: 'Synthetic Shared Person', avatar: 'person-1.png' },
+    { id: 'person-2', displayName: 'Synthetic No Work Person', avatar: 'person-2.webp' },
+    { id: 'person-3', displayName: 'Synthetic Unsafe Asset', avatar: '../private.png' },
+  ]);
+  assert.deepEqual(profiles.map(profile => ({ id: profile.id, name: profile.name, avatarUrl: profile.avatarUrl })), [
+    { id: 'person-2', name: 'Synthetic No Work Person', avatarUrl: '/avatars/person-2.webp' },
+    { id: 'person-1', name: 'Synthetic Shared Person', avatarUrl: '/avatars/person-1.png' },
+    { id: 'person-3', name: 'Synthetic Unsafe Asset', avatarUrl: null },
+  ]);
+});

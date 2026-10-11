@@ -15,6 +15,7 @@ import { readTeamProjection, TeamProjectionInputError } from '../tooling/team-pr
 import { buildTeamProjectionSnapshot } from '../tooling/team-projection/snapshot.mjs';
 import { buildTeamProjectionPlanningArchive } from '../tooling/team-projection/presentation.mjs';
 import { parsePlanningArchive } from '../tooling/planning/archive.mjs';
+import { taskCodeForId } from '../tooling/tracker/task-codes.mjs';
 import { buildSnapshot } from '../tracker/viewer/tooling/build.mjs';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
@@ -142,12 +143,18 @@ test('team settings use a strict projection path and disable controls', () => {
   const instance = teamSettings();
   assert.equal(instance.data.layout, 'team-projection-v1');
   assert.equal(instance.data.projectionPath, 'team/projection.json');
+  assert.equal(instance.data.companionPath, null);
   assert.deepEqual(instance.data.projectionLinkPolicy, { allowedEvidenceHosts: ['example.com'], forbiddenGitHubRepositories: [] });
+  const companion = teamSettings({ data: { ...instance.data, companionPath: 'team/companion.json' } });
+  assert.equal(companion.data.companionPath, 'team/companion.json');
   assert.equal(instance.publish.kind, 'disabled');
   assert.throws(() => teamSettings({ publish: { kind: 'github-app' } }), /disabled publishing/);
   assert.throws(() => teamSettings({ access: { kind: 'ready', teamDomain: 'https://team.fixture.test', audience: 'team', readerEmails: ['reader@fixture.test'], service: { kind: 'enabled', clientId: 'svc' } } }), /disabled Access service/);
   assert.throws(() => teamSettings({ data: { folderPath: '', layout: 'team-projection-v1', projectionPath: '../private.json', evidence: { kind: 'none' } } }), /projectionPath/);
   assert.throws(() => teamSettings({ data: { folderPath: '', layout: 'team-projection-v1', projectionPath: 'team/%2e%2e/private.json', evidence: { kind: 'none' } } }), /projectionPath/);
+  for (const companionPath of ['../private.json', 'team/%2e%2e/private.json', '/absolute.json', 'team//companion.json']) {
+    assert.throws(() => teamSettings({ data: { ...instance.data, companionPath } }), /companionPath/);
+  }
   assert.throws(() => teamSettings({ data: { folderPath: '', layout: 'team-projection-v1', projectionPath: 'team/projection.json', evidence: { kind: 'grok-bot-v1' } } }), /must not load evidence/);
   assert.throws(() => teamSettings({ data: { folderPath: '', layout: 'team-projection-v1', projectionPath: 'team/projection.json', evidence: { kind: 'none' }, projectionLinkPolicy: { allowedEvidenceHosts: ['127.0.0.1'], forbiddenGitHubRepositories: [] } } }), /public DNS evidence host/);
   assert.throws(() => teamSettings({ data: { folderPath: '', layout: 'team-projection-v1', projectionPath: 'team/projection.json', evidence: { kind: 'none' }, projectionLinkPolicy: { allowedEvidenceHosts: ['example.com'], forbiddenGitHubRepositories: ['bad repository'] } } }), /invalid format/);
@@ -162,6 +169,8 @@ test('reader accepts only the public projection and adapter returns an empty-can
   assert.equal(snapshot.schemaVersion, 4);
   assert.equal(snapshot.source.layout, 'team-projection-v1');
   assert.equal(snapshot.items.length, 1);
+  assert.equal(snapshot.items[0].referenceCode, taskCodeForId('public-task'));
+  assert.equal(snapshot.items[0].referenceCode, 'T-QQQWCA');
   assert.equal(snapshot.items[0].sections.outcome, 'A public scope');
   assert.equal(snapshot.items[0].updatedAt, null);
   assert.equal(snapshot.items[0].completedAt, null);

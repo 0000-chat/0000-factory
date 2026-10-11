@@ -114,6 +114,7 @@ export type GanttContextProps = {
   onAddItem: ((date: Date) => void) | undefined;
   placeholderLength: number;
   timelineData: TimelineData;
+  dailyTickEvery: number;
   ref: RefObject<HTMLDivElement | null> | null;
   scrollToFeature?: (
     feature: GanttFeature,
@@ -350,6 +351,7 @@ const GanttContext = createContext<GanttContextProps>({
   onAddItem: undefined,
   placeholderLength: 2,
   timelineData: [],
+  dailyTickEvery: 1,
   ref: null,
   scrollToFeature: undefined,
 });
@@ -406,6 +408,9 @@ export const GanttContentHeader: FC<GanttContentHeaderProps> = ({
 
 const DailyHeader: FC = () => {
   const gantt = useContext(GanttContext);
+  const timelineStartDate = getTimelineStartDate(gantt.timelineData);
+  const dailyColumnWidth = (gantt.columnWidth * gantt.zoom) / 100;
+  const showWeekday = gantt.dailyTickEvery === 1 && dailyColumnWidth >= 42;
 
   return gantt.timelineData.map((year) =>
     year.quarters
@@ -414,19 +419,15 @@ const DailyHeader: FC = () => {
         <div className="relative flex flex-col" key={`${year.year}-${month.month ?? index}`}>
           <GanttContentHeader
             columns={month.days}
-            renderHeaderItem={(item: number) => (
-              <div className="gantt-day-cell">
-                <p>
-                  {format(addDays(new Date(year.year, month.month ?? index, 1), item), "d")}
-                </p>
-                <p className="text-muted-foreground">
-                  {format(
-                    addDays(new Date(year.year, month.month ?? index, 1), item),
-                    "EEEEE"
-                  )}
-                </p>
-              </div>
-            )}
+            renderHeaderItem={(item: number) => {
+              const date = addDays(new Date(year.year, month.month ?? index, 1), item);
+              const dayIndex = differenceInDays(date, timelineStartDate);
+              const showTick = dayIndex % gantt.dailyTickEvery === 0;
+              return <div className="gantt-day-cell" data-tick-visible={showTick ? "true" : "false"}>
+                {showTick ? <p>{format(date, "d")}</p> : null}
+                {showTick && showWeekday ? <p className="text-muted-foreground">{format(date, "EEEEE")}</p> : null}
+              </div>;
+            }}
             title={format(new Date(year.year, month.month ?? index, 1), "MMMM yyyy")}
           />
           <GanttColumns
@@ -581,14 +582,22 @@ export const GanttSidebarItem: FC<GanttSidebarItemProps> = ({
   );
 };
 
-export const GanttSidebarHeader: FC = () => (
+export type GanttSidebarHeaderProps = {
+  primaryLabel?: string;
+  secondaryLabel?: string;
+};
+
+export const GanttSidebarHeader: FC<GanttSidebarHeaderProps> = ({
+  primaryLabel = "Issues",
+  secondaryLabel = "Duration",
+}) => (
   <div
     className="sticky top-0 z-10 flex shrink-0 items-end justify-between gap-2.5 border-border/50 border-b bg-backdrop/90 p-2.5 font-medium text-muted-foreground text-xs backdrop-blur-sm"
     style={{ height: "var(--gantt-header-height)" }}
   >
     {/* <Checkbox className="shrink-0" /> */}
-    <p className="flex-1 truncate text-left">Issues</p>
-    <p className="shrink-0">Duration</p>
+    <p className="flex-1 truncate text-left">{primaryLabel}</p>
+    <p className="shrink-0">{secondaryLabel}</p>
   </div>
 );
 
@@ -617,11 +626,15 @@ export const GanttSidebarGroup: FC<GanttSidebarGroupProps> = ({
 export type GanttSidebarProps = {
   children: ReactNode;
   className?: string;
+  primaryHeader?: string;
+  secondaryHeader?: string;
 };
 
 export const GanttSidebar: FC<GanttSidebarProps> = ({
   children,
   className,
+  primaryHeader,
+  secondaryHeader,
 }) => (
   <div
     className={cn(
@@ -630,7 +643,7 @@ export const GanttSidebar: FC<GanttSidebarProps> = ({
     )}
     data-roadmap-ui="gantt-sidebar"
   >
-    <GanttSidebarHeader />
+    <GanttSidebarHeader primaryLabel={primaryHeader} secondaryLabel={secondaryHeader} />
     <div className="space-y-4">{children}</div>
   </div>
 );
@@ -1370,6 +1383,7 @@ export type GanttProviderProps = {
   range?: Range;
   zoom?: number;
   rowHeight?: number;
+  dailyTickEvery?: number;
   dateRange?: { startAt: Date; endAt: Date } | null;
   onAddItem?: (date: Date) => void;
   children: ReactNode;
@@ -1380,6 +1394,7 @@ export const GanttProvider: FC<GanttProviderProps> = ({
   zoom = 100,
   range = "monthly",
   rowHeight: requestedRowHeight = 36,
+  dailyTickEvery: requestedDailyTickEvery = 1,
   dateRange,
   onAddItem,
   children,
@@ -1404,6 +1419,9 @@ export const GanttProvider: FC<GanttProviderProps> = ({
   const rowHeight = Number.isFinite(requestedRowHeight) && requestedRowHeight > 0
     ? requestedRowHeight
     : 36;
+  const dailyTickEvery = Number.isFinite(requestedDailyTickEvery) && requestedDailyTickEvery > 0
+    ? Math.max(1, Math.trunc(requestedDailyTickEvery))
+    : 1;
   let columnWidth = 50;
 
   if (range === "monthly") {
@@ -1447,11 +1465,10 @@ export const GanttProvider: FC<GanttProviderProps> = ({
       const sidebarElement = scrollRef.current?.querySelector(
         '[data-roadmap-ui="gantt-sidebar"]'
       );
-      const newWidth = sidebarElement ? 300 : 0;
+      const newWidth = sidebarElement ? sidebarElement.getBoundingClientRect().width : 0;
       setSidebarWidth(newWidth);
     };
 
-    // Update immediately
     updateSidebarWidth();
 
     // Also update on resize or when children change
@@ -1462,9 +1479,11 @@ export const GanttProvider: FC<GanttProviderProps> = ({
         subtree: true,
       });
     }
+    window.addEventListener("resize", updateSidebarWidth);
 
     return () => {
       observer.disconnect();
+      window.removeEventListener("resize", updateSidebarWidth);
     };
   }, []);
 
@@ -1573,6 +1592,7 @@ export const GanttProvider: FC<GanttProviderProps> = ({
         rowHeight,
         onAddItem,
         placeholderLength: 2,
+        dailyTickEvery,
         timelineData,
         ref: scrollRef,
       });
@@ -1607,6 +1627,7 @@ export const GanttProvider: FC<GanttProviderProps> = ({
         onAddItem,
         timelineData,
         placeholderLength: 2,
+        dailyTickEvery,
         ref: scrollRef,
         scrollToFeature,
       }}

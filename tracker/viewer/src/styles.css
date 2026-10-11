@@ -130,6 +130,11 @@ button:focus-visible, [role="treeitem"]:focus-visible, [data-slot="select-trigge
 .app-root { display: flex; min-height: 100vh; }
 .app-sidebar { position: sticky; top: 0; display: flex; flex: 0 0 204px; flex-direction: column; gap: 22px; width: 204px; height: 100vh; padding: 24px 14px 16px; border-right: 1px solid var(--border); background: var(--card); }
 .brand-lockup { display: flex; align-items: center; align-self: flex-start; gap: 10px; padding: 0 6px; color: var(--foreground); text-decoration: none; }
+.sidebar-identity { display: grid; gap: 3px; margin-top: auto; padding: 10px 8px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-quiet); }
+.sidebar-identity strong { overflow: hidden; font-size: 0.76rem; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-identity small, .sidebar-identity-label { color: var(--muted-foreground); font-size: 0.64rem; line-height: 1.35; }
+.sidebar-identity-label { font-weight: 750; letter-spacing: 0.05em; text-transform: uppercase; }
+.sidebar-identity-unavailable { border-color: color-mix(in srgb, var(--status-at-risk) 35%, var(--border)); }
 .brand-mark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 11px; background: var(--primary); color: var(--primary-foreground); font-size: 0.78rem; font-weight: 850; letter-spacing: -0.07em; }
 .brand-name { font-size: 1.12rem; font-weight: 780; letter-spacing: -0.045em; }
 .app-main { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 100vh; }
@@ -378,6 +383,7 @@ button:focus-visible, [role="treeitem"]:focus-visible, [data-slot="select-trigge
 .calendar-event-select:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .calendar-event-kind { overflow: hidden; color: var(--muted-foreground); font-size: 0.55rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-event-assignee { display: inline-flex; flex: 0 0 18px; width: 18px; height: 18px; align-items: center; justify-content: center; overflow: hidden; }
+.calendar-event-assignee:has(.person-link-assigned) { flex-basis: 56px; width: 56px; justify-content: flex-start; overflow: visible; }
 .calendar-release-targets, .calendar-undated, .kanban-unmapped { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
 .calendar-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .calendar-section-heading h3 { margin: 0; font-size: 0.84rem; font-weight: 760; }
@@ -403,6 +409,7 @@ button:focus-visible, [role="treeitem"]:focus-visible, [data-slot="select-trigge
 .kanban-task { display: grid; gap: 7px; width: 100%; min-height: 86px; padding: 11px 11px 5px; border: 0; background: transparent; cursor: pointer; text-align: left; }
 .kanban-task:hover, .kanban-task.is-selected { background: var(--accent); }
 .kanban-task-title { color: var(--foreground); font-size: 0.76rem; font-weight: 690; line-height: 1.35; }
+.kanban-task-status { color: var(--muted-foreground); font-size: 0.61rem; font-weight: 700; text-transform: capitalize; }
 .kanban-task-assignee { display: flex; min-width: 0; padding: 0 11px 10px; color: var(--muted-foreground); font-size: 0.66rem; }
 .kanban-commitment { justify-self: start; padding: 3px 6px; border-radius: 99px; background: var(--success-subtle); color: var(--success); font-size: 0.59rem; font-weight: 760; }
 .kanban-commitment-proposed { background: var(--muted); color: var(--muted-foreground); }

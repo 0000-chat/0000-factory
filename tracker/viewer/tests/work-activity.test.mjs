@@ -269,6 +269,56 @@ test('separately approved draft schedules count as planned while missing endpoin
   assert.equal(projection.get('forecast-only').own.state, 'unknown');
 });
 
+test('shared scheduled rows keep approved dates when commitment metadata is absent', () => {
+  const projection = buildWorkProjection({
+    items: [item('shared-scheduled', {
+      commitment: null,
+      status: 'active',
+      owner: 'fixture-owner',
+      ownerName: 'Fixture Owner',
+      schedule: { approved: true, plannedStart: '2026-10-10', plannedEnd: '2026-10-12' },
+    })],
+    evidence: [],
+    now: '2026-10-09',
+  });
+
+  const entry = projection.get('shared-scheduled');
+  assert.equal(entry.status, 'active');
+  assert.equal(entry.owner, 'fixture-owner');
+  assert.equal(entry.ownerName, 'Fixture Owner');
+  assert.equal(entry.timeline.plannedStart, '2026-10-10');
+  assert.equal(entry.timeline.plannedDue, '2026-10-12');
+  assert.equal(entry.timeline.partial, false);
+});
+
+test('structural context keeps neutral metadata while child schedules and owners roll up', () => {
+  const projection = buildWorkProjection({
+    items: [
+      item('context-parent', {
+        status: '',
+        owner: null,
+        contextOnly: true,
+        childIds: ['shared-child'],
+      }),
+      item('shared-child', {
+        parent: 'context-parent',
+        status: 'started',
+        owner: 'fixture-owner',
+        schedule: { approved: true, plannedStart: '2026-10-01', plannedEnd: '2026-10-02' },
+      }),
+    ],
+    evidence: [],
+    now: '2026-09-30',
+  });
+
+  const context = projection.get('context-parent');
+  assert.equal(context.status, '');
+  assert.equal(context.owner, null);
+  assert.deepEqual(context.timeline.plannedStart, '2026-10-01');
+  assert.deepEqual(context.timeline.plannedDue, '2026-10-02');
+  assert.deepEqual(context.descendants.ownerIds, ['fixture-owner']);
+});
+
 test('inferred starts and overdue age use only dated evidence and approved effective due dates', () => {
   const projection = buildWorkProjection({
     items: [

@@ -76,10 +76,10 @@ function scheduleSortValue(item) {
 
 function WorkTable({ items, contextualIds = new Set(), onSelect }) {
   const columns = useMemo(() => [
-    { accessorKey: 'title', header: 'Work', cell: ({ row }) => { const item = row.original; return <span className="work-title-cell"><span>{item.title}</span>{!isAccepted(item) ? <BadgeChip tone={isDraft(item) ? 'slate' : 'amber'}>{commitmentLabel(item)}</BadgeChip> : null}</span>; } },
+    { accessorKey: 'title', header: 'Work', cell: ({ row }) => { const item = row.original; return <span className="work-title-cell">{item.referenceCode ? <code className="work-reference-code">{item.referenceCode}</code> : null}<span>{item.title}</span>{!isAccepted(item) ? <BadgeChip tone={isDraft(item) ? 'slate' : 'amber'}>{commitmentLabel(item)}</BadgeChip> : null}</span>; } },
     { accessorKey: 'status', header: 'Status', sortingAccessor: item => item.status, cell: ({ row }) => humanize(row.original.status) },
     { id: 'health', header: 'Health', sortingAccessor: item => item.health?.state ?? null, cell: ({ row }) => healthLabel(row.original.health?.state) },
-    { id: 'owner', header: 'Owner', sortingAccessor: item => item.ownerName || item.owner || null, cell: ({ row }) => row.original.owner && row.original.owner !== 'unassigned' ? <PersonLink value={row.original.owner} name={row.original.ownerName} avatar className="work-table-owner-link" /> : 'Unassigned' },
+    { id: 'owner', header: 'Owner', sortingAccessor: item => item.ownerName || item.owner || null, cell: ({ row }) => row.original.owner && row.original.owner !== 'unassigned' ? <PersonLink value={row.original.owner} name={row.original.ownerName} avatar assignment className="work-table-owner-link" /> : 'Unassigned' },
     { id: 'progress', header: 'Verified progress', sortingAccessor: item => isAccepted(item) ? progressPercent(item.progress) : null, cell: ({ row }) => <ProgressInline item={row.original} /> },
     { id: 'schedule', header: 'Schedule', sortingAccessor: scheduleSortValue, cell: ({ row }) => <><ScheduleInline item={row.original} />{contextualIds.has(row.original.id) ? <BadgeChip tone="slate">Context</BadgeChip> : null}</> },
     { id: 'children', header: 'Children', sortingAccessor: item => item.childSummary?.total, cell: ({ row }) => row.original.childSummary.total ? `${row.original.childSummary.done}/${row.original.childSummary.total} done` : '—' },

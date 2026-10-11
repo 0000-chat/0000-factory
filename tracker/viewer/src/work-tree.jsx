@@ -196,6 +196,7 @@ function TreeItem({
         </span>
         <div className={`tracker-tree-label ${contextual ? 'tree-contextual' : ''}`}>
           <span className="work-tree-title">
+            {item.referenceCode ? <code className="work-reference-code">{item.referenceCode}</code> : null}
             <strong>{item.title}</strong>
             {!structural && !isAccepted(item) ? <BadgeChip tone={isDraft(item) ? 'slate' : 'amber'} className="tree-planned-chip">{commitmentLabel(item)}</BadgeChip> : null}
           </span>
@@ -205,7 +206,7 @@ function TreeItem({
           </small>
         </div>
         <span className="tree-row-meta">
-          {structural ? null : <WorkOwnership item={item} data={data} entry={entry} collapsed={collapsedForOwnership} showName size="sm" />}
+          {structural ? null : <WorkOwnership item={item} data={data} entry={entry} collapsed={collapsedForOwnership} showName size="sm" assignment />}
           {structural ? null : <BadgeChip className="tree-health-chip" tone={healthTone(item.health?.state)}>{healthLabel(item.health?.state)}</BadgeChip>}
           {structural ? null : progressInline(item)}
           {structural ? null : scheduleInline(item)}

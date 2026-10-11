@@ -28,6 +28,14 @@ disabled. These modes do not request provider credentials or make external
 publish calls. Ready Access and enabled publishing are test-only settings
 created by the synthetic fixture tests.
 
+The optional `model.approverIds` array configures the stable actor aliases
+accepted for Don approval and confirmation records. Values are normalized to
+lowercase actor IDs, must be unique and nonempty, and remain scoped to the
+parsed instance. When omitted, the generic defaults are `don` and `owner`.
+The list changes which identities satisfy the existing exact approval, digest,
+decision-link, and confirmation checks; it does not weaken those checks or
+grant publishing or Access permissions.
+
 Ready Access settings may authorize individual identities with
 `access.readerEmails` and may additionally authorize mailbox domains with the
 optional `access.readerEmailDomains` array. Each configured domain is a
@@ -133,6 +141,34 @@ so public links belong in `evidenceLinks`.
 An empty projection with the all-zero source plan digest is treated as an
 uninitialized setup state: it produces a working empty app and no stale weekly
 episode. A non-empty projection must carry a real source plan digest.
+
+### Optional safe team companion
+
+Team mode may set `data.companionPath` to one additional safe,
+repository-relative JSON file. The path must stay outside `assets/`, contain no
+parent or encoded segments, and point to a regular non-executable file. The
+companion is an authorized display supplement; it does not extend the standing
+projection schema or create a publication channel. Its envelope is
+`kind: "team-safe-companion"`, `schemaVersion: 1`, and contains only:
+
+* `directory` entries with a stable generic `id`, safe `displayName`, and a
+  local avatar basename or `null`;
+* `schedules` entries with a projected `taskId`, an approval-bound
+  `approvedEnd`, and an optional approval-bound `approvedStart`;
+* `taskMetadata` entries with only the safe status, commitment, phase, and
+  health-state enums; and
+* digest, audit, and disabled-publish fields that bind the supplement to the
+  exact projection and approved roster.
+
+The reader validates the companion before use. A projection or roster digest
+mismatch drops schedules and task metadata; a roster mismatch also drops the
+directory, so stale avatars are never staged. A matching companion still must
+agree with each anchored task status and approved end date. Avatar files are
+copied only when their exact basenames are referenced by `directory`; extra,
+missing, executable, symlinked, or path-traversing files fail the input
+boundary. With no companion path, no identity metadata or avatar assets are
+loaded. Companion publication remains disabled and the data root never supplies
+raw evidence, private notes, source links, or full plans.
 
 For tracker-v1, weekly planning archives remain optional, validated
 presentation inputs kept separate from the canonical tracker snapshot. See

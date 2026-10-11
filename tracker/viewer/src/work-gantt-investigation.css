@@ -1,0 +1,246 @@
+.work-gantt-investigation-panel {
+  --work-gantt-investigation-banner-offset: var(--publishing-status-banner-height, 88px);
+  position: sticky;
+  top: var(--work-gantt-investigation-banner-offset);
+  align-self: flex-start;
+  display: flex;
+  min-width: 272px;
+  max-width: 360px;
+  flex: 0 0 336px;
+  flex-direction: column;
+  gap: 0;
+  max-height: calc(100dvh - var(--work-gantt-investigation-banner-offset));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 22px 24px;
+  border-left: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+}
+
+.work-gantt-investigation-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.work-gantt-investigation-heading {
+  min-width: 0;
+}
+
+.work-gantt-investigation-eyebrow {
+  margin: 0 0 5px;
+  color: var(--muted-foreground);
+  font-size: 0.66rem;
+  font-weight: 780;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.work-gantt-investigation-heading h2 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 1.05rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.work-gantt-investigation-close {
+  margin: -5px -8px 0 0;
+  color: var(--muted-foreground);
+}
+
+.work-gantt-investigation-owner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  margin-top: 17px;
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+}
+
+.work-gantt-investigation-owner-link {
+  color: var(--foreground);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.work-gantt-investigation-owner-link .person-link-label {
+  max-width: 156px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-gantt-investigation-owner-unassigned {
+  color: var(--muted-foreground);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.work-gantt-investigation-owner-context {
+  color: var(--muted-foreground);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.work-gantt-investigation-status {
+  margin: 13px 0 16px;
+}
+
+.work-gantt-investigation-status .tracker-badge {
+  font-size: 0.68rem;
+}
+
+.work-gantt-investigation-fields {
+  display: grid;
+  gap: 15px;
+  margin: 0;
+}
+
+.work-gantt-investigation-field {
+  min-width: 0;
+}
+
+.work-gantt-investigation-field dt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 4px;
+  color: var(--foreground);
+  font-size: 0.73rem;
+  font-weight: 720;
+}
+
+.work-gantt-investigation-field dt svg {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+}
+
+.work-gantt-investigation-field dd {
+  min-width: 0;
+  margin: 0 0 0 22px;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.work-gantt-investigation-field code {
+  font-size: 0.68rem;
+  overflow-wrap: anywhere;
+}
+
+.work-gantt-investigation-links {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.work-gantt-investigation-links button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.work-gantt-investigation-activity-value {
+  display: grid;
+  gap: 3px;
+}
+
+.work-gantt-investigation-activity-value small,
+.work-gantt-investigation-activity-value a {
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.work-gantt-investigation-activity-value a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.work-gantt-investigation-divider {
+  height: 1px;
+  margin: 19px 0 18px;
+  background: var(--border);
+}
+
+.work-gantt-investigation-outcome h3 {
+  margin: 0 0 8px;
+  color: var(--foreground);
+  font-size: 0.77rem;
+  font-weight: 760;
+}
+
+.work-gantt-investigation-outcome .markdown,
+.work-gantt-investigation-outcome p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.work-gantt-investigation-outcome .markdown > :first-child {
+  margin-top: 0;
+}
+
+.work-gantt-investigation-outcome .markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.work-gantt-investigation-empty {
+  color: var(--muted-foreground);
+}
+
+.work-gantt-investigation-warning {
+  display: grid;
+  gap: 3px;
+  margin: 17px 0 0;
+  padding: 10px 11px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--surface-quiet);
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.work-gantt-investigation-warning strong {
+  color: var(--foreground);
+  font-size: 0.7rem;
+}
+
+.work-gantt-investigation-actions {
+  display: flex;
+  margin-top: 20px;
+}
+
+@media (max-width: 760px) {
+  .work-gantt-investigation-panel {
+    position: static;
+    min-width: 0;
+    max-width: none;
+    flex-basis: auto;
+    max-height: none;
+    align-self: stretch;
+    overflow-y: visible;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+    padding: 16px 17px 20px;
+  }
+}

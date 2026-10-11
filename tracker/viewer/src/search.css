@@ -108,6 +108,16 @@
   white-space: nowrap;
 }
 
+.global-search-result-code,
+.work-reference-code {
+  color: var(--muted-foreground);
+  font: 0.66rem ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.global-search-result-code { line-height: 1.25; }
+
 .global-search-result-subtitle {
   overflow: hidden;
   color: var(--muted-foreground);

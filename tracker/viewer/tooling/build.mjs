@@ -21,6 +21,7 @@ import { repositoryPath, selectedDataPaths } from '../../../tooling/instance/pat
 import { DataSourceError, SOURCE_READ_LIMITS, validateDataSource } from '../../../tooling/tracker/source-validation.mjs';
 import { emptyPlanningArchive, loadPlanningArchive } from '../../../tooling/planning/archive.mjs';
 import { readTeamProjection } from '../../../tooling/team-projection/reader.mjs';
+import { readTeamCompanion } from '../../../tooling/team-projection/companion.mjs';
 import { buildTeamProjectionSnapshot } from '../../../tooling/team-projection/snapshot.mjs';
 import { buildTeamProjectionPlanningArchive } from '../../../tooling/team-projection/presentation.mjs';
 import { buildTrackerData, parseOwnerNames } from './data.mjs';
@@ -413,6 +414,11 @@ function loadTeamProjectionInputs({ engine, data, settingsPath, outputPath, load
     projectionPath: instance.data.projectionPath,
     linkPolicy: instance.data.projectionLinkPolicy,
   });
+  const companion = readTeamCompanion({
+    dataRoot: selectedRoot,
+    companionPath: instance.data.companionPath,
+    projection: selectedProjection.rawProjection,
+  });
   const dataMeta = dataGitMetadata(data);
   const engineMeta = engineGitMetadata(engine);
   return {
@@ -423,12 +429,16 @@ function loadTeamProjectionInputs({ engine, data, settingsPath, outputPath, load
     configDigest: loaded.configDigest,
     assetPath,
     instance,
-    files: new Map([[instance.data.projectionPath, '']]),
+    files: new Map([
+      [instance.data.projectionPath, ''],
+      ...(instance.data.companionPath ? [[instance.data.companionPath, '']] : []),
+    ]),
     records: null,
     validated: { records: null, registry: null, guide: '', teamProfiles: [] },
     projection: selectedProjection.projection,
     projectionDigest: selectedProjection.digest,
     projectionBytes: selectedProjection.bytes,
+    companion,
     planningArchive: instance.features.weeklyPlanning
       ? buildTeamProjectionPlanningArchive(selectedProjection.projection)
       : emptyPlanningArchive(),
@@ -439,7 +449,12 @@ function loadTeamProjectionInputs({ engine, data, settingsPath, outputPath, load
       canonicalPath: instance.data.projectionPath,
       repositoryPath: repositoryPath(instance, instance.data.projectionPath),
       digest: selectedProjection.digest,
-    }],
+    }, ...(companion ? [{
+      role: 'team-companion',
+      canonicalPath: instance.data.companionPath,
+      repositoryPath: repositoryPath(instance, instance.data.companionPath),
+      digest: companion.fileDigest,
+    }] : [])],
     settingsDigest: loaded.configDigest,
     assetDigest,
     dataMeta,
@@ -562,6 +577,16 @@ function assertBuildInputsUnchanged(inputs) {
       linkPolicy: inputs.instance.data.projectionLinkPolicy,
     });
     if (currentProjection.digest !== inputs.projectionDigest) throw new Error('team projection input changed during build');
+    if (inputs.instance.data.companionPath) {
+      const currentCompanion = readTeamCompanion({
+        dataRoot: selectedRoot,
+        companionPath: inputs.instance.data.companionPath,
+        projection: currentProjection.rawProjection,
+      });
+      if (!currentCompanion || currentCompanion.fileDigest !== inputs.companion?.fileDigest) {
+        throw new Error('team companion input changed during build');
+      }
+    }
     if (digestBytes(readFileSync(inputs.instancePath)) !== inputs.settingsDigest) {
       throw new Error('settings changed during build');
     }
@@ -729,6 +754,7 @@ function renderStagedOutput(inputs, outputPath, data, provenance) {
     provenance: {
       ...provenance,
       data,
+      avatarNames: inputs.companion?.directory?.map(entry => entry.avatar).filter(Boolean) ?? [],
       ...(inputs.instance.features.weeklyPlanning ? { planningArchive: inputs.planningArchive } : {}),
     },
   });
@@ -788,10 +814,11 @@ export function buildSnapshot({ engineRoot, instancePath, dataRepo, output, buil
     ...inputs.dataMeta,
     builtAt,
     projectionDigest: inputs.projectionDigest ?? null,
+    approverIds: inputs.instance.model.approverIds,
     ownerNames: parseOwnerNames(inputs.validated.guide),
   };
   let data = inputs.instance.data.layout === 'team-projection-v1'
-    ? buildTeamProjectionSnapshot(inputs.projection, sourceMeta)
+    ? buildTeamProjectionSnapshot(inputs.projection, sourceMeta, inputs.companion)
     : buildTrackerData(inputs.records, sourceMeta);
   if (inputs.instance.data.layout !== 'team-projection-v1') data.team = inputs.validated.teamProfiles;
   data = addContentRevision(data);

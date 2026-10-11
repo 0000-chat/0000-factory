@@ -145,7 +145,7 @@ export function ApprovalSummary({ item }) {
 /** @param {{ item: import('./snapshot').TrackerItem }} props */
 export function ItemChips({ item }) {
   const stageTone = isAccepted(item) ? 'green' : isDraft(item) ? 'slate' : 'amber';
-  return <div className="item-chips"><Pill variant="outline" className={`tracker-pill tracker-pill-${statusTone(item.status)}`}>{humanize(item.status)}</Pill><Pill variant="outline" className={`tracker-pill tracker-pill-${stageTone}`}>{commitmentLabel(item)}</Pill>{item.phase ? <BadgeChip>{humanize(item.phase)}</BadgeChip> : null}{item.owner && item.owner !== 'unassigned' ? <span className="item-assignee"><PersonLink value={item.owner} name={item.ownerName} avatar pill className="item-assignee-link" /></span> : <BadgeChip>Unassigned</BadgeChip>}<Pill variant="outline" className={`tracker-pill tracker-pill-${healthTone(item.health?.state)}`}>{healthLabel(item.health?.state)}</Pill></div>;
+  return <div className="item-chips"><Pill variant="outline" className={`tracker-pill tracker-pill-${statusTone(item.status)}`}>{humanize(item.status)}</Pill><Pill variant="outline" className={`tracker-pill tracker-pill-${stageTone}`}>{commitmentLabel(item)}</Pill>{item.phase ? <BadgeChip>{humanize(item.phase)}</BadgeChip> : null}{item.owner && item.owner !== 'unassigned' ? <span className="item-assignee"><PersonLink value={item.owner} name={item.ownerName} avatar pill assignment className="item-assignee-link" /></span> : <BadgeChip>Unassigned</BadgeChip>}<Pill variant="outline" className={`tracker-pill tracker-pill-${healthTone(item.health?.state)}`}>{healthLabel(item.health?.state)}</Pill></div>;
 }
 
 /** @param {import('./features/contracts').SnapshotFooterProps} props */
