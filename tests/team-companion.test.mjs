@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 
 import { readTeamCompanion, validateTeamCompanion } from '../tooling/team-projection/companion.mjs';
 import { buildTeamProjectionSnapshot } from '../tooling/team-projection/snapshot.mjs';
+import { buildWorkProjection } from '../tracker/viewer/src/work-activity.mjs';
+import { buildWorkGanttModel } from '../tracker/viewer/src/work-gantt-model.mjs';
 
 const CHECK_ROOT = process.env.TMPDIR && process.env.TMPDIR !== '/tmp'
   ? process.env.TMPDIR
@@ -73,7 +75,7 @@ function projection() {
 test('companion metadata drives safe identity and approved endpoint rendering', () => {
   const value = companion();
   assert.equal(validateTeamCompanion(value).valid, true);
-  const snapshot = buildTeamProjectionSnapshot(projection(), {}, value);
+  const snapshot = buildTeamProjectionSnapshot(projection(), {}, { ...value, staleSchedule: false });
   const [item] = snapshot.items;
   assert.equal(item.ownerName, 'Synthetic Person');
   assert.equal(item.schedule.plannedStart, '2026-10-01');
@@ -83,6 +85,73 @@ test('companion metadata drives safe identity and approved endpoint rendering', 
   assert.equal(item.phase, 'build');
   assert.equal(item.health.state, 'on-track');
   assert.equal(snapshot.team[0].avatarUrl, '/avatars/person-1.webp');
+});
+
+test('a valid companion schedule allowlist clears omitted baseline deadlines', () => {
+  const base = projection();
+  const value = companion();
+  const boundProjection = {
+    kind: 'standing-team-projection',
+    ...base,
+    policyRevision: value.policyRevision,
+    audit: { rosterDigest: value.audit.rosterDigest },
+    tasks: [
+      ...base.tasks.map(task => ({ ...task, status: 'active' })),
+      { ...base.tasks[0], taskId: 'task-end-only-one', title: 'End-only one', status: 'active', approvedDate: '2026-10-04' },
+      { ...base.tasks[0], taskId: 'task-end-only-two', title: 'End-only two', status: 'active', approvedDate: '2026-10-05' },
+    ],
+  };
+  const allowlisted = {
+    ...value,
+    projectionDigest: digest(boundProjection),
+    schedules: [
+      { taskId: 'task-end-only-one', approvedStart: null, approvedEnd: '2026-10-04' },
+      { taskId: 'task-end-only-two', approvedStart: null, approvedEnd: '2026-10-05' },
+    ],
+    taskMetadata: [],
+  };
+  delete allowlisted.companionDigest;
+  allowlisted.companionDigest = digest(allowlisted);
+  const path = join(CHECK_ROOT, 'team-safe-companion-allowlist.json');
+  mkdirSync(CHECK_ROOT, { recursive: true });
+  writeFileSync(path, `${JSON.stringify(allowlisted)}\n`, { mode: 0o600 });
+  try {
+    const read = readTeamCompanion({ dataRoot: CHECK_ROOT, companionPath: 'team-safe-companion-allowlist.json', projection: boundProjection });
+    assert.equal(read.staleSchedule, false);
+    const snapshot = buildTeamProjectionSnapshot(boundProjection, {}, read);
+    const omitted = snapshot.items.find(item => item.id === 'task-safe');
+    assert.equal(omitted.sections.outcome, 'Public scope');
+    assert.equal(omitted.target, null);
+    assert.equal(omitted.teamProjection.approvedDate, null);
+    assert.equal(omitted.teamProjection.approvedStart, null);
+    assert.equal(omitted.teamProjection.approvedEnd, null);
+    assert.equal(omitted.schedule.plannedStart, null);
+    assert.equal(omitted.schedule.plannedEnd, null);
+    assert.equal(omitted.schedule.approved, false);
+    assert.equal(omitted.schedule.provisional, true);
+    const workProjection = buildWorkProjection({ items: snapshot.items, evidence: snapshot.activityEvidence, now: '2026-10-12' });
+    const gantt = buildWorkGanttModel({
+      projection: workProjection,
+      visibleIds: new Set(workProjection.keys()),
+      expandedIds: new Set(),
+    });
+    assert.equal(gantt.rows.find(row => row.id === 'task-safe').marks.some(mark => mark.sourceKind === 'approved'), false);
+    for (const [taskId, end] of [['task-end-only-one', '2026-10-04'], ['task-end-only-two', '2026-10-05']]) {
+      const item = snapshot.items.find(candidate => candidate.id === taskId);
+      assert.equal(item.target, end);
+      assert.equal(item.teamProjection.approvedDate, end);
+      assert.equal(item.teamProjection.approvedStart, null);
+      assert.equal(item.teamProjection.approvedEnd, end);
+      assert.equal(item.schedule.plannedStart, null);
+      assert.equal(item.schedule.plannedEnd, end);
+      assert.equal(item.schedule.approved, true);
+      assert.equal(item.schedule.provisional, false);
+      const approvedMark = gantt.rows.find(row => row.id === taskId).marks.find(mark => mark.sourceKind === 'approved');
+      assert.deepEqual([approvedMark?.startDay, approvedMark?.endDay, approvedMark?.point], [end, end, true]);
+    }
+  } finally {
+    unlinkSync(path);
+  }
 });
 
 test('companion rejects private fields and avatar traversal', () => {

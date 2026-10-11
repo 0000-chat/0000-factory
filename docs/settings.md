@@ -163,12 +163,16 @@ projection schema or create a publication channel. Its envelope is
 The reader validates the companion before use. A projection or roster digest
 mismatch drops schedules and task metadata; a roster mismatch also drops the
 directory, so stale avatars are never staged. A matching companion still must
-agree with each anchored task status and approved end date. Avatar files are
-copied only when their exact basenames are referenced by `directory`; extra,
-missing, executable, symlinked, or path-traversing files fail the input
-boundary. With no companion path, no identity metadata or avatar assets are
-loaded. Companion publication remains disabled and the data root never supplies
-raw evidence, private notes, source links, or full plans.
+agree with each anchored task status and approved end date. For a valid,
+projection-bound companion, `schedules` is the authoritative allowlist: an
+omitted projected task has no approved start, end, target, or approved-date
+marker inherited from the standing projection, while listed entries supply
+those approved endpoints. With no companion path, the standing projection's
+existing approved dates retain their legacy behavior. Avatar files are copied
+only when their exact basenames are referenced by `directory`; extra, missing,
+executable, symlinked, or path-traversing files fail the input boundary.
+Companion publication remains disabled and the data root never supplies raw
+evidence, private notes, source links, or full plans.
 
 For tracker-v1, weekly planning archives remain optional, validated
 presentation inputs kept separate from the canonical tracker snapshot. See
