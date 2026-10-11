@@ -51,9 +51,42 @@ function updateFor(item) {
     .map(update => ({ ...update, itemId: item.id, itemTitle: item.title, activityKind: 'tracker-update' }));
 }
 
-function latestActivity(profile, ownedWork) {
+const SHARED_PROFILE_FIELDS = [
+  'id',
+  'slug',
+  'name',
+  'fullName',
+  'aliases',
+  'handle',
+  'githubHandle',
+  'githubUrl',
+  'slackId',
+  'slackUrl',
+  'slackTitle',
+  'avatar',
+  'avatarUrl',
+  'organization',
+  'organizations',
+  'organizationIds',
+  'verifiedLabel',
+  'status',
+];
+
+function pickSharedProfileFields(profile) {
+  return Object.fromEntries(SHARED_PROFILE_FIELDS
+    .filter(field => Object.hasOwn(profile, field))
+    .map(field => [field, profile[field]]));
+}
+
+/** Remove manager-only profile and guide context from a shared team member. */
+export function projectTeamProfile(profile, { teamProjection = false } = {}) {
+  if (!teamProjection || profile === null || typeof profile !== 'object' || Array.isArray(profile)) return profile;
+  return pickSharedProfileFields(profile);
+}
+
+function latestActivity(profile, ownedWork, { teamProjection = false } = {}) {
   const trackerUpdates = ownedWork.flatMap(updateFor);
-  const guideUpdate = profile.observedWork ? {
+  const guideUpdate = !teamProjection && profile.observedWork ? {
       id: `${profile.slug}-team-guide-observation`,
       title: 'Team guide observation',
       observedAt: profile.observedWorkAt,
@@ -68,7 +101,8 @@ function latestActivity(profile, ownedWork) {
     .sort((left, right) => dateMillis(right.observedAt) - dateMillis(left.observedAt))[0] ?? null;
 }
 
-function guideAssignmentStage(profile) {
+function guideAssignmentStage(profile, { teamProjection = false } = {}) {
+  if (teamProjection) return null;
   const current = String(profile.current ?? '');
   if (!/\b(planned|draft|proposed|unaccepted|not accepted)\b/i.test(current)) return null;
   return /\b(active|accepted)\b[^.]{0,120}\bwork\b/i.test(current) ? 'mixed' : 'proposed';
@@ -87,9 +121,10 @@ function assignedProfile(item, profiles) {
 }
 
 /** Join the team guide roster to live accepted work and its linked evidence. */
-export function buildTeamDirectory(profiles, items) {
+export function buildTeamDirectory(profiles, items, { teamProjection = false } = {}) {
   const allItems = Array.isArray(items) ? items : [];
-  const profileList = Array.isArray(profiles) ? profiles : [];
+  const profileList = (Array.isArray(profiles) ? profiles : [])
+    .map(profile => projectTeamProfile(profile, { teamProjection }));
   const ownedByProfile = new Map(profileList.map(profile => [profile.id, []]));
   for (const item of allItems) {
     const profile = assignedProfile(item, profileList);
@@ -112,14 +147,14 @@ export function buildTeamDirectory(profiles, items) {
       blocked: focusWork.some(item => item.isBlocked),
       proposed: focusWork.some(item => item.isProposed),
     };
-    const guideAssignmentStageValue = guideAssignmentStage(profile);
+    const guideAssignmentStageValue = guideAssignmentStage(profile, { teamProjection });
     return {
       ...profile,
       acceptedWork,
       proposedWork,
       focusWork,
       blockers,
-      latestActivity: latestActivity(profile, owned),
+      latestActivity: latestActivity(profile, owned, { teamProjection }),
       guideAssignmentStage: guideAssignmentStageValue,
       directoryRole: directoryRole(profile.slackTitle),
       attention,
@@ -168,7 +203,10 @@ export function projectedTeamProfiles(items) {
   }
   return [...profiles.values()].sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
 }
-function searchableText(member) {
+function searchableText(member, { teamProjection = false } = {}) {
+  const latestActivityText = teamProjection && member.latestActivity?.activityKind === 'guide-observation'
+    ? []
+    : [member.latestActivity?.sections?.observation, member.latestActivity?.sections?.evidence];
   return [
     member.name,
     member.fullName,
@@ -176,23 +214,21 @@ function searchableText(member) {
     member.slackTitle,
     member.organization,
     ...(member.organizations ?? []),
-    member.strongAt,
-    member.current,
+    ...(teamProjection ? [] : [member.strongAt, member.current]),
     ...(member.acceptedWork ?? []).map(item => item.title),
     ...(member.proposedWork ?? []).map(item => item.title),
     ...(member.blockers ?? []).map(blocker => `${blocker.itemTitle ?? ''} ${blocker.reason ?? ''}`),
-    member.latestActivity?.sections?.observation,
-    member.latestActivity?.sections?.evidence,
+    ...latestActivityText,
   ].join(' ').toLocaleLowerCase();
 }
 
-export function filterTeamMembers(members, { query = '', organization = 'all', needsAttentionOnly = false } = {}) {
+export function filterTeamMembers(members, { query = '', organization = 'all', needsAttentionOnly = false, teamProjection = false } = {}) {
   const normalizedQuery = String(query ?? '').trim().toLocaleLowerCase();
   return (Array.isArray(members) ? members : []).filter(member => {
     const memberOrganizations = member.organizations ?? [];
     const organizationMatch = organization === 'all'
       || (organization === '__unrecorded__' ? memberOrganizations.length === 0 : memberOrganizations.includes(organization));
     const attentionMatch = !needsAttentionOnly || member.needsAttention === true;
-    return organizationMatch && attentionMatch && searchableText(member).includes(normalizedQuery);
+    return organizationMatch && attentionMatch && searchableText(member, { teamProjection }).includes(normalizedQuery);
   });
 }
