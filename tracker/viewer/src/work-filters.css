@@ -1,4 +1,6 @@
 .work-filter-controls { display: grid; gap: 8px; width: 100%; min-width: 0; }
+.team-projection-work-note { display: grid; gap: 3px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--muted-foreground); background: var(--surface-quiet); font-size: 0.68rem; line-height: 1.4; }
+.team-projection-work-note strong { color: var(--foreground); font-size: 0.72rem; }
 .work-filter-toolbar { display: grid; grid-template-columns: minmax(132px, 0.95fr) minmax(180px, 1.3fr) minmax(132px, 0.95fr) minmax(132px, 0.95fr) minmax(142px, 0.92fr); align-items: end; gap: 12px; min-width: 0; }
 .work-filter-field { display: grid; min-width: 0; gap: 5px; }
 .work-filter-field-label { color: var(--muted-foreground); font-size: 0.68rem; font-weight: 780; letter-spacing: 0.06em; line-height: 1.2; }

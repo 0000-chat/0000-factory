@@ -1,6 +1,7 @@
 import { getScopeItems, scheduleFeatures, workVisibility } from './view-model.mjs';
 import { UNASSIGNED_OWNER, type WorkSearch } from './routing-state';
 import type { TrackerItem, TrackerSnapshot } from './snapshot';
+import { isTeamProjection } from './team-mode';
 
 export interface WorkFilterChoice {
   readonly value: string;
@@ -47,7 +48,7 @@ function choiceLabel(value: string): string {
     .join(' ');
 }
 
-export function workFilterOptions(data: TrackerSnapshot): WorkFilterChoices {
+export function workFilterOptions(data: TrackerSnapshot, { teamProjection = false }: { teamProjection?: boolean } = {}): WorkFilterChoices {
   const ownerLabels = new Map<string, string>();
   const statusValues = new Set<string>();
   for (const item of data.items) {
@@ -57,8 +58,12 @@ export function workFilterOptions(data: TrackerSnapshot): WorkFilterChoices {
     } else {
       const currentLabel = ownerLabels.get(ownerValue);
       const ownerName = cleanText(item.ownerName);
-      if (currentLabel === undefined || (currentLabel === ownerValue && ownerName !== undefined)) {
-        ownerLabels.set(ownerValue, ownerName ?? ownerValue);
+      const teamLabel = ownerValue;
+      const label = teamProjection
+        ? (ownerName !== undefined && ownerName !== ownerValue ? ownerName : teamLabel)
+        : ownerName ?? ownerValue;
+      if (currentLabel === undefined || (currentLabel === ownerValue && ownerName !== undefined) || (teamProjection && currentLabel === teamLabel && ownerName !== undefined && ownerName !== ownerValue)) {
+        ownerLabels.set(ownerValue, label);
       }
     }
     const status = cleanText(item.status);
@@ -185,12 +190,15 @@ export function projectFilteredWork(
   data: TrackerSnapshot,
   parsedWorkSearch: WorkSearch,
 ): FilteredWorkProjection {
+  const teamProjection = isTeamProjection(data);
   const scopedItems: TrackerItem[] = getScopeItems(
     data.items,
     parsedWorkSearch.scope === 'all' ? '*' : parsedWorkSearch.scope,
   );
   const baseItems = completionVisibleItems(scopedItems, data, parsedWorkSearch);
-  const baseVisibility = workVisibility(baseItems, '*', parsedWorkSearch.planned, parsedWorkSearch.drafts);
+  const baseVisibility = teamProjection
+    ? { items: baseItems, contextualIds: new Set<string>() }
+    : workVisibility(baseItems, '*', parsedWorkSearch.planned, parsedWorkSearch.drafts);
   const baseContextualIds: ReadonlySet<string> = baseVisibility.contextualIds;
   const tokens = queryTokens(parsedWorkSearch.q);
   const matchItems: TrackerItem[] = baseVisibility.items.filter((item: TrackerItem) =>
@@ -209,9 +217,11 @@ export function projectFilteredWork(
     : { ...item, commitment: '__filter_context__' });
   const restored = workVisibility(graphItems, '*', parsedWorkSearch.planned, parsedWorkSearch.drafts);
   const originalById = new Map(data.items.map(item => [item.id, item]));
-  const items = restored.items
-    .map((item: TrackerItem) => originalById.get(item.id))
-    .filter((item): item is TrackerItem => item !== undefined);
+  const items = teamProjection
+    ? matchItems
+    : restored.items
+      .map((item: TrackerItem) => originalById.get(item.id))
+      .filter((item): item is TrackerItem => item !== undefined);
   const visibleIds: ReadonlySet<string> = new Set(items.map(item => item.id));
   const contextualIds: ReadonlySet<string> = new Set(restored.contextualIds);
   return {

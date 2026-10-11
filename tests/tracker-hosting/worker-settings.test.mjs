@@ -25,7 +25,14 @@ const keyPair = await webcrypto.subtle.generateKey(
 const publicJwk = await webcrypto.subtle.exportKey('jwk', keyPair.publicKey);
 publicJwk.kid = KID;
 
-function settings({ access = 'ready', service = 'disabled', publish = 'github-app', folderPath = 'sites/synthetic' } = {}) {
+function settings({
+  access = 'ready',
+  service = 'disabled',
+  publish = 'github-app',
+  folderPath = 'sites/synthetic',
+  readerEmails = [PUBLISHER, READER],
+  readerEmailDomains = [],
+} = {}) {
   return {
     schemaVersion: 1,
     id: 'synthetic',
@@ -56,7 +63,8 @@ function settings({ access = 'ready', service = 'disabled', publish = 'github-ap
         kind: 'ready',
         teamDomain: TEAM_DOMAIN,
         audience: AUDIENCE,
-        readerEmails: [PUBLISHER, READER],
+        readerEmails,
+        readerEmailDomains,
         service: service === 'enabled' ? { kind: 'enabled', clientId: 'synthetic-service' } : { kind: 'disabled' },
       },
     publish: publish === 'disabled'
@@ -207,6 +215,33 @@ test('Access rejects issuer, audience, signature, expiry, future, and reader mis
   assert.equal(response.status, 403);
   assert.deepEqual(assetCalls, []);
   assert.equal(keyCalls.length, 1);
+});
+
+test('Access accepts a signed reader from an explicitly configured email domain', async () => {
+  const keyCalls = [];
+  const assetCalls = [];
+  const worker = createTrackerWorker(settings({
+    readerEmails: [],
+    readerEmailDomains: ['EXAMPLE.TEST'],
+    publish: 'disabled',
+  }), {
+    accessFetch: accessFetch(keyCalls),
+    now: () => FIXED_NOW,
+  });
+
+  const accepted = await worker.fetch(
+    request(await tokenFor({ email: 'Member@Example.Test' })),
+    { ASSETS: assets(assetCalls) },
+  );
+  assert.equal(accepted.status, 200);
+
+  const rejected = await worker.fetch(
+    request(await tokenFor({ email: 'member@other.example.test' })),
+    { ASSETS: assets(assetCalls) },
+  );
+  assert.equal(rejected.status, 403);
+  assert.deepEqual(assetCalls, ['/']);
+  assert.equal(keyCalls.length, 2);
 });
 
 test('service identities can read assets but cannot publish', async () => {

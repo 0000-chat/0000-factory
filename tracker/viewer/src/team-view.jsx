@@ -57,7 +57,8 @@ function MentionInline({ value, profiles, routeSearch, as: Tag = 'span', classNa
 function RichText({ value, className = '', items = [], profiles = [], routeSearch }) {
   const context = useRouteContext({ from: '__root__' });
   const sourceCommit = context.data?.source?.commit ?? 'unknown';
-  const html = renderMarkdown(rewriteTeamTrackerLinks(value, items, sourceCommit), profileMentionOptions(profiles, routeSearch));
+  const isTeamProjection = context.data?.source?.layout === 'team-projection-v1';
+  const html = renderMarkdown(rewriteTeamTrackerLinks(value, items, sourceCommit, { allowRepositoryLinks: !isTeamProjection }), profileMentionOptions(profiles, routeSearch));
   return html ? <div className={`markdown team-markdown team-rich-text ${className}`} dangerouslySetInnerHTML={{ __html: html }} /> : <p className="team-empty-copy">Not recorded.</p>;
 }
 
@@ -165,13 +166,15 @@ function rowEventIsNavigationSafe(event) {
   return !(typeof window !== 'undefined' && window.getSelection?.()?.toString());
 }
 
-function TeamDirectory({ members, search, onSearchChange, organizationFilter, onOrganizationChange, onResetFilters, routeSearch }) {
+function TeamDirectory({ members, search, onSearchChange, organizationFilter, onOrganizationChange, onResetFilters, routeSearch, teamProjection = false }) {
   const navigate = useNavigate();
   const [needsAttentionOnly, setNeedsAttentionOnly] = useState(false);
   const organizations = [...new Set(members.flatMap(member => member.organizations ?? []))].sort((left, right) => left.localeCompare(right));
   const matching = filterTeamMembers(members, { query: search, organization: organizationFilter, needsAttentionOnly });
   const navigateToMember = member => void navigate({ to: '/team/$memberSlug', params: { memberSlug: member.slug }, search: routeSearch });
-  const emptyMessage = needsAttentionOnly
+  const emptyMessage = teamProjection && !needsAttentionOnly && !search.trim() && organizationFilter === 'all'
+    ? 'No team members are shared yet.'
+    : needsAttentionOnly
     ? 'No blocked or proposed work matches these filters.'
     : search.trim()
       ? `No team members match “${search.trim()}”.`
@@ -247,7 +250,7 @@ function TeamProfile({ member, onSelectItem, items, routeSearch, profiles }) {
 }
 
 /** @param {import('./features/contracts').TeamViewProps} props */
-export function TeamView({ profiles, items, memberSlug = null, search, onSearchChange, organizationFilter, onOrganizationChange, onResetFilters, onSelectItem }) {
+export function TeamView({ profiles, items, teamProjection = false, memberSlug = null, search, onSearchChange, organizationFilter, onOrganizationChange, onResetFilters, onSelectItem }) {
   const members = useMemo(() => buildTeamDirectory(profiles, items), [profiles, items]);
   const routeSearch = { q: search, organization: organizationFilter };
   if (memberSlug) {
@@ -255,5 +258,5 @@ export function TeamView({ profiles, items, memberSlug = null, search, onSearchC
     if (!member) return <Card className="surface-card team-not-found"><CardContent><TrackerEmpty title={<h1>Team member not found</h1>} description="The requested profile is not in the current team snapshot." descriptionClassName="team-empty-copy" action={<MemberLink search={routeSearch} className="team-back-link"><ArrowLeft size={15} aria-hidden="true" />All team members</MemberLink>} /></CardContent></Card>;
     return <TeamProfile member={member} onSelectItem={onSelectItem} items={Array.isArray(items) ? items : []} routeSearch={routeSearch} profiles={members} />;
   }
-  return <TeamDirectory members={members} search={search} onSearchChange={onSearchChange} organizationFilter={organizationFilter} onOrganizationChange={onOrganizationChange} onResetFilters={onResetFilters} routeSearch={routeSearch} />;
+  return <TeamDirectory members={members} search={search} onSearchChange={onSearchChange} organizationFilter={organizationFilter} onOrganizationChange={onOrganizationChange} onResetFilters={onResetFilters} routeSearch={routeSearch} teamProjection={teamProjection} />;
 }

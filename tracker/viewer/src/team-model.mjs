@@ -127,6 +127,47 @@ export function buildTeamDirectory(profiles, items) {
     };
   });
 }
+
+/**
+ * Team projections intentionally omit the canonical roster. Keep the Team
+ * surface useful by exposing only assignee IDs that occur in the projection;
+ * a human name is used only when the projected task supplied one.
+ */
+export function projectedTeamProfiles(items) {
+  const profiles = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    const id = String(item?.owner ?? '').trim();
+    if (!id || id.toLowerCase() === 'unassigned') continue;
+    const candidateName = String(item?.ownerName ?? '').trim();
+    const hasVerifiedName = candidateName && candidateName !== id;
+    const current = profiles.get(id);
+    if (current && (!hasVerifiedName || current.verifiedLabel)) continue;
+    profiles.set(id, {
+      id,
+      slug: id,
+      handle: id,
+      name: hasVerifiedName ? candidateName : id,
+      fullName: hasVerifiedName ? candidateName : null,
+      status: 'projected',
+      githubHandle: null,
+      avatar: null,
+      aliases: [],
+      organizations: [],
+      organizationIds: [],
+      current: null,
+      strongAt: null,
+      experience: null,
+      bestAssignments: null,
+      preference: null,
+      slackTitle: null,
+      avatarUrl: null,
+      githubUrl: null,
+      slackUrl: null,
+      verifiedLabel: Boolean(hasVerifiedName),
+    });
+  }
+  return [...profiles.values()].sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+}
 function searchableText(member) {
   return [
     member.name,

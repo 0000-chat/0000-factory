@@ -41,6 +41,7 @@ import {
   shouldInterceptMarkdownClick,
   validatedReturnTo,
 } from './navigation';
+import { isTeamProjection } from './team-mode';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -70,6 +71,7 @@ function returnLabel(value: string): string {
     case 'plans': return 'Return to Plans';
     case 'team': return 'Return to Team';
     case 'reports': return 'Return to Reports';
+    case 'weekly-planning': return 'Return to Weekly planning';
     default: return 'Return to Work';
   }
 }
@@ -101,6 +103,8 @@ export function RouteReturnLink({ value, options = {} }: { value: unknown; optio
       }
       return <Link to="/team" search={parseTeamSearch(search, options)} replace>{label}</Link>;
     }
+    case 'weekly-planning':
+      return <Link to="/weekly-planning" replace>{label}</Link>;
     default:
       return <Link to="/work" search={parseWorkSearch({}, options)} replace>Return to Work</Link>;
   }
@@ -131,11 +135,13 @@ function NotFoundPage() {
 
 function Sidebar({
   data,
+  teamProjection,
   pathname,
   onNavigateSearchHref,
   onSelectSearchResult,
 }: {
   data: TrackerSnapshot;
+  teamProjection: boolean;
   pathname: string;
   onNavigateSearchHref: (href: string) => void;
   onSelectSearchResult: (result: GlobalSearchResult) => void;
@@ -164,15 +170,15 @@ function Sidebar({
     <Link className="brand-lockup" to="/work" search={workSearch} aria-label={branding.homeLabel}>
       <span className="brand-mark">{branding.markText}</span><span className="brand-name">{branding.name}</span>
     </Link>
-    <GlobalSearchDialog data={data} onNavigate={onNavigateSearchHref} onSelectResult={onSelectSearchResult} />
+    {teamProjection ? null : <GlobalSearchDialog data={data} onNavigate={onNavigateSearchHref} onSelectResult={onSelectSearchResult} />}
     <nav className="primary-nav" data-primary-navigation aria-label="Tracker views">
       <div className="app-tabs">
-        <Link className={navClass('today')} data-slot="tabs-trigger" data-state={active('today') ? 'active' : 'inactive'} to="/today" search={todaySearch} aria-current={active('today') ? 'page' : undefined}><CalendarDays size={16} aria-hidden="true" />Today</Link>
+        {teamProjection ? null : <Link className={navClass('today')} data-slot="tabs-trigger" data-state={active('today') ? 'active' : 'inactive'} to="/today" search={todaySearch} aria-current={active('today') ? 'page' : undefined}><CalendarDays size={16} aria-hidden="true" />Today</Link>}
         <Link className={navClass('work')} data-slot="tabs-trigger" data-state={active('work') ? 'active' : 'inactive'} to="/work" search={workSearch} aria-current={active('work') ? 'page' : undefined}><LayoutDashboard size={16} aria-hidden="true" />Work</Link>
-        <Link className={navClass('plans')} data-slot="tabs-trigger" data-state={active('plans') ? 'active' : 'inactive'} to="/plans" search={plansSearch} aria-current={active('plans') ? 'page' : undefined}><ClipboardList size={16} aria-hidden="true" />Plans</Link>
+        {teamProjection ? null : <Link className={navClass('plans')} data-slot="tabs-trigger" data-state={active('plans') ? 'active' : 'inactive'} to="/plans" search={plansSearch} aria-current={active('plans') ? 'page' : undefined}><ClipboardList size={16} aria-hidden="true" />Plans</Link>}
         <Link className={navClass('weekly-planning')} data-slot="tabs-trigger" data-state={active('weekly-planning') ? 'active' : 'inactive'} to="/weekly-planning" aria-current={active('weekly-planning') ? 'page' : undefined}><ClipboardList size={16} aria-hidden="true" />Weekly planning</Link>
         <Link className={navClass('team')} data-slot="tabs-trigger" data-state={active('team') ? 'active' : 'inactive'} to="/team" search={teamSearch} aria-current={active('team') ? 'page' : undefined}><Users size={16} aria-hidden="true" />Team</Link>
-        <Link className={navClass('reports')} data-slot="tabs-trigger" data-state={active('reports') ? 'active' : 'inactive'} to="/reports" search={reportsSearch} aria-current={active('reports') ? 'page' : undefined}><BarChart3 size={16} aria-hidden="true" />Reports</Link>
+        {teamProjection ? null : <Link className={navClass('reports')} data-slot="tabs-trigger" data-state={active('reports') ? 'active' : 'inactive'} to="/reports" search={reportsSearch} aria-current={active('reports') ? 'page' : undefined}><BarChart3 size={16} aria-hidden="true" />Reports</Link>}
       </div>
     </nav>
     <ThemeControl />
@@ -181,6 +187,7 @@ function Sidebar({
 
 export function AppShell() {
   const { data, taskEdit } = useRouteContext({ from: '__root__' });
+  const teamProjection = isTeamProjection(data);
   const location = useRouterState({ select: state => state.location });
   const navigate = useNavigate();
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -452,10 +459,10 @@ export function AppShell() {
   };
 
   return <BrowseSelectionProvider onSelectItem={onSelectItem}><div className="app-root" onClick={routeHrefClick}>
-    <Sidebar data={data} pathname={pathname} onNavigateSearchHref={navigateSearchHref} onSelectSearchResult={onSelectSearchResult} />
+    <Sidebar data={data} teamProjection={teamProjection} pathname={pathname} onNavigateSearchHref={navigateSearchHref} onSelectSearchResult={onSelectSearchResult} />
     <div className="app-main">
       <main className="app-shell" tabIndex={-1}>
-        <div className="task-history-toolbar" role="group" aria-label="Task edit history">
+        {teamProjection ? null : <div className="task-history-toolbar" role="group" aria-label="Task edit history">
           <Button type="button" variant="outline" size="sm" disabled={!canUndo} title={undoTarget ? `Undo last edit to ${editableFieldLabel(undoTarget.field)} on ${undoTargetTitle}` : 'No task edit to undo'} onPointerDownCapture={() => { pendingHistoryIntent.current.undo = undoExpectedActionId ?? null; }} onClick={() => {
             const expected = pendingHistoryIntent.current.undo ?? undoExpectedActionId;
             pendingHistoryIntent.current.undo = null;
@@ -474,7 +481,7 @@ export function AppShell() {
           {unavailableRedo ? <Button type="button" variant="ghost" size="sm" aria-label="Skip unavailable Redo edit" title={`Skip the unavailable Redo edit for ${unavailableRedo.itemId}; it will remain in retained history.`} onClick={() => taskEdit.skipUnavailable('redo', unavailableRedo.actionId)}>Skip unavailable edit</Button> : null}
           {taskHistoryStatus ? <span className="task-history-save-state" role="status" aria-live="polite">{taskHistoryStatus}</span> : null}
           {undoHeldByOtherTab || redoHeldByOtherTab ? <span className="task-history-save-error">Finish editing this field in the other tab before changing its history.</span> : null}
-        </div>
+        </div>}
         <Outlet />
       </main>
       <footer className="app-footer">

@@ -290,4 +290,7 @@ test('builds stable Team paths and rewrites tracker Markdown links to router rou
     '[work](/work/item%2F1) [decision](/decisions/launch) [history](https://github.com/synthetic-org/synthetic-tracker/blob/main/tracker-data/tracker/history/old.md)',
   );
   assert.doesNotMatch(markdown, /#\//);
+
+  const projectionMarkdown = rewriteTeamTrackerLinks('[history](tracker/history/old.md)', [], 'projection-commit', { allowRepositoryLinks: false });
+  assert.equal(projectionMarkdown, '[history](tracker/history/old.md)');
 });

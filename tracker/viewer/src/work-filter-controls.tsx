@@ -22,6 +22,7 @@ import { ProjectSelector, VisibilityControls } from './shared.jsx';
 import { workFilterOptions, type WorkFilterChoice } from './work-filters';
 import type { TrackerSnapshot } from './snapshot';
 import type { SearchInput, WorkSearch } from './routing-state';
+import { isTeamProjection } from './team-mode';
 
 interface WorkFilterControlsProps {
   data: TrackerSnapshot;
@@ -241,7 +242,8 @@ function OwnerFilterChip({ value, label, data, onRemove }: { value: string; labe
 
 export function WorkFilterControls({ data, search, onChange, matchCount }: WorkFilterControlsProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const choices = useMemo(() => workFilterOptions(data), [data]);
+  const teamProjection = isTeamProjection(data);
+  const choices = useMemo(() => workFilterOptions(data, { teamProjection }), [data, teamProjection]);
   const ownerLabels = new Map(choices.owners.map(choice => [choice.value, choice.label]));
   const statusLabels = new Map(choices.statuses.map(choice => [choice.value, choice.label]));
   const activeFilterCount = Number(Boolean(search.q.trim()))
@@ -284,10 +286,10 @@ export function WorkFilterControls({ data, search, onChange, matchCount }: WorkF
         <SearchField label="Search work" value={search.q} onChange={q => onChange({ q })} placeholder="Search work" />
       </div>
       <div className="work-filter-field work-filter-owner">
-        <span className="work-filter-field-label">Owner</span>
+        <span className="work-filter-field-label">{teamProjection ? 'Person' : 'Owner'}</span>
         <MultiTagFilter
-          label="Filter by owner"
-          emptyLabel="All owners"
+          label={teamProjection ? 'Person-scoped My Work' : 'Filter by owner'}
+          emptyLabel={teamProjection ? 'All projected people' : 'All owners'}
           choices={choices.owners}
           values={search.owners}
           onChange={owners => onChange({ owners })}

@@ -94,6 +94,62 @@ test('ready Access, service, and enabled publishing validate together', () => {
   assert.equal(parsed.access.teamDomain, 'https://team.synthetic.test');
   assert.deepEqual(parsed.access.service, { kind: 'enabled', clientId: 'synthetic-service' });
   assert.equal(parsed.publish.kind, 'github-app');
+  assert.deepEqual(parsed.access.readerEmailDomains, []);
+});
+
+test('ready Access may authorize a bounded, normalized email domain list', () => {
+  const parsed = parseInstanceConfig(readySettings({
+    access: {
+      kind: 'ready',
+      teamDomain: 'https://team.synthetic.test',
+      audience: 'synthetic-audience',
+      readerEmails: [],
+      readerEmailDomains: ['NEXTFINANCIAL.IO'],
+      service: { kind: 'disabled' },
+    },
+    publish: { kind: 'disabled' },
+  }));
+  assert.deepEqual(parsed.access.readerEmails, []);
+  assert.deepEqual(parsed.access.readerEmailDomains, ['nextfinancial.io']);
+
+  for (const readerEmailDomains of [
+    [],
+    ['127.0.0.1'],
+    ['::1'],
+    ['internal'],
+    ['localhost'],
+    ['team.synthetic.test.'],
+    ['team..synthetic.test'],
+    ['team synthetic.test'],
+  ]) {
+    assert.throws(
+      () => parseInstanceConfig(readySettings({
+        access: {
+          kind: 'ready',
+          teamDomain: 'https://team.synthetic.test',
+          audience: 'synthetic-audience',
+          readerEmails: [],
+          readerEmailDomains,
+          service: { kind: 'disabled' },
+        },
+        publish: { kind: 'disabled' },
+      })),
+      /settings\.access(?:\.readerEmailDomains)?/u,
+    );
+  }
+  assert.throws(
+    () => parseInstanceConfig(readySettings({
+      access: {
+        kind: 'ready',
+        teamDomain: 'https://team.synthetic.test',
+        audience: 'synthetic-audience',
+        readerEmails: [],
+        service: { kind: 'disabled' },
+      },
+      publish: { kind: 'disabled' },
+    })),
+    /must configure readerEmails or readerEmailDomains/u,
+  );
 });
 
 test('public projection round-trips without runtime policy', () => {

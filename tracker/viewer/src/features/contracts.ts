@@ -47,6 +47,7 @@ export interface PlansViewProps {
 export interface TeamViewProps {
   profiles: TrackerSnapshot['team'];
   items: TrackerItem[];
+  teamProjection?: boolean;
   memberSlug: string | null;
   search: string;
   onSearchChange: (search: string) => void;
@@ -78,6 +79,7 @@ export interface ItemPageProps {
   taskEdit: TaskEditController;
   renderItemLink?: (itemId: string, label: string) => ReactNode;
   returnLink?: ReactNode;
+  readOnly?: boolean;
 }
 
 export interface DecisionPageProps {
