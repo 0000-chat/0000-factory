@@ -134,10 +134,11 @@ export function GlobalSearchDialog({
             {hasQuery ? groups.map(group => <CommandGroup key={group.kind} heading={`${group.label} (${group.total})`}>
               {group.results.map(result => <CommandItem
                 key={`${group.kind}:${result.id}`}
-                value={`${result.title} ${result.subtitle ?? ''} ${result.id} ${group.label}`}
+                value={`${result.title} ${result.subtitle ?? ''} ${result.referenceCode ?? ''} ${result.id} ${group.label}`}
                 onSelect={() => selectResult(result)}
               >
                 <span className="global-search-result-copy">
+                  {result.referenceCode ? <code className="global-search-result-code">{result.referenceCode}</code> : null}
                   <span className="global-search-result-title">{result.title}</span>
                   {result.subtitle ? <span className="global-search-result-subtitle">{result.subtitle}</span> : null}
                 </span>

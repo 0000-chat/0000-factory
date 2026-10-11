@@ -99,7 +99,7 @@ function queryTokens(query: string): string[] {
 
 function matchesQuery(item: TrackerItem, tokens: string[]): boolean {
   if (tokens.length === 0) return true;
-  const searchable = [item.title, item.id, item.ownerName]
+  const searchable = [item.title, item.id, item.referenceCode, item.ownerName]
     .map(cleanText)
     .filter((value): value is string => value !== undefined)
     .map(value => value.toLocaleLowerCase());

@@ -114,6 +114,17 @@ unconfigured Access. Tests that exercise ready Access or simulated publishing
 generate their own short-lived credentials and use fake transports. Real site
 settings and production records are outside this repository.
 
+## Task reference codes
+
+Every tracker item receives a short reference code such as `T-RTUDWH`. The
+code is derived from the item's immutable canonical `id` using the frozen v1
+format, so it remains stable when records are reordered, renamed in Markdown,
+or rebuilt. Treat canonical IDs as permanent after publication; changing one
+creates a different code and breaks existing references. The six-character
+code uses a reduced alphabet to avoid visually confusable characters. The
+validator fails when two loaded IDs collide, and the digest CLI accepts either
+an item ID or its case-insensitive reference code.
+
 Generated assets, Worker configuration, runtime configuration, manifests, and
 viewer bundles belong to OUTPUT. The repository includes no deployment or
 publishing command. Do not add a production checkout, provider token, browser

@@ -2,6 +2,7 @@ import { acceptanceState as sharedAcceptanceState } from '../../../tooling/track
 import { normalizeActivityEvidence } from '../../../tooling/tracker/activity-evidence.mjs';
 import { extractMarkdownSections, extractMarkdownTitle, scanMarkdownHeadings } from '../../../tooling/tracker/markdown.mjs';
 import { normalizeDeliveryRecords } from '../../../tooling/tracker/delivery-records.mjs';
+import { taskCodeForId } from '../../../tooling/tracker/task-codes.mjs';
 import { approvalData, approvedParts, buildProposal, commitmentValue, deriveProgress, isAccepted, numberValue } from './planning.mjs';
 
 function refs(value) {
@@ -242,6 +243,7 @@ function itemRecord(record, relationships, progressByItem, allRecords, legacyApp
   const schedule = scheduleFor(data, { approved: isAccepted(data) && acceptance.scheduleApproved, preserveProposed: !isAccepted(data) });
   return {
     id: data.id,
+    referenceCode: taskCodeForId(data.id),
     title,
     type: data.type,
     status: data.status,
