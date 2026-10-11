@@ -156,6 +156,13 @@ function fullTaskProjection(tasks = [
     mode: 'one-time-current-task-copy', scope: 'all-current-canonical-task-records', sourceTaskKind: 'task',
     includesDonOwned: true, includesUnassigned: true, privateRule: 'private-true-excluded',
   };
+  const policy = {
+    ...scope,
+    policyRevision: 'manual-full-current-task-copy-v1',
+    hierarchyVersion: 1,
+    hierarchyContextFields: ['id', 'kind', 'title', 'parentId'],
+    fields: [...fields].sort(),
+  };
   const value = {
     schemaVersion: 1,
     kind: 'full-task-projection',
@@ -171,6 +178,8 @@ function fullTaskProjection(tasks = [
       ...scope,
       fieldsDigest: digest([...fields].sort()),
       scopeDigest: digest(scope),
+      policyDigest: digest(policy),
+      selectionDigest: digest({ ...scope, taskIds: tasks.map(task => task.taskId).sort() }),
       taskIdsDigest: digest(tasks.map(task => task.taskId).sort()),
       taskCount: tasks.length,
       contextNodeCount: contextNodes.length,
