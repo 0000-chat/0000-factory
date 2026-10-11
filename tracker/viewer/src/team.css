@@ -75,6 +75,7 @@
 .team-profile-stats strong { font-size: 0.87rem; overflow-wrap: anywhere; }
 .team-profile-stats span { color: var(--muted-foreground); font-size: 0.64rem; }
 .team-profile-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr); align-items: start; gap: 13px; }
+.team-profile-grid-shared { grid-template-columns: minmax(0, 1fr); }
 .team-profile-column { display: grid; gap: 13px; min-width: 0; }
 .team-profile-section [data-slot="card-content"] { display: grid; gap: 14px; }
 .team-section-card-header { padding: 16px 20px 0; }

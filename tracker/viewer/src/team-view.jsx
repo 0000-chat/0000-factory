@@ -106,9 +106,10 @@ function GuideContext({ member, items, profiles, routeSearch }) {
   return <section className="team-guide-context"><div className="team-section-heading"><h3>Guide focus</h3><BadgeChip>Team guide</BadgeChip></div><p className="team-empty-copy">No focus or current assignment is recorded in the team guide.</p></section>;
 }
 
-function LatestActivity({ activity, compact = false, items = [], profiles = [], routeSearch }) {
+function LatestActivity({ activity, compact = false, items = [], profiles = [], routeSearch, teamProjection = false }) {
   const context = useRouteContext({ from: '__root__' });
   const sourceCommit = context.data?.source?.commit ?? 'unknown';
+  if (teamProjection && activity?.activityKind === 'guide-observation') return <p className="team-empty-copy">No dated update is recorded.</p>;
   if (!activity) return <p className="team-empty-copy">No dated update is recorded.</p>;
   if (compact) {
     const summary = compactEvidenceSummary(activity);
@@ -137,11 +138,11 @@ function BlockerSummary({ blockers, compact = false, onSelect, profiles = [], ro
   </li>)}</ul>;
 }
 
-function TeamFocus({ member, profiles = [], routeSearch }) {
+function TeamFocus({ member, profiles = [], routeSearch, teamProjection = false }) {
   const focusItems = member.focusWork;
   const focusItem = focusItems[0];
   const hiddenItems = focusItems.slice(1);
-  const focus = focusItem?.title || compactText(member.current || member.strongAt);
+  const focus = focusItem?.title || (teamProjection ? '' : compactText(member.current || member.strongAt));
   const proposedCount = hiddenItems.filter(item => item.isProposed).length;
   const blockedCount = hiddenItems.filter(item => item.isBlocked).length;
   const hiddenSummary = [
@@ -170,7 +171,7 @@ function TeamDirectory({ members, search, onSearchChange, organizationFilter, on
   const navigate = useNavigate();
   const [needsAttentionOnly, setNeedsAttentionOnly] = useState(false);
   const organizations = [...new Set(members.flatMap(member => member.organizations ?? []))].sort((left, right) => left.localeCompare(right));
-  const matching = filterTeamMembers(members, { query: search, organization: organizationFilter, needsAttentionOnly });
+  const matching = filterTeamMembers(members, { query: search, organization: organizationFilter, needsAttentionOnly, teamProjection });
   const navigateToMember = member => void navigate({ to: '/team/$memberSlug', params: { memberSlug: member.slug }, search: routeSearch });
   const emptyMessage = teamProjection && !needsAttentionOnly && !search.trim() && organizationFilter === 'all'
     ? 'No team members are shared yet.'
@@ -198,8 +199,8 @@ function TeamDirectory({ members, search, onSearchChange, organizationFilter, on
         <thead><tr><th scope="col">Person</th><th scope="col">Current focus</th><th scope="col">Latest update</th></tr></thead>
         <tbody>{matching.map(member => <tr key={member.slug} className="team-directory-row" data-testid={`team-row-${member.slug}`} tabIndex={0} aria-label={`Open ${member.name} profile`} onClick={event => { if (rowEventIsNavigationSafe(event)) navigateToMember(member); }} onKeyDown={event => { if ((event.key === 'Enter' || event.key === ' ') && rowEventIsNavigationSafe(event)) { event.preventDefault(); navigateToMember(member); } }}>
           <td data-label="Person"><MemberLink memberSlug={member.slug} search={routeSearch} className="team-member-link"><AssigneeAvatars owner={member.handle ?? member.name} ownerName={member.name} imageUrl={member.avatarUrl} size="md" /><span className="team-member-copy"><strong>{member.name}</strong><span className="team-member-org">{member.organizations?.join(', ') || 'Organization not recorded'}</span></span></MemberLink></td>
-          <td data-label="Current focus"><TeamFocus member={member} profiles={members} routeSearch={routeSearch} /></td>
-          <td data-label="Latest update"><LatestActivity activity={member.latestActivity} compact profiles={members} routeSearch={routeSearch} /></td>
+          <td data-label="Current focus"><TeamFocus member={member} profiles={members} routeSearch={routeSearch} teamProjection={teamProjection} /></td>
+          <td data-label="Latest update"><LatestActivity activity={member.latestActivity} compact profiles={members} routeSearch={routeSearch} teamProjection={teamProjection} /></td>
         </tr>)}</tbody>
       </table></div> : <TrackerEmpty className="empty-panel team-no-results" icon={<Users size={22} aria-hidden="true" />} title={<p>{emptyMessage}</p>} action={hasFilters ? <Button size="sm" variant="ghost" onClick={resetFilters}>Reset filters</Button> : null} />}
       <p className="team-directory-note">Showing {matching.length} of {members.length} people</p>
@@ -211,7 +212,7 @@ function ProfileSection({ title, children, className = '' }) {
   return <Card className={`surface-card team-profile-section ${className}`}><CardHeader className="team-section-card-header"><CardTitle>{title}</CardTitle></CardHeader><CardContent>{children}</CardContent></Card>;
 }
 
-function TeamProfile({ member, onSelectItem, items, routeSearch, profiles }) {
+function TeamProfile({ member, onSelectItem, items, routeSearch, profiles, teamProjection = false }) {
   const organizationText = member.organizations?.join(', ') || 'Organization not recorded';
   return <div className="team-profile-page">
     <MemberLink search={routeSearch} className="team-back-link"><ArrowLeft size={15} aria-hidden="true" />All team members</MemberLink>
@@ -222,21 +223,21 @@ function TeamProfile({ member, onSelectItem, items, routeSearch, profiles }) {
       </CardContent>
     </Card>
 
-    <div className="team-profile-grid">
+    <div className={`team-profile-grid${teamProjection ? ' team-profile-grid-shared' : ''}`}>
       <div className="team-profile-column">
         <ProfileSection title="Current accepted work">
           <AcceptedWork member={member} onSelect={onSelectItem} />
           {member.proposedWork.length ? <div className="team-proposed-work"><div className="team-section-heading"><h3>Proposed tracker work</h3><BadgeChip tone="amber">Not accepted</BadgeChip></div><div className="team-work-list">{member.proposedWork.map(item => <div className="team-proposed-item" key={item.id}><strong>{item.title}</strong><small>{humanize(item.commitment)} · {humanize(item.status)}</small></div>)}</div></div> : null}
         </ProfileSection>
         <ProfileSection title="Latest evidenced update">
-          <LatestActivity activity={member.latestActivity} items={items} profiles={profiles} routeSearch={routeSearch} />
+          <LatestActivity activity={member.latestActivity} items={items} profiles={profiles} routeSearch={routeSearch} teamProjection={teamProjection} />
           {member.latestActivity?.itemId ? <button className="text-link team-activity-item-link" type="button" onClick={() => onSelectItem(member.latestActivity.itemId)}>Open {member.latestActivity.itemTitle}<ArrowUpRight size={14} aria-hidden="true" /></button> : null}
         </ProfileSection>
         <ProfileSection title="Blockers">
           <BlockerSummary blockers={member.blockers} onSelect={onSelectItem} profiles={profiles} routeSearch={routeSearch} />
         </ProfileSection>
       </div>
-      <div className="team-profile-column">
+      {teamProjection ? null : <div className="team-profile-column">
         <ProfileSection title="Capability and fit">
           <div className="team-profile-copy"><div><h3>Strong at</h3><RichText value={member.strongAt} items={items} profiles={profiles} routeSearch={routeSearch} /></div><div><h3>Experience points</h3><RichText value={member.experience} items={items} profiles={profiles} routeSearch={routeSearch} /></div><div><h3>Best assignments</h3><RichText value={member.bestAssignments} items={items} profiles={profiles} routeSearch={routeSearch} /></div></div>
         </ProfileSection>
@@ -244,19 +245,19 @@ function TeamProfile({ member, onSelectItem, items, routeSearch, profiles }) {
           <GuideContext member={member} items={items} profiles={profiles} routeSearch={routeSearch} />
           <div className="team-preference"><h3>Stated preference</h3><RichText value={member.preference} items={items} profiles={profiles} routeSearch={routeSearch} /></div>
         </ProfileSection>
-      </div>
+      </div>}
     </div>
   </div>;
 }
 
 /** @param {import('./features/contracts').TeamViewProps} props */
 export function TeamView({ profiles, items, teamProjection = false, memberSlug = null, search, onSearchChange, organizationFilter, onOrganizationChange, onResetFilters, onSelectItem }) {
-  const members = useMemo(() => buildTeamDirectory(profiles, items), [profiles, items]);
+  const members = useMemo(() => buildTeamDirectory(profiles, items, { teamProjection }), [profiles, items, teamProjection]);
   const routeSearch = { q: search, organization: organizationFilter };
   if (memberSlug) {
     const member = members.find(profile => profile.slug === memberSlug);
     if (!member) return <Card className="surface-card team-not-found"><CardContent><TrackerEmpty title={<h1>Team member not found</h1>} description="The requested profile is not in the current team snapshot." descriptionClassName="team-empty-copy" action={<MemberLink search={routeSearch} className="team-back-link"><ArrowLeft size={15} aria-hidden="true" />All team members</MemberLink>} /></CardContent></Card>;
-    return <TeamProfile member={member} onSelectItem={onSelectItem} items={Array.isArray(items) ? items : []} routeSearch={routeSearch} profiles={members} />;
+    return <TeamProfile member={member} onSelectItem={onSelectItem} items={Array.isArray(items) ? items : []} routeSearch={routeSearch} profiles={members} teamProjection={teamProjection} />;
   }
   return <TeamDirectory members={members} search={search} onSearchChange={onSearchChange} organizationFilter={organizationFilter} onOrganizationChange={onOrganizationChange} onResetFilters={onResetFilters} routeSearch={routeSearch} teamProjection={teamProjection} />;
 }
