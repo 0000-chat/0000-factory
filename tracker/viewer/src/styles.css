@@ -409,6 +409,7 @@ button:focus-visible, [role="treeitem"]:focus-visible, [data-slot="select-trigge
 .kanban-task { display: grid; gap: 7px; width: 100%; min-height: 86px; padding: 11px 11px 5px; border: 0; background: transparent; cursor: pointer; text-align: left; }
 .kanban-task:hover, .kanban-task.is-selected { background: var(--accent); }
 .kanban-task-title { color: var(--foreground); font-size: 0.76rem; font-weight: 690; line-height: 1.35; }
+.kanban-task-reference-code { display: block; margin-bottom: 2px; }
 .kanban-task-status { color: var(--muted-foreground); font-size: 0.61rem; font-weight: 700; text-transform: capitalize; }
 .kanban-task-assignee { display: flex; min-width: 0; padding: 0 11px 10px; color: var(--muted-foreground); font-size: 0.66rem; }
 .kanban-commitment { justify-self: start; padding: 3px 6px; border-radius: 99px; background: var(--success-subtle); color: var(--success); font-size: 0.59rem; font-weight: 760; }

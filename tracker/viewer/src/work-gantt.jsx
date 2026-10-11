@@ -423,6 +423,7 @@ function WorkGanttSidebarRow({
         title={title}
         onClick={() => onSelect(row.id)}
       >
+        {item?.referenceCode ? <code className="work-reference-code work-gantt-reference-code">{item.referenceCode}</code> : null}
         <span className="work-gantt-title">{title}</span>
         <span className="work-gantt-title-meta">
           {status ? <span className="work-gantt-row-meta work-gantt-status" title={'Lifecycle status · ' + status}>{status}</span> : null}
@@ -843,6 +844,8 @@ function WorkGanttTimelineContent({
           {rows.map(row => {
             const item = data?.itemById?.get(row.id) ?? row.entry;
             const title = item.title ?? row.entry.title;
+            const referenceCode = item.referenceCode;
+            const titleWithReference = referenceCode ? `${referenceCode} · ${title}` : title;
             const primaryId = row.primaryMark?.id;
             const visibleChildIntervals = (row.childSummaryIntervals ?? []).filter(interval => showActivity || interval.sourceKind !== 'observed');
             const rollups = row.collapsed && row.hasChildren
@@ -935,7 +938,7 @@ function WorkGanttTimelineContent({
                 style={{ left: `${envelopeLeft}px`, width: `${envelopeWidth}px` }}
                 onClick={() => onSelect(row.id)}
                 onPointerDown={event => event.stopPropagation()}
-              ><span className="work-gantt-parent-envelope-label">{parentLabelText}</span></button> : null}
+              ><span className="work-gantt-parent-envelope-label">{item.referenceCode ? <code className="work-reference-code">{item.referenceCode}</code> : null}{parentLabelText}</span></button> : null}
               {row.collapsed && hasOwnApprovedPlan && childApprovedEnvelope ? <>
                 <span className="work-gantt-parent-track-label work-gantt-parent-track-label-plan" style={{ left: trackLabelLeft(row.ownApprovedMark) }}>{planLabel}</span>
                 <span className="work-gantt-parent-track-label work-gantt-parent-track-label-child" style={{ left: trackLabelLeft(childApprovedEnvelope) }}>{childLabel}</span>
@@ -970,7 +973,7 @@ function WorkGanttTimelineContent({
                 style={{ left: `${expandedParentLabelLeft}px`, width: `${expandedParentLabelWidth}px` }}
                 onClick={() => onSelect(row.id)}
                 onPointerDown={event => event.stopPropagation()}
-              ><span className="work-gantt-expanded-parent-label-text">{parentLabelText}</span></button> : null}
+              ><span className="work-gantt-expanded-parent-label-text">{item.referenceCode ? <code className="work-reference-code">{item.referenceCode}</code> : null}{parentLabelText}</span></button> : null}
               {row.isExpanded && visibleChildSummaryEnvelope ? childApprovedEnvelope ? <button
                 className="work-gantt-child-summary-bracket"
                 type="button"
@@ -1022,8 +1025,8 @@ function WorkGanttTimelineContent({
                 overlapMode="overlay"
                 hitTesting="lanes"
                 getInteractionLane={feature => workGanttInteractionLane(row, feature)}
-                getAriaLabel={feature => title + ' · ' + accessibleMarkDescription(feature)}
-                getTitle={feature => title + ' · ' + accessibleMarkDescription(feature)}
+                getAriaLabel={feature => titleWithReference + ' · ' + accessibleMarkDescription(feature)}
+                getTitle={feature => titleWithReference + ' · ' + accessibleMarkDescription(feature)}
                 getClassName={feature => {
                   const classes = ['work-gantt-mark', 'work-gantt-mark-' + feature.sourceKind];
                   if (row.hasChildren && row.collapsed && !row.ownApprovedMark) classes.push('work-gantt-summary');
@@ -1071,7 +1074,7 @@ function WorkGanttTimelineContent({
                       aria-hidden="true"
                       style={{ '--motion-left': String(motion.left) + '%', '--motion-width': String(motion.width) + '%' }}
                     /> : null}
-                    {label && feature.id === primaryId ? <span className="gantt-feature-label work-gantt-label">{label}</span> : null}
+                    {label && feature.id === primaryId ? <span className="gantt-feature-label work-gantt-label">{referenceCode ? <code className="work-reference-code">{referenceCode}</code> : null}{label}</span> : null}
                   </span>;
                 }}
               </GanttFeatureRow> : null}

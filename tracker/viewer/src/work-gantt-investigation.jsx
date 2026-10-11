@@ -181,7 +181,7 @@ export function WorkGanttInvestigation({ row, data, onClose, onOpenFullDetails }
       <header className="work-gantt-investigation-header">
         <div className="work-gantt-investigation-heading">
           <p className="work-gantt-investigation-eyebrow">Work item</p>
-          <h2>{entry.title || item?.title || row.id}</h2>
+          <h2>{item?.referenceCode ? <code className="work-reference-code">{item.referenceCode}</code> : null}{entry.title || item?.title || row.id}</h2>
         </div>
         <Button
           type="button"

@@ -70,6 +70,8 @@ test('populated synthetic routes show work, plans, reports, and team data', asyn
   const snapshot = await readSnapshot(page);
   expect(snapshot.items).toHaveLength(94);
   expect(snapshot.source?.commit).toMatch(/^[0-9a-f]{40}$/);
+  const foundation = snapshot.items?.find((item) => (item as { id?: string }).id === itemId) as { referenceCode?: string } | undefined;
+  expect(foundation?.referenceCode).toMatch(/^T-[A-Z0-9]{6}$/);
 
   await expect(page.getByRole('heading', { name: 'Work', exact: true, level: 1 })).toBeVisible();
   await expect(page.getByText('Synthetic foundation task', { exact: true })).toBeVisible();
@@ -108,15 +110,24 @@ test('Gantt keeps schedule controls compact and opens row investigation', async 
 
   const row = page.getByRole('button', { name: /Open details for Synthetic foundation task/ }).first();
   await expect(row).toBeVisible();
+  const snapshot = await readSnapshot(page);
+  const referenceCode = (snapshot.items?.find((item) => (item as { id?: string }).id === itemId) as { referenceCode?: string } | undefined)?.referenceCode;
+  expect(referenceCode).toMatch(/^T-[A-Z0-9]{6}$/);
+  await expect(row).toContainText(referenceCode!);
   await row.click();
 
   const investigation = page.getByTestId('work-gantt-investigation');
   await expect(investigation).toBeVisible();
-  await expect(investigation.getByRole('heading', { name: 'Synthetic foundation task', exact: true, level: 2 })).toBeVisible();
+  await expect(investigation.getByRole('heading', { name: /Synthetic foundation task/, level: 2 })).toBeVisible();
+  await expect(investigation).toContainText(referenceCode!);
   await expect(investigation.getByText('Approved schedule', { exact: true })).toBeVisible();
   await expect(investigation.getByRole('button', { name: 'Open full details', exact: true })).toBeVisible();
   await investigation.getByRole('button', { name: 'Close work item investigation', exact: true }).click();
   await expect(investigation).toBeHidden();
+  await openRoute(page, '/work?mode=kanban');
+  const kanbanTask = page.locator('.kanban-task').filter({ hasText: 'Synthetic foundation task' }).first();
+  await expect(kanbanTask).toBeVisible();
+  await expect(kanbanTask).toContainText(referenceCode!);
   expect(pageErrors).toEqual([]);
 });
 
