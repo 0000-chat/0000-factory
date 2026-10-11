@@ -23,7 +23,7 @@ import {
 } from './livestore-schema';
 import { parseTrackerSnapshot } from './snapshot';
 import { isTeamProjection } from './team-mode';
-import { fetchPlanningArchive, type PlanningArchive } from './planning-archive';
+import { emptyPlanningArchive, fetchPlanningArchive, type PlanningArchive } from './planning-archive';
 import { refreshCanonicalSnapshot, SnapshotAcknowledgementTimeout, waitForStoreAcknowledgement, type TrackerStore } from './snapshot-sync';
 import { trackerInstanceConfig } from './instance-config';
 import { legacyLocationPath } from './navigation';
@@ -1045,15 +1045,18 @@ class StoreErrorBoundary extends Component<{ readonly children: ReactNode }, { r
 
 function TrackerApplication() {
   const store = useStore(trackerStoreOptions);
-  const [planningArchive, setPlanningArchive] = useState<PlanningArchive | null>(null);
+  const [planningArchive, setPlanningArchive] = useState<PlanningArchive | null>(() => (
+    trackerInstanceConfig.features.weeklyPlanning ? null : emptyPlanningArchive()
+  ));
   const [planningArchiveError, setPlanningArchiveError] = useState<Error | null>(null);
   useEffect(() => {
+    if (!trackerInstanceConfig.features.weeklyPlanning) return undefined;
     const controller = new AbortController();
     void fetchPlanningArchive(controller.signal)
       .then(setPlanningArchive)
       .catch(error => {
         if (error?.name !== 'AbortError') setPlanningArchiveError(error instanceof Error ? error : new Error(String(error)));
-      });
+    });
     return () => controller.abort();
   }, []);
   if (planningArchiveError !== null) return <SnapshotError error={planningArchiveError} />;

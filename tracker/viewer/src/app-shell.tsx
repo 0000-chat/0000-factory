@@ -71,7 +71,7 @@ function returnLabel(value: string): string {
     case 'plans': return 'Return to Plans';
     case 'team': return 'Return to Team';
     case 'reports': return 'Return to Reports';
-    case 'weekly-planning': return 'Return to Weekly planning';
+    case 'weekly-planning': return trackerInstanceConfig.features.weeklyPlanning ? 'Return to Weekly planning' : 'Return to Work';
     default: return 'Return to Work';
   }
 }
@@ -104,6 +104,9 @@ export function RouteReturnLink({ value, options = {} }: { value: unknown; optio
       return <Link to="/team" search={parseTeamSearch(search, options)} replace>{label}</Link>;
     }
     case 'weekly-planning':
+      if (!trackerInstanceConfig.features.weeklyPlanning) {
+        return <Link to="/work" search={parseWorkSearch({}, options)} replace>Return to Work</Link>;
+      }
       return <Link to="/weekly-planning" replace>{label}</Link>;
     default:
       return <Link to="/work" search={parseWorkSearch({}, options)} replace>Return to Work</Link>;
@@ -176,7 +179,7 @@ function Sidebar({
         {teamProjection ? null : <Link className={navClass('today')} data-slot="tabs-trigger" data-state={active('today') ? 'active' : 'inactive'} to="/today" search={todaySearch} aria-current={active('today') ? 'page' : undefined}><CalendarDays size={16} aria-hidden="true" />Today</Link>}
         <Link className={navClass('work')} data-slot="tabs-trigger" data-state={active('work') ? 'active' : 'inactive'} to="/work" search={workSearch} aria-current={active('work') ? 'page' : undefined}><LayoutDashboard size={16} aria-hidden="true" />Work</Link>
         {teamProjection ? null : <Link className={navClass('plans')} data-slot="tabs-trigger" data-state={active('plans') ? 'active' : 'inactive'} to="/plans" search={plansSearch} aria-current={active('plans') ? 'page' : undefined}><ClipboardList size={16} aria-hidden="true" />Plans</Link>}
-        <Link className={navClass('weekly-planning')} data-slot="tabs-trigger" data-state={active('weekly-planning') ? 'active' : 'inactive'} to="/weekly-planning" aria-current={active('weekly-planning') ? 'page' : undefined}><ClipboardList size={16} aria-hidden="true" />Weekly planning</Link>
+        {trackerInstanceConfig.features.weeklyPlanning ? <Link className={navClass('weekly-planning')} data-slot="tabs-trigger" data-state={active('weekly-planning') ? 'active' : 'inactive'} to="/weekly-planning" aria-current={active('weekly-planning') ? 'page' : undefined}><ClipboardList size={16} aria-hidden="true" />Weekly planning</Link> : null}
         <Link className={navClass('team')} data-slot="tabs-trigger" data-state={active('team') ? 'active' : 'inactive'} to="/team" search={teamSearch} aria-current={active('team') ? 'page' : undefined}><Users size={16} aria-hidden="true" />Team</Link>
         {teamProjection ? null : <Link className={navClass('reports')} data-slot="tabs-trigger" data-state={active('reports') ? 'active' : 'inactive'} to="/reports" search={reportsSearch} aria-current={active('reports') ? 'page' : undefined}><BarChart3 size={16} aria-hidden="true" />Reports</Link>}
       </div>
@@ -312,7 +315,8 @@ export function AppShell() {
         void navigate({ to: '/decisions/$decisionId', params: { decisionId: targetRoute.decisionId } });
         break;
       case 'weekly-planning':
-        void navigate({ to: '/weekly-planning' });
+        if (trackerInstanceConfig.features.weeklyPlanning) void navigate({ to: '/weekly-planning' });
+        else void navigate({ to: '/work', search: parseWorkSearch({}, projectOptions), replace: true });
         break;
       case 'root':
       case 'invalid':
@@ -445,7 +449,8 @@ export function AppShell() {
         void navigate({ to: '/decisions/$decisionId', params: { decisionId: targetRoute.decisionId } });
         break;
       case 'weekly-planning':
-        void navigate({ to: '/weekly-planning' });
+        if (trackerInstanceConfig.features.weeklyPlanning) void navigate({ to: '/weekly-planning' });
+        else void navigate({ to: '/work', search: parseWorkSearch({}, projectOptions), replace: true });
         break;
       case 'root':
       case 'invalid':

@@ -82,7 +82,7 @@ function shortId(id, max) {
  * an empty, read-only site.  `publishKind: 'enabled'` is an alias for the
  * versioned `github-app` setting and requires explicit ready Access.
  *
- * @param {{id?: string, folderPath?: string, evidenceKind?: string, accessKind?: string, publishKind?: string}} [options]
+ * @param {{id?: string, folderPath?: string, evidenceKind?: string, accessKind?: string, publishKind?: string, weeklyPlanning?: boolean}} [options]
  */
 export function fixtureInstance({
   id = DEFAULT_ID,
@@ -90,6 +90,7 @@ export function fixtureInstance({
   evidenceKind = 'none',
   accessKind = 'unconfigured',
   publishKind = 'disabled',
+  weeklyPlanning = true,
 } = {}) {
   const instanceId = boundedId(optionText(id, 'id'));
   if (typeof folderPath !== 'string') throw new TypeError('folderPath: expected a repository-relative path string');
@@ -97,6 +98,7 @@ export function fixtureInstance({
   const evidence = option(evidenceKind, 'evidenceKind', SUPPORTED_EVIDENCE, 'none');
   const access = option(accessKind, 'accessKind', SUPPORTED_ACCESS, 'unconfigured');
   const publish = option(publishKind, 'publishKind', SUPPORTED_PUBLISH, 'disabled');
+  if (typeof weeklyPlanning !== 'boolean') throw new TypeError('weeklyPlanning: expected a boolean');
   const publishingEnabled = publish === 'enabled' || publish === 'github-app';
   if (publishingEnabled && access !== 'ready') {
     throw new TypeError('publishKind: enabled publishing requires accessKind: ready');
@@ -163,6 +165,7 @@ export function fixtureInstance({
       compatibilityDate: '2026-09-30',
       compatibilityFlags: ['nodejs_compat'],
     },
+    features: { weeklyPlanning },
   };
   return parseInstanceConfig(instance);
 }

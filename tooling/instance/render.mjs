@@ -226,7 +226,7 @@ export function renderInstanceArtifacts({ instance, manifestDir, engineRoot, out
     if (Object.hasOwn(provenanceRecord, 'data')) {
       writeText(join(stage, 'assets/data.json'), `${JSON.stringify(provenanceRecord.data, null, 2)}\n`);
     }
-    if (Object.hasOwn(provenanceRecord, 'planningArchive')) {
+    if (parsed.features.weeklyPlanning && Object.hasOwn(provenanceRecord, 'planningArchive')) {
       writeText(join(stage, 'assets/planning/archive.json'), `${JSON.stringify(provenanceRecord.planningArchive, null, 2)}\n`);
     }
 

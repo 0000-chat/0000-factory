@@ -99,6 +99,21 @@ test('the synthetic 0000 projection preserves browser keys byte-for-byte', () =>
     activityPausedKey: '0000.workActivity.animationsPaused',
   });
   assert.equal(parsed.publishing.kind, 'disabled');
+  assert.deepEqual(parsed.features, { weeklyPlanning: true });
+});
+
+test('browser public config accepts a disabled weekly planning feature and rejects malformed values', () => {
+  const disabled = parsePublicInstanceConfig({
+    ...synthetic0000Projection,
+    features: { weeklyPlanning: false },
+  });
+  assert.deepEqual(disabled.features, { weeklyPlanning: false });
+  for (const features of [null, [], true, {}, { weeklyPlanning: 'false' }, { weeklyPlanning: false, future: true }]) {
+    assert.throws(
+      () => parsePublicInstanceConfig({ ...synthetic0000Projection, features }),
+      /publicInstance\.features(?:\.weeklyPlanning|\.future)?/u,
+    );
+  }
 });
 
 test('independent projections isolate every browser state surface', () => {

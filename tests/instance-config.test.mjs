@@ -76,9 +76,24 @@ test('version 1 settings parse as nested, frozen site data', () => {
   assert.equal(parsed.github.repo, 'synthetic-data');
   assert.equal(parsed.model.approvalProtocol, 'don-v1');
   assert.equal(parsed.deployment.workerName, 'tracker-synthetic');
+  assert.deepEqual(parsed.features, { weeklyPlanning: true });
   assert.equal(Object.isFrozen(parsed), true);
   assert.equal(Object.isFrozen(parsed.browser), true);
   assert.throws(() => { parsed.browser.storeId = 'changed'; }, TypeError);
+});
+
+test('weekly planning is an optional, strictly typed instance feature', () => {
+  const disabled = parseInstanceConfig(settings({ features: { weeklyPlanning: false } }));
+  assert.deepEqual(disabled.features, { weeklyPlanning: false });
+  assert.deepEqual(publicInstanceConfig(disabled).features, { weeklyPlanning: false });
+  assert.deepEqual(parsePublicInstanceConfig(publicInstanceConfig(disabled)).features, { weeklyPlanning: false });
+
+  for (const features of [null, [], true, {}, { weeklyPlanning: 'false' }, { weeklyPlanning: false, future: true }]) {
+    assert.throws(
+      () => parseInstanceConfig(settings({ features })),
+      /settings\.features(?:\.weeklyPlanning|\.future)?/u,
+    );
+  }
 });
 
 test('ready Access, service, and enabled publishing validate together', () => {

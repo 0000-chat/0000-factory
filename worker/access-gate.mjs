@@ -154,6 +154,32 @@ function isPublishPath(pathname) {
   return pathname === '/api/publish' || pathname === '/api/publish/' || pathname.startsWith('/api/publish/');
 }
 
+function normalizedPathname(pathname) {
+  if (typeof pathname !== 'string' || !pathname.startsWith('/')) return null;
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+  if (decoded.includes('\\') || decoded.includes('\u0000')) return null;
+  const segments = decoded.split('/');
+  if (segments.some(segment => segment === '.' || segment === '..')) return null;
+  return `/${segments.filter(Boolean).join('/')}`.toLowerCase();
+}
+
+function isPlanningPath(pathname) {
+  const normalized = normalizedPathname(pathname);
+  // A malformed encoded URL must not fall through to the SPA when a feature
+  // is disabled. This fail-closed branch also prevents partial decoding from
+  // changing which route boundary is being checked.
+  if (normalized === null) return true;
+  return normalized === '/weekly-planning'
+    || normalized.startsWith('/weekly-planning/')
+    || normalized === '/planning'
+    || normalized.startsWith('/planning/');
+}
+
 function createConfiguredWorker(instance, options) {
   const access = instance.access;
   const verifyOptions = {
@@ -193,6 +219,10 @@ function createConfiguredWorker(instance, options) {
           ...options,
           instance,
         });
+      }
+
+      if (!instance.features.weeklyPlanning && isPlanningPath(pathname)) {
+        return response('Not found.', 404);
       }
 
       if (!env.ASSETS || typeof env.ASSETS.fetch !== 'function') {

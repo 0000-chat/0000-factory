@@ -113,7 +113,7 @@ function safePresentationHtml(value: unknown, path: string): string {
   return html;
 }
 
-function emptyArchive(): PlanningArchive {
+export function emptyPlanningArchive(): PlanningArchive {
   return { schemaVersion: 1, entries: [], currentDraftId: null, latestApprovedId: null };
 }
 
@@ -176,7 +176,7 @@ export function parsePlanningArchive(value: unknown): PlanningArchive {
 
 export async function fetchPlanningArchive(signal?: AbortSignal): Promise<PlanningArchive> {
   const response = await fetch('/planning/archive.json', { cache: 'no-store', signal });
-  if (response.status === 404) return emptyArchive();
+  if (response.status === 404) return emptyPlanningArchive();
   if (!response.ok) throw new Error(`Weekly planning archive unavailable (${response.status}).`);
   try {
     return parsePlanningArchive(await response.json());

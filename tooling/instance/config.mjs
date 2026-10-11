@@ -20,7 +20,7 @@ const COMPATIBILITY_FLAGS = new Set(['nodejs_compat']);
 
 const ROOT_KEYS = [
   'schemaVersion', 'id', 'branding', 'github', 'data', 'model', 'browser',
-  'access', 'publish', 'deployment',
+  'access', 'publish', 'deployment', 'features',
 ];
 const BRANDING_KEYS = ['name', 'title', 'description', 'markText', 'homeLabel', 'loadingLabel', 'faviconPath'];
 const GITHUB_KEYS = ['owner', 'repo', 'branch'];
@@ -34,6 +34,7 @@ const BROWSER_KEYS = [
 ];
 const EVIDENCE_KEYS = ['kind'];
 const DEPLOYMENT_KEYS = ['accountBinding', 'workerName', 'customDomain', 'compatibilityDate', 'compatibilityFlags'];
+const FEATURES_KEYS = ['weeklyPlanning'];
 const ACCESS_UNCONFIGURED_KEYS = ['kind'];
 const ACCESS_READY_KEYS = ['kind', 'teamDomain', 'audience', 'readerEmails', 'readerEmailDomains', 'service'];
 const SERVICE_DISABLED_KEYS = ['kind'];
@@ -349,6 +350,20 @@ function parseData(value, path) {
   };
 }
 
+/** @param {unknown} value @param {string} path */
+function parseFeatures(value, path) {
+  if (value === undefined) return { weeklyPlanning: true };
+  const record = object(value, path);
+  exactKeys(record, FEATURES_KEYS, path);
+  if (!Object.hasOwn(record, 'weeklyPlanning')) {
+    throw new InstanceConfigError(`${path}.weeklyPlanning`, 'required field is missing');
+  }
+  if (typeof record.weeklyPlanning !== 'boolean') {
+    throw new InstanceConfigError(`${path}.weeklyPlanning`, 'must be a boolean');
+  }
+  return { weeklyPlanning: record.weeklyPlanning };
+}
+
 /** @param {Record<string, unknown>} value @param {string} path */
 function parseAccess(value, path) {
   const record = object(value, path);
@@ -454,6 +469,7 @@ export function parseInstanceConfig(value) {
   if (namespace !== id) throw new InstanceConfigError('settings.browser.namespace', 'must match settings.id');
   const access = parseAccess(input.access, 'settings.access');
   const data = parseData(dataInput, 'settings.data');
+  const features = parseFeatures(input.features, 'settings.features');
   if (data.layout === INSTANCE_TEAM_LAYOUT) {
     if (input.publish?.kind !== 'disabled') {
       throw new InstanceConfigError('settings.publish.kind', 'team projection instances require disabled publishing');
@@ -501,6 +517,7 @@ export function parseInstanceConfig(value) {
       compatibilityDate: compatibilityDate(deploymentInput.compatibilityDate, 'settings.deployment.compatibilityDate'),
       compatibilityFlags: compatibilityFlags(deploymentInput.compatibilityFlags, 'settings.deployment.compatibilityFlags'),
     },
+    features,
   };
   instance.publish = parsePublish(input.publish, 'settings.publish', access);
   return /** @type {Readonly<InstanceConfig>} */ (freezeDeep(instance));
@@ -553,10 +570,11 @@ export function publicInstanceConfig(instance) {
     },
     browser: { ...parsed.browser },
     publishing: { kind: parsed.publish.kind === 'github-app' ? 'enabled' : 'disabled' },
+    features: { ...parsed.features },
   });
 }
 
-const PUBLIC_ROOT_KEYS = ['schemaVersion', 'id', 'branding', 'source', 'browser', 'publishing'];
+const PUBLIC_ROOT_KEYS = ['schemaVersion', 'id', 'branding', 'source', 'browser', 'publishing', 'features'];
 const PUBLIC_BRANDING_KEYS = BRANDING_KEYS;
 const PUBLIC_SOURCE_KEYS = ['owner', 'repo', 'branch', 'folderPath'];
 const PUBLIC_BROWSER_KEYS = BROWSER_KEYS;
@@ -577,6 +595,7 @@ export function parsePublicInstanceConfig(value) {
   if (publishing.kind !== 'enabled' && publishing.kind !== 'disabled') {
     throw new InstanceConfigError('publicInstance.publishing.kind', 'must be enabled or disabled');
   }
+  const features = parseFeatures(input.features, 'publicInstance.features');
   const id = instanceId(input.id, 'publicInstance.id');
   const namespace = instanceId(browser.namespace, 'publicInstance.browser.namespace');
   if (namespace !== id) throw new InstanceConfigError('publicInstance.browser.namespace', 'must match publicInstance.id');
@@ -608,6 +627,7 @@ export function parsePublicInstanceConfig(value) {
       activityPausedKey: browserKey(browser.activityPausedKey, 'publicInstance.browser.activityPausedKey', namespace, { separator: '.' }),
     },
     publishing: { kind: publishing.kind },
+    features,
   }));
 }
 
@@ -653,6 +673,7 @@ export function parseInstanceCatalog(value) {
  * @property {{kind:'unconfigured'}|{kind:'ready',teamDomain:string,audience:string,readerEmails:string[],readerEmailDomains:string[],service:{kind:'disabled'}|{kind:'enabled',clientId:string}}} access
  * @property {{kind:'disabled'}|{kind:'github-app',publisherEmail:string,recordActorId:string,operations:'existing-task-edits-v1'}} publish
  * @property {{accountBinding:string,workerName:string,customDomain:string,compatibilityDate:string,compatibilityFlags:string[]}} deployment
+ * @property {{weeklyPlanning:boolean}} features
  */
 
 /** @typedef {object} PublicInstanceConfig
@@ -662,4 +683,5 @@ export function parseInstanceCatalog(value) {
  * @property {{owner:string,repo:string,branch:string,folderPath:string}} source
  * @property {{namespace:string,storeId:string,themeKey:string,editLockPrefix:string,publishLockName:string,unscheduledCollapsedKey:string,activityPausedKey:string}} browser
  * @property {{kind:'enabled'|'disabled'}} publishing
+ * @property {{weeklyPlanning:boolean}} features
  */
