@@ -38,6 +38,14 @@ function normalizedEmail(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
+/** @param {Readonly<{readerEmails:string[],readerEmailDomains?:string[]}>} access @param {string} email */
+function readerEmailAllowed(access, email) {
+  if (access.readerEmails.includes(email)) return true;
+  const at = email.lastIndexOf('@');
+  if (at <= 0 || at === email.length - 1 || email.indexOf('@') !== at) return false;
+  return Array.isArray(access.readerEmailDomains) && access.readerEmailDomains.includes(email.slice(at + 1));
+}
+
 async function accessKey(teamDomain, keyId, fetchImpl) {
   const result = await fetchImpl(`${teamDomain}/cdn-cgi/access/certs`, {
     headers: { Accept: 'application/json' },
@@ -54,7 +62,8 @@ async function accessKey(teamDomain, keyId, fetchImpl) {
 /**
  * Verify a Cloudflare Access JWT against the captured site policy. Access keys
  * are fetched only after issuer, audience, and time claims pass. The result is
- * either an exact reader email or the configured read-only service identity.
+ * either an exact reader email, a configured reader email domain, or the
+ * configured read-only service identity.
  */
 export async function verifyAccessJwt(token, access, {
   now = Date.now,
@@ -111,7 +120,7 @@ export async function verifyAccessJwt(token, access, {
     return { kind: 'service', clientId: payload.common_name };
   }
 
-  if (!claimEmail || !access.readerEmails.includes(claimEmail)) throw new Error('wrong Access identity');
+  if (!claimEmail || !readerEmailAllowed(access, claimEmail)) throw new Error('wrong Access identity');
   return claimEmail;
 }
 

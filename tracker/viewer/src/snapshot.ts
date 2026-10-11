@@ -188,6 +188,17 @@ export interface TrackerSource extends SnapshotRecord {
   builtAt?: string;
   committedAt?: string | null;
   dirty?: boolean;
+  layout?: string;
+  projectionId?: string;
+  week?: string;
+  revision?: string;
+  policyRevision?: string;
+  /** Timestamp supplied by the projection export, when available. */
+  exportedAt?: string;
+  /** Alias accepted from projection producers that call this generatedAt. */
+  projectionGeneratedAt?: string;
+  /** Stable digest of the exported projection, when available. */
+  projectionDigest?: string;
 }
 
 export interface TrackerSnapshot extends SnapshotRecord {

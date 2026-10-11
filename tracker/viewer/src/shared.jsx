@@ -151,7 +151,13 @@ export function ItemChips({ item }) {
 /** @param {import('./features/contracts').SnapshotFooterProps} props */
 export function SnapshotFooter({ source }) {
   const meta = source ?? {};
-  return <div className="snapshot-line" data-testid="snapshot-meta"><span>Source snapshot</span><span>{meta.commit && meta.commit !== 'unknown' ? `commit ${meta.shortCommit || meta.commit.slice(0, 10)}` : 'commit unknown'}</span><span>built {formatTimestamp(meta.builtAt)}</span>{meta.committedAt ? <span>source {formatTimestamp(meta.committedAt)}</span> : null}{meta.dirty ? <BadgeChip tone="amber">local changes present</BadgeChip> : null}</div>;
+  const teamProjection = meta.layout === 'team-projection-v1';
+  if (teamProjection) {
+    const zeroDigest = meta.projectionDigest === `sha256:${'0'.repeat(64)}`;
+    const sharedAt = meta.exportedAt || meta.projectionGeneratedAt;
+    return <div className="snapshot-line" data-testid="snapshot-meta"><span>{zeroDigest ? 'No tasks shared yet' : 'Shared tasks'}</span>{sharedAt ? <span>shared {formatTimestamp(sharedAt)}</span> : null}</div>;
+  }
+  return <div className="snapshot-line" data-testid="snapshot-meta"><span>Source snapshot</span><span>{meta.commit && meta.commit !== 'unknown' ? `commit ${meta.shortCommit || meta.commit.slice(0, 10)}` : 'commit unknown'}</span><span>{`built ${formatTimestamp(meta.builtAt)}`}</span>{meta.committedAt ? <span>{`source ${formatTimestamp(meta.committedAt)}`}</span> : null}{meta.dirty ? <BadgeChip tone="amber">local changes present</BadgeChip> : null}</div>;
 }
 
 function scopeOptions(data) {

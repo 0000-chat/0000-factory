@@ -28,7 +28,8 @@ function settings(overrides = {}) {
     },
     access: {
       kind: 'ready', teamDomain: 'https://team.synthetic.test', audience: 'audience',
-      readerEmails: ['reader@synthetic.test', 'publisher@synthetic.test'], service: { kind: 'disabled' },
+      readerEmails: ['reader@synthetic.test', 'publisher@synthetic.test'],
+      readerEmailDomains: ['EXAMPLE.TEST'], service: { kind: 'disabled' },
     },
     publish: { kind: 'github-app', publisherEmail: 'publisher@synthetic.test', recordActorId: 'publisher', operations: 'existing-task-edits-v1' },
     deployment: {
@@ -63,8 +64,11 @@ test('HTML projection is escaped and runtime policy stays outside assets', async
   assert.equal(html.includes('team.synthetic.test'), false);
   assert.equal(html.includes('reader@synthetic.test'), false);
   assert.equal(html.includes('publisher@synthetic.test'), false);
+  assert.equal(html.includes('example.test'), false);
   assert.equal(html.includes('synthetic-account'), false);
-  assert.equal(readFileSync(join(output, 'runtime-config.mjs'), 'utf8').includes('team.synthetic.test'), true);
+  const runtimeConfig = readFileSync(join(output, 'runtime-config.mjs'), 'utf8');
+  assert.equal(runtimeConfig.includes('team.synthetic.test'), true);
+  assert.match(runtimeConfig, /"readerEmailDomains":\["example\.test"\]/u);
   assert.equal(readFileSync(join(output, 'assets/data.json'), 'utf8'), '{\n  "synthetic": true\n}\n');
   const workerEntry = readFileSync(join(output, 'worker-entry.mjs'), 'utf8');
   assert.doesNotMatch(workerEntry, /file:\/\//u);

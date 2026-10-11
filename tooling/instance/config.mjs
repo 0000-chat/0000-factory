@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 
 export const INSTANCE_SCHEMA_VERSION = 1;
 export const INSTANCE_LAYOUT = 'tracker-v1';
+export const INSTANCE_TEAM_LAYOUT = 'team-projection-v1';
 export const INSTANCE_APPROVAL_PROTOCOL = 'don-v1';
 export const INSTANCE_PUBLISH_OPERATIONS = 'existing-task-edits-v1';
 
@@ -23,7 +24,9 @@ const ROOT_KEYS = [
 ];
 const BRANDING_KEYS = ['name', 'title', 'description', 'markText', 'homeLabel', 'loadingLabel', 'faviconPath'];
 const GITHUB_KEYS = ['owner', 'repo', 'branch'];
-const DATA_KEYS = ['folderPath', 'layout', 'evidence'];
+const TRACKER_DATA_KEYS = ['folderPath', 'layout', 'evidence'];
+const TEAM_DATA_KEYS = ['folderPath', 'layout', 'projectionPath', 'evidence', 'projectionLinkPolicy'];
+const PROJECTION_LINK_POLICY_KEYS = ['allowedEvidenceHosts', 'forbiddenGitHubRepositories'];
 const MODEL_KEYS = ['approvalProtocol'];
 const BROWSER_KEYS = [
   'namespace', 'storeId', 'themeKey', 'editLockPrefix', 'publishLockName',
@@ -32,7 +35,7 @@ const BROWSER_KEYS = [
 const EVIDENCE_KEYS = ['kind'];
 const DEPLOYMENT_KEYS = ['accountBinding', 'workerName', 'customDomain', 'compatibilityDate', 'compatibilityFlags'];
 const ACCESS_UNCONFIGURED_KEYS = ['kind'];
-const ACCESS_READY_KEYS = ['kind', 'teamDomain', 'audience', 'readerEmails', 'service'];
+const ACCESS_READY_KEYS = ['kind', 'teamDomain', 'audience', 'readerEmails', 'readerEmailDomains', 'service'];
 const SERVICE_DISABLED_KEYS = ['kind'];
 const SERVICE_ENABLED_KEYS = ['kind', 'clientId'];
 const PUBLISH_DISABLED_KEYS = ['kind'];
@@ -45,6 +48,11 @@ const ACTOR_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}$/u;
 const WORKER_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 const DNS_LABEL_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/u;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
+const MAX_ACCESS_READER_EMAILS = 1024;
+const MAX_ACCESS_READER_EMAIL_DOMAINS = 128;
+const MAX_PROJECTION_EVIDENCE_HOSTS = 128;
+const MAX_PROJECTION_GITHUB_REPOSITORIES = 128;
+const GITHUB_REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/u;
 
 /** Error raised when settings do not satisfy their versioned contract. */
 export class InstanceConfigError extends TypeError {
@@ -164,9 +172,14 @@ function email(value, path) {
   return result;
 }
 
-/** @param {unknown} value @param {string} path */
-function emailSet(value, path) {
-  if (!Array.isArray(value) || value.length === 0) throw new InstanceConfigError(path, 'must be a non-empty email array');
+/** @param {unknown} value @param {string} path @param {{allowEmpty?: boolean}} [options] */
+function emailSet(value, path, { allowEmpty = false } = {}) {
+  if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
+    throw new InstanceConfigError(path, `must be ${allowEmpty ? 'an' : 'a non-empty'} email array`);
+  }
+  if (value.length > MAX_ACCESS_READER_EMAILS) {
+    throw new InstanceConfigError(path, `must contain at most ${MAX_ACCESS_READER_EMAILS} email addresses`);
+  }
   const result = value.map((candidate, index) => email(candidate, `${path}[${index}]`));
   if (new Set(result).size !== result.length) throw new InstanceConfigError(path, 'must not contain duplicate email addresses');
   return result;
@@ -181,6 +194,76 @@ function dnsName(value, path) {
     throw new InstanceConfigError(path, 'must be a DNS host name');
   }
   return result.toLowerCase();
+}
+
+/** @param {unknown} value @param {string} path */
+function readerEmailDomain(value, path) {
+  const result = dnsName(value, path);
+  const ipv4 = result.split('.');
+  const isIpv4Literal = ipv4.length === 4
+    && ipv4.every(label => /^(?:0|[1-9]\d{0,2})$/u.test(label) && Number(label) <= 255);
+  if (!result.includes('.') || isIpv4Literal || result === 'localhost' || result.endsWith('.localhost') || result.endsWith('.local')) {
+    throw new InstanceConfigError(path, 'must be a public DNS email domain');
+  }
+  return result;
+}
+
+/** @param {unknown} value @param {string} path */
+function readerEmailDomainSet(value, path) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new InstanceConfigError(path, 'must be a DNS domain array when provided');
+  if (value.length > MAX_ACCESS_READER_EMAIL_DOMAINS) {
+    throw new InstanceConfigError(path, `must contain at most ${MAX_ACCESS_READER_EMAIL_DOMAINS} domains`);
+  }
+  const result = value.map((candidate, index) => readerEmailDomain(candidate, `${path}[${index}]`));
+  if (new Set(result).size !== result.length) throw new InstanceConfigError(path, 'must not contain duplicate email domains');
+  return result;
+}
+
+/** @param {unknown} value @param {string} path */
+function projectionEvidenceHost(value, path) {
+  const result = dnsName(value, path);
+  const ipv4 = result.split('.');
+  const isIpv4Literal = ipv4.length === 4
+    && ipv4.every(label => /^(?:0|[1-9]\d{0,2})$/u.test(label) && Number(label) <= 255);
+  if (!result.includes('.') || isIpv4Literal || result === 'localhost' || result.endsWith('.localhost') || result.endsWith('.local')) {
+    throw new InstanceConfigError(path, 'must be a public DNS evidence host');
+  }
+  return result;
+}
+
+/** @param {unknown} value @param {string} path */
+function projectionRepository(value, path) {
+  const result = text(value, path, { min: 3, max: 201, pattern: GITHUB_REPOSITORY_PATTERN }).toLowerCase();
+  const [owner, repository] = result.split('/');
+  if (owner === '.' || owner === '..' || repository === '.' || repository === '..') {
+    throw new InstanceConfigError(path, 'must be an owner/repository pair');
+  }
+  return result;
+}
+
+/** @param {unknown} value @param {string} path @param {(value: unknown, path: string) => string} normalize @param {number} max @param {string} label */
+function projectionStringSet(value, path, normalize, max, label) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new InstanceConfigError(path, `must be an array of ${label}`);
+  if (value.length > max) throw new InstanceConfigError(path, `must contain at most ${max} ${label}`);
+  const result = value.map((candidate, index) => normalize(candidate, `${path}[${index}]`));
+  if (new Set(result).size !== result.length) throw new InstanceConfigError(path, `must not contain duplicate ${label}`);
+  return result;
+}
+
+/** @param {unknown} value @param {string} path */
+function parseProjectionLinkPolicy(value, path) {
+  if (value === undefined) return { allowedEvidenceHosts: [], forbiddenGitHubRepositories: [] };
+  const record = object(value, path);
+  exactKeys(record, PROJECTION_LINK_POLICY_KEYS, path);
+  for (const key of PROJECTION_LINK_POLICY_KEYS) {
+    if (!Object.hasOwn(record, key)) throw new InstanceConfigError(`${path}.${key}`, 'required field is missing');
+  }
+  return {
+    allowedEvidenceHosts: projectionStringSet(record.allowedEvidenceHosts, `${path}.allowedEvidenceHosts`, projectionEvidenceHost, MAX_PROJECTION_EVIDENCE_HOSTS, 'evidence hosts'),
+    forbiddenGitHubRepositories: projectionStringSet(record.forbiddenGitHubRepositories, `${path}.forbiddenGitHubRepositories`, projectionRepository, MAX_PROJECTION_GITHUB_REPOSITORIES, 'GitHub repositories'),
+  };
 }
 
 /** @param {unknown} value @param {string} path */
@@ -240,6 +323,33 @@ function parseService(value, path) {
 }
 
 /** @param {Record<string, unknown>} value @param {string} path */
+function parseData(value, path) {
+  const layout = value.layout;
+  if (layout === INSTANCE_LAYOUT) {
+    exactKeys(value, TRACKER_DATA_KEYS, path);
+    return {
+      folderPath: normalizeRepositoryPath(value.folderPath, `${path}.folderPath`, { allowEmpty: true }),
+      layout: INSTANCE_LAYOUT,
+      evidence: parseEvidence(value.evidence, `${path}.evidence`),
+    };
+  }
+  if (layout !== INSTANCE_TEAM_LAYOUT) {
+    throw new InstanceConfigError(`${path}.layout`, `must be ${INSTANCE_LAYOUT} or ${INSTANCE_TEAM_LAYOUT}`);
+  }
+  exactKeys(value, TEAM_DATA_KEYS, path);
+  if (value.evidence?.kind !== 'none') {
+    throw new InstanceConfigError(`${path}.evidence.kind`, 'team projection data must not load evidence sources');
+  }
+  return {
+    folderPath: normalizeRepositoryPath(value.folderPath, `${path}.folderPath`, { allowEmpty: true }),
+    layout: INSTANCE_TEAM_LAYOUT,
+    projectionPath: normalizeRepositoryPath(value.projectionPath, `${path}.projectionPath`),
+    evidence: parseEvidence(value.evidence, `${path}.evidence`),
+    projectionLinkPolicy: parseProjectionLinkPolicy(value.projectionLinkPolicy, `${path}.projectionLinkPolicy`),
+  };
+}
+
+/** @param {Record<string, unknown>} value @param {string} path */
 function parseAccess(value, path) {
   const record = object(value, path);
   if (record.kind === 'unconfigured') {
@@ -248,11 +358,17 @@ function parseAccess(value, path) {
   }
   if (record.kind !== 'ready') throw new InstanceConfigError(`${path}.kind`, 'must be unconfigured or ready');
   exactKeys(record, ACCESS_READY_KEYS, path);
+  const readerEmails = emailSet(record.readerEmails, `${path}.readerEmails`, { allowEmpty: true });
+  const readerEmailDomains = readerEmailDomainSet(record.readerEmailDomains, `${path}.readerEmailDomains`);
+  if (readerEmails.length === 0 && readerEmailDomains.length === 0) {
+    throw new InstanceConfigError(path, 'must configure readerEmails or readerEmailDomains');
+  }
   return {
     kind: 'ready',
     teamDomain: accessTeamDomain(record.teamDomain, `${path}.teamDomain`),
     audience: text(record.audience, `${path}.audience`, { min: 1, max: 512 }),
-    readerEmails: emailSet(record.readerEmails, `${path}.readerEmails`),
+    readerEmails,
+    readerEmailDomains,
     service: parseService(record.service, `${path}.service`),
   };
 }
@@ -327,7 +443,6 @@ export function parseInstanceConfig(value) {
   const githubInput = object(input.github, 'settings.github');
   exactKeys(githubInput, GITHUB_KEYS, 'settings.github');
   const dataInput = object(input.data, 'settings.data');
-  exactKeys(dataInput, DATA_KEYS, 'settings.data');
   const modelInput = object(input.model, 'settings.model');
   exactKeys(modelInput, MODEL_KEYS, 'settings.model');
   const browserInput = object(input.browser, 'settings.browser');
@@ -338,6 +453,15 @@ export function parseInstanceConfig(value) {
   const namespace = instanceId(browserInput.namespace, 'settings.browser.namespace');
   if (namespace !== id) throw new InstanceConfigError('settings.browser.namespace', 'must match settings.id');
   const access = parseAccess(input.access, 'settings.access');
+  const data = parseData(dataInput, 'settings.data');
+  if (data.layout === INSTANCE_TEAM_LAYOUT) {
+    if (input.publish?.kind !== 'disabled') {
+      throw new InstanceConfigError('settings.publish.kind', 'team projection instances require disabled publishing');
+    }
+    if (input.access?.kind === 'ready' && input.access.service?.kind !== 'disabled') {
+      throw new InstanceConfigError('settings.access.service.kind', 'team projection instances require a disabled Access service');
+    }
+  }
   const instance = {
     schemaVersion: INSTANCE_SCHEMA_VERSION,
     id,
@@ -355,11 +479,7 @@ export function parseInstanceConfig(value) {
       repo: repositoryName(githubInput.repo, 'settings.github.repo'),
       branch: gitRef(githubInput.branch, 'settings.github.branch'),
     },
-    data: {
-      folderPath: normalizeRepositoryPath(dataInput.folderPath, 'settings.data.folderPath', { allowEmpty: true }),
-      layout: literal(dataInput.layout, 'settings.data.layout', INSTANCE_LAYOUT),
-      evidence: parseEvidence(dataInput.evidence, 'settings.data.evidence'),
-    },
+    data,
     model: {
       approvalProtocol: literal(modelInput.approvalProtocol, 'settings.model.approvalProtocol', INSTANCE_APPROVAL_PROTOCOL),
     },
@@ -414,8 +534,8 @@ export function loadInstanceConfig({ path }) {
 
 /**
  * Project only values safe to serve to a browser. Runtime Access policy,
- * reader emails, publisher actor policy, account binding, and credentials are
- * intentionally absent.
+ * reader emails/domains, publisher actor policy, account binding, and
+ * credentials are intentionally absent.
  *
  * @param {Readonly<InstanceConfig>} instance
  */
@@ -527,10 +647,10 @@ export function parseInstanceCatalog(value) {
  * @property {string} id
  * @property {{name:string,title:string,description:string,markText:string,homeLabel:string,loadingLabel:string,faviconPath:string}} branding
  * @property {{owner:string,repo:string,branch:string}} github
- * @property {{folderPath:string,layout:'tracker-v1',evidence:{kind:'none'}|{kind:'grok-bot-v1'}}} data
+ * @property {{folderPath:string,layout:'tracker-v1',evidence:{kind:'none'}|{kind:'grok-bot-v1'}}|{folderPath:string,layout:'team-projection-v1',projectionPath:string,evidence:{kind:'none'},projectionLinkPolicy:{allowedEvidenceHosts:string[],forbiddenGitHubRepositories:string[]}}} data
  * @property {{approvalProtocol:'don-v1'}} model
  * @property {{namespace:string,storeId:string,themeKey:string,editLockPrefix:string,publishLockName:string,unscheduledCollapsedKey:string,activityPausedKey:string}} browser
- * @property {{kind:'unconfigured'}|{kind:'ready',teamDomain:string,audience:string,readerEmails:string[],service:{kind:'disabled'}|{kind:'enabled',clientId:string}}} access
+ * @property {{kind:'unconfigured'}|{kind:'ready',teamDomain:string,audience:string,readerEmails:string[],readerEmailDomains:string[],service:{kind:'disabled'}|{kind:'enabled',clientId:string}}} access
  * @property {{kind:'disabled'}|{kind:'github-app',publisherEmail:string,recordActorId:string,operations:'existing-task-edits-v1'}} publish
  * @property {{accountBinding:string,workerName:string,customDomain:string,compatibilityDate:string,compatibilityFlags:string[]}} deployment
  */

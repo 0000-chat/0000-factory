@@ -21,6 +21,8 @@ import { buildManagerProjection, selectManagerMatches } from './work-manager-mod
 import type { BuildManagerProjectionInput, ManagerPreset } from './work-manager-types';
 import { WorkManagerControls } from './work-manager-controls';
 import { clearManagerPreset, createWorkManagerRouteState, enterManagerPreset, hasManagerAdvancedRefinements, workManagerExpansionFingerprint } from './work-manager-controller-state';
+import { isTeamProjection } from './team-mode';
+import { projectedTeamProfiles } from './team-model.mjs';
 
 let managerPresetStateForSession = createWorkManagerRouteState();
 
@@ -55,6 +57,7 @@ function workVisibleItems(items: TrackerItem[], data: ReturnType<typeof useSnaps
 
 export function WorkPage() {
   const data = useSnapshot();
+  const teamProjection = isTeamProjection(data);
   const now = useWorkActivityClock();
   const projection = useMemo(() => buildWorkProjection({
     items: data.items,
@@ -103,7 +106,7 @@ export function WorkPage() {
   const eligibleIds = useMemo(() => new Set(visible.items
     .filter(item => !visible.contextualIds.has(item.id))
     .map(item => item.id)), [visible.contextualIds, visible.items]);
-  const managerEnabled = search.preset !== 'none' || search.people.length > 0;
+  const managerEnabled = !teamProjection && (search.preset !== 'none' || search.people.length > 0);
   const activityMode = search.mode === 'tree' || search.mode === 'gantt';
   const applyManagerFilter = managerEnabled && activityMode;
   const activityEligibleIds = useMemo(() => applyManagerFilter
@@ -163,7 +166,10 @@ export function WorkPage() {
     onActivityFilterChange: activity => update({ activity }),
   });
   const controls = <>
-    <WorkManagerControls
+    {teamProjection ? <section className="team-projection-work-note" aria-label="Person-scoped My Work">
+      <strong>My Work</strong>
+      <span>Use Person to view one team member’s tasks.</span>
+    </section> : <WorkManagerControls
       projection={managerProjection}
       people={(Array.isArray(data.people) ? data.people : []) as import('./work-manager-controls').WorkManagerPerson[]}
       search={search}
@@ -174,7 +180,7 @@ export function WorkPage() {
       modified={hasManagerAdvancedRefinements(search)}
       onPresetChange={updateManagerPreset}
       onPeopleChange={people => update({ people })}
-    />
+    />}
     <WorkFilterControls data={data} search={search} onChange={update} matchCount={visible.matchCount} />
   </>;
   const onModeChange = (mode: typeof search.mode) => update({ mode });
@@ -245,7 +251,8 @@ export function TeamPage({ memberSlug }: { memberSlug?: string }) {
     if (memberSlug === undefined) void navigate({ to: '/team', search: next, replace: true });
     else void navigate({ to: '/team/$memberSlug', params: { memberSlug }, search: next, replace: true });
   };
-  return <TeamView profiles={data.team} items={data.items} memberSlug={memberSlug ?? null} search={search.q} onSearchChange={q => update({ q })} organizationFilter={search.organization} onOrganizationChange={organization => update({ organization })} onResetFilters={() => update({ q: '', organization: 'all' })} onSelectItem={useBrowseItemSelection()} />;
+  const profiles = data.team.length > 0 ? data.team : (isTeamProjection(data) ? projectedTeamProfiles(data.items) : data.team);
+  return <TeamView profiles={profiles} items={data.items} teamProjection={isTeamProjection(data)} memberSlug={memberSlug ?? null} search={search.q} onSearchChange={q => update({ q })} organizationFilter={search.organization} onOrganizationChange={organization => update({ organization })} onResetFilters={() => update({ q: '', organization: 'all' })} onSelectItem={useBrowseItemSelection()} />;
 }
 
 export function WorkItemPage({ itemId }: { itemId: string }) {
@@ -264,6 +271,7 @@ export function WorkItemPage({ itemId }: { itemId: string }) {
     taskDrafts={taskDrafts}
     pendingDraftCount={taskDrafts.length}
     taskEdit={taskEdit}
+    readOnly={isTeamProjection(data)}
     renderItemLink={(id, label) => <ItemRouteLink itemId={id}>{label}</ItemRouteLink>}
     returnLink={<RouteReturnLink value={routerState.returnTo} />}
   />;

@@ -25,6 +25,17 @@ disabled. These modes do not request provider credentials or make external
 publish calls. Ready Access and enabled publishing are test-only settings
 created by the synthetic fixture tests.
 
+Ready Access settings may authorize individual identities with
+`access.readerEmails` and may additionally authorize mailbox domains with the
+optional `access.readerEmailDomains` array. Each configured domain is a
+lowercase-normalized public DNS name and is matched against the complete email
+domain from the signed Access identity; `@example.test` does not authorize a
+subdomain. At least one exact email or domain is required, and both arrays are
+bounded. A GitHub-app publisher still must be listed in `readerEmails`, so a
+domain-only policy remains read-only. The Worker applies this policy only
+after issuer, audience, time, and signature verification. The identity provider
+and its Google-only policy are configured outside this Factory settings file.
+
 ## Root layout
 
 Copy examples/root to an external data directory. Its settings file is at the
@@ -67,9 +78,63 @@ The viewer build writes generated browser assets, a data snapshot, generated
 Worker entry/configuration, and non-served provenance files under OUTPUT.
 Settings and source records remain in DATA.
 
-Weekly planning archives are optional, validated presentation inputs kept
-separate from the canonical tracker snapshot. See [the archive contract](planning-archive.md)
-for the generic schema, validation boundary, and route behavior.
+## Team projection layout
+
+An instance that is intended to read a shared team projection sets its data
+layout and projection path explicitly:
+
+```json
+{
+  "data": {
+    "folderPath": "",
+    "layout": "team-projection-v1",
+    "projectionPath": "projection/current.json",
+    "evidence": { "kind": "none" },
+    "projectionLinkPolicy": {
+      "allowedEvidenceHosts": [],
+      "forbiddenGitHubRepositories": []
+    }
+  },
+  "publish": { "kind": "disabled" }
+}
+```
+
+`projectionPath` is a safe repository-relative path below the selected
+`folderPath`. Factory reads that one JSON file and validates the schema-1 team
+projection contract. It accepts the original `team-projection` weekly shape
+and the `standing-team-projection` shape emitted by the team delivery mirror.
+The standing shape exposes only its public task fields (`title`,
+`description`, `assignee`, `reviewer`, `status`, `nextStep`,
+`completionCriteria`, and the explicitly labeled `approved` or `forecast`
+`deadline`). Factory derives its display week from the export timestamp. Its
+`gaps`, `audit`, and disabled `publish` metadata are validated at the input
+boundary and omitted from browser data. Team mode does not load canonical tracker records,
+evidence sources, or private history. Access may be
+unconfigured or ready with a disabled service; publishing must remain disabled.
+The generated browser payload uses the existing tracker snapshot shape with
+only public projection tasks populated. Canonical approvals, receipts, and
+Don controls are not created by this adapter. The build derives a blocked,
+read-only team presentation from the same allowed task fields; it does not
+copy a private weekly HTML file or add current-draft or approval controls. The
+presentation is marked `presentationKind: "team-projection"` and reports
+coverage as partial because a projection is not a canonical weekly plan.
+Evidence links must be query-free HTTPS URLs without credentials and must use
+an explicitly configured `data.projectionLinkPolicy.allowedEvidenceHosts`
+entry. The optional `forbiddenGitHubRepositories` list uses lowercase
+`owner/repository` values to deny private source paths even when `github.com`
+is an allowed host. With no link policy, all projection evidence links are
+rejected; loopback, local-network, and IP hosts remain rejected globally.
+Narrative fields may contain ordinary product terms such as Slack, meetings,
+OAuth, and tokens; credential-shaped values and narrative URLs remain invalid,
+so public links belong in `evidenceLinks`.
+An empty projection with the all-zero source plan digest is treated as an
+uninitialized setup state: it produces a working empty app and no stale weekly
+episode. A non-empty projection must carry a real source plan digest.
+
+For tracker-v1, weekly planning archives remain optional, validated
+presentation inputs kept separate from the canonical tracker snapshot. See
+[the archive contract](planning-archive.md) for the generic schema, validation
+boundary, and route behavior.
 
 ## Synthetic fixture helper
 
