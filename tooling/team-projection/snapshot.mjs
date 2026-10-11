@@ -12,7 +12,10 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
   const directory = Array.isArray(companion?.directory) ? companion.directory : [];
   const directoryById = new Map(directory.map(entry => [entry.id, entry]));
   const metadataByTaskId = new Map((Array.isArray(companion?.taskMetadata) ? companion.taskMetadata : []).map(entry => [entry.taskId, entry]));
-  const schedulesByTaskId = new Map((companion?.staleSchedule ? [] : Array.isArray(companion?.schedules) ? companion.schedules : []).map(entry => [entry.taskId, entry]));
+  const companionSchedulesAreAuthoritative = companion?.kind === 'team-safe-companion'
+    && companion.staleSchedule === false
+    && Array.isArray(companion.schedules);
+  const schedulesByTaskId = new Map((companionSchedulesAreAuthoritative ? companion.schedules : []).map(entry => [entry.taskId, entry]));
   const teamProfiles = directory.map(entry => ({
     id: entry.id,
     slug: entry.id,
@@ -101,7 +104,11 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     const metadata = metadataByTaskId.get(task.taskId) ?? null;
     const schedule = schedulesByTaskId.get(task.taskId) ?? null;
     const plannedStart = schedule?.approvedStart ?? null;
-    const plannedEnd = schedule?.approvedEnd ?? task.approvedDate ?? null;
+    // A validated companion is an allowlist: omitted tasks have no current
+    // approved endpoint. Keep the anchored projection deadline only for the
+    // legacy path where no companion supplied an authoritative schedule set.
+    const plannedEnd = schedule?.approvedEnd ?? (companionSchedulesAreAuthoritative ? null : task.approvedDate ?? null);
+    const approvedDate = companionSchedulesAreAuthoritative ? plannedEnd : task.approvedDate ?? null;
     const forecastEnd = task.forecastDate ?? null;
     const ownerProfile = directoryById.get(task.assignee);
     return {
@@ -130,7 +137,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
         taskId: task.taskId,
         assignee: task.assignee ?? null,
         reviewer: task.reviewer ?? null,
-        approvedDate: task.approvedDate ?? null,
+        approvedDate,
         approvedStart: plannedStart,
         approvedEnd: plannedEnd,
         commitment: metadata?.commitment ?? null,
