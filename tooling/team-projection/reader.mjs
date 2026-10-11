@@ -18,6 +18,9 @@ const STANDING_TOP_LEVEL_KEYS = [
   'schemaVersion', 'kind', 'projectionId', 'revision', 'policyRevision',
   'generatedAt', 'tasks', 'gaps', 'audit', 'publish',
 ];
+const STANDING_HIERARCHY_TOP_LEVEL_KEYS = [
+  ...STANDING_TOP_LEVEL_KEYS, 'hierarchyVersion', 'contextNodes',
+];
 const TASK_KEYS = [
   'taskId', 'title', 'scope', 'completionCondition', 'assignee', 'reviewer',
   'status', 'nextStep', 'approvedDate', 'forecastDate', 'checkpoint',
@@ -27,6 +30,12 @@ const STANDING_TASK_KEYS = [
   'taskId', 'title', 'description', 'assignee', 'reviewer', 'status',
   'nextStep', 'completionCriteria', 'deadline',
 ];
+const STANDING_HIERARCHY_TASK_KEYS = [...STANDING_TASK_KEYS, 'parentId'];
+// Context nodes are deliberately structural-only. They use the viewer's
+// generic node names so an omitted parent can be shown in a breadcrumb/tree
+// without importing any task fields.
+const CONTEXT_ANCESTOR_KEYS = ['id', 'title', 'kind', 'parentId'];
+const CONTEXT_ANCESTOR_KINDS = new Set(['project', 'workstream', 'task']);
 const DEPENDENCY_KEYS = ['summary'];
 const OMISSION_KEYS = ['taskId', 'field', 'reason'];
 const STANDING_GAP_KEYS = ['taskId', 'field', 'reason', 'message'];
@@ -109,11 +118,15 @@ function validateLegacyProjection(value) {
 function validateStandingProjection(value) {
   const errors = [];
   if (!isRecord(value)) return { valid: false, errors: ['projection: must be an object'] };
-  if (value.schemaVersion !== 1) errors.push('schemaVersion: must be 1');
+  const hierarchical = value.schemaVersion === 2;
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2) errors.push('schemaVersion: must be 1 or 2');
   if (value.kind !== 'standing-team-projection') errors.push('kind: must be standing-team-projection');
+  if (hierarchical && value.hierarchyVersion !== 1) errors.push('hierarchyVersion: must be 1');
+  if (hierarchical && !Array.isArray(value.contextNodes)) errors.push('contextNodes: must be an array');
   if (!isId(value.projectionId)) errors.push('projectionId: must be an ID');
   if (!isId(value.revision)) errors.push('revision: must be an ID');
   if (typeof value.policyRevision !== 'string' || !value.policyRevision) errors.push('policyRevision: must be a non-empty string');
+  if (hierarchical && value.policyRevision !== 'standing-sharing-v2') errors.push('policyRevision: must be standing-sharing-v2');
   if (!isUtc(value.generatedAt)) errors.push('generatedAt: must be an ISO UTC timestamp');
   if (!Array.isArray(value.tasks)) errors.push('tasks: must be an array');
   else value.tasks.forEach((task, index) => {
@@ -132,11 +145,82 @@ function validateStandingProjection(value) {
         errors.push(`${path}.deadline: must be null or an approved/forecast date`);
       }
     }
+    if (hierarchical && task.parentId !== null && !isId(task.parentId)) {
+      errors.push(`${path}.parentId: must be an ID or null`);
+    }
   });
   if (!Array.isArray(value.gaps)) errors.push('gaps: must be an array');
   if (!isRecord(value.audit)) errors.push('audit: must be an object');
   if (!isRecord(value.publish)) errors.push('publish: must be an object');
   return errors.length ? { valid: false, errors } : { valid: true, errors: [] };
+}
+
+function validateStandingHierarchy(value) {
+  const tasksById = new Map(value.tasks.map(task => [task.taskId, task]));
+  const nodesById = new Map();
+  const allIds = new Set();
+  for (const [taskIndex, task] of value.tasks.entries()) {
+    if (allIds.has(task.taskId)) fail(`tasks[${taskIndex}].taskId`, `duplicate ID ${task.taskId}`);
+    allIds.add(task.taskId);
+  }
+  if (!Array.isArray(value.contextNodes)) fail('contextNodes', 'must be an array');
+  value.contextNodes.forEach((node, nodeIndex) => {
+    const path = `contextNodes[${nodeIndex}]`;
+    exactKeys(node, CONTEXT_ANCESTOR_KEYS, path);
+    if (!isId(node.id)) fail(`${path}.id`, 'must be an ID');
+    if (allIds.has(node.id)) fail(`${path}.id`, `collides with task or context ID ${node.id}`);
+    if (nodesById.has(node.id)) fail(`${path}.id`, 'must be unique across context nodes');
+    safeText(node.title, `${path}.title`, { nullable: false });
+    if (!CONTEXT_ANCESTOR_KINDS.has(node.kind)) fail(`${path}.kind`, 'must be project, workstream, or task');
+    if (node.parentId !== null && !isId(node.parentId)) fail(`${path}.parentId`, 'must be an ID or null');
+    allIds.add(node.id);
+    nodesById.set(node.id, node);
+  });
+
+  const knownIds = new Set([...tasksById.keys(), ...nodesById.keys()]);
+  value.tasks.forEach((task, index) => {
+    if (task.parentId !== null && !knownIds.has(task.parentId)) {
+      fail(`tasks[${index}].parentId`, 'must reference a task or context ancestor node');
+    }
+  });
+  for (const [nodeId, node] of nodesById) {
+    if (node.parentId !== null && !knownIds.has(node.parentId)) {
+      fail(`contextNodes[${nodeId}].parentId`, 'must reference a task or context ancestor node');
+    }
+  }
+
+  // A shared structural chain must remain acyclic so the viewer's tree and
+  // breadcrumb walks cannot become unbounded on malformed input.
+  for (const startId of knownIds) {
+    const visited = new Set();
+    let current = startId;
+    while (current) {
+      if (visited.has(current)) fail('contextNodes', 'must not contain a parent cycle');
+      visited.add(current);
+      const record = tasksById.get(current) ?? nodesById.get(current);
+      current = record?.parentId ?? null;
+    }
+  }
+
+  // Every exported context node must be on the ancestor chain of at least one
+  // shared task. This rejects unrelated structural rows that could otherwise
+  // appear as team work without a task proving why they are needed.
+  const reachableContextIds = new Set();
+  for (const task of value.tasks) {
+    const visited = new Set();
+    let current = task.parentId;
+    while (current !== null) {
+      if (visited.has(current)) break;
+      visited.add(current);
+      const record = tasksById.get(current) ?? nodesById.get(current);
+      if (!record) break;
+      if (nodesById.has(current)) reachableContextIds.add(current);
+      current = record.parentId;
+    }
+  }
+  for (const nodeId of nodesById.keys()) {
+    if (!reachableContextIds.has(nodeId)) fail(`contextNodes[${nodeId}]`, 'must be an ancestor of a shared task');
+  }
 }
 
 export class TeamProjectionInputError extends Error {
@@ -284,6 +368,7 @@ function weekFromTimestamp(value) {
 }
 
 function normalizeStandingProjection(value, rawDigest) {
+  const hierarchical = value.schemaVersion === 2;
   return {
     schemaVersion: 1,
     kind: 'team-projection',
@@ -293,6 +378,7 @@ function normalizeStandingProjection(value, rawDigest) {
     policyRevision: value.policyRevision,
     sourcePlanDigest: `sha256:${rawDigest}`,
     generatedAt: value.generatedAt,
+    ...(hierarchical ? { contextNodes: value.contextNodes.map(node => ({ ...node })) } : {}),
     tasks: value.tasks.map(task => ({
       taskId: task.taskId,
       title: task.title,
@@ -307,6 +393,7 @@ function normalizeStandingProjection(value, rawDigest) {
       checkpoint: null,
       dependencies: [],
       evidenceLinks: [],
+      ...(hierarchical ? { parentId: task.parentId } : {}),
     })),
     omissions: [],
   };
@@ -315,15 +402,19 @@ function normalizeStandingProjection(value, rawDigest) {
 function validateStrictProjection(value, linkPolicy) {
   scanJson(value);
   const standing = value?.kind === 'standing-team-projection';
-  exactKeys(value, standing ? STANDING_TOP_LEVEL_KEYS : TOP_LEVEL_KEYS, '$');
+  const hierarchical = standing && value.schemaVersion === 2;
+  exactKeys(value, hierarchical ? STANDING_HIERARCHY_TOP_LEVEL_KEYS : standing ? STANDING_TOP_LEVEL_KEYS : TOP_LEVEL_KEYS, '$');
   const result = standing ? validateStandingProjection(value) : validateLegacyProjection(value);
   if (!result.valid) throw new TeamProjectionInputError(`team projection is invalid: ${result.errors.join('; ')}`);
-  if (standing) validateStandingMetadata(value);
+  if (standing) {
+    validateStandingMetadata(value);
+    if (hierarchical) validateStandingHierarchy(value);
+  }
 
   const ids = new Set();
   value.tasks.forEach((task, index) => {
     const path = `tasks[${index}]`;
-    exactKeys(task, standing ? STANDING_TASK_KEYS : TASK_KEYS, path);
+    exactKeys(task, hierarchical ? STANDING_HIERARCHY_TASK_KEYS : standing ? STANDING_TASK_KEYS : TASK_KEYS, path);
     if (standing && task.deadline !== null) exactKeys(task.deadline, ['label', 'date'], `${path}.deadline`);
     if (ids.has(task.taskId)) fail(`${path}.taskId`, `duplicate task ID ${task.taskId}`);
     ids.add(task.taskId);

@@ -627,7 +627,7 @@ function canonicalFieldBaseline(canonicalData, item, field, visibleValue) {
   };
 }
 
-function ItemPageHeader({ item, data, canonicalData, renderItemLink, returnLink, taskDraft, taskEdit, readOnly = false }) {
+function ItemPageHeader({ item, data, canonicalData, renderItemLink, returnLink, taskDraft, taskEdit, readOnly = false, contextOnly = false }) {
   const [titleEditing, setTitleEditing] = useState(false);
   return <header className="detail-page-header">
     <div className="detail-page-nav">{returnLink ? <span className="detail-page-return">{returnLink}</span> : null}</div>
@@ -640,7 +640,7 @@ function ItemPageHeader({ item, data, canonicalData, renderItemLink, returnLink,
         taskEdit={taskEdit}
         onEditingChange={setTitleEditing}
       />}</h1><p className="detail-id">{item.id}</p></div>
-      {readOnly ? <div className="item-chips"><BadgeChip tone={statusTone(item.status)}>{humanize(item.status)}</BadgeChip>{item.owner && item.owner !== 'unassigned' ? <PersonLink data={data} value={item.owner} name={item.ownerName || item.owner} avatar pill className="item-assignee-link" /> : <BadgeChip>Unassigned</BadgeChip>}</div> : <ItemChips item={item} />}
+      {readOnly ? (contextOnly ? null : <div className="item-chips"><BadgeChip tone={statusTone(item.status)}>{humanize(item.status)}</BadgeChip>{item.owner && item.owner !== 'unassigned' ? <PersonLink data={data} value={item.owner} name={item.ownerName || item.owner} avatar pill className="item-assignee-link" /> : <BadgeChip>Unassigned</BadgeChip>}</div>) : <ItemChips item={item} />}
     </div>
     <ItemBreadcrumbs item={item} data={data} renderItemLink={renderItemLink} />
   </header>;
@@ -652,7 +652,21 @@ function projectedText(value) {
   return '';
 }
 
+function TeamProjectionContextBody({ item, data, renderItemLink, returnLink }) {
+  return <article className="item-detail-page team-context-detail">
+    <ItemPageHeader item={item} data={data} renderItemLink={renderItemLink} returnLink={returnLink} readOnly contextOnly />
+    <div className="detail-page-content">
+      <section className="detail-page-section" aria-label="Structural context">
+        <h2>Structural context</h2>
+        <p>This node provides hierarchy context for shared tasks. It is not an actionable task.</p>
+        <dl><div><dt>Kind</dt><dd>{humanize(item.type)}</dd></div><div><dt>Parent</dt><dd>{item.parent ?? 'Root'}</dd></div></dl>
+      </section>
+    </div>
+  </article>;
+}
+
 function TeamProjectionItemBody({ item, data, canonicalData, renderItemLink, returnLink }) {
+  if (item.contextOnly === true) return <TeamProjectionContextBody item={item} data={data} renderItemLink={renderItemLink} returnLink={returnLink} />;
   const projection = item.teamProjection ?? {};
   const dependencies = Array.isArray(projection.dependencies) ? projection.dependencies.map(projectedText).filter(Boolean) : [];
   const reviewer = projectedText(projection.reviewer);

@@ -4,6 +4,7 @@ import { projectFilterOptions } from '../src/route-data';
 import { normalizeTrackerSnapshot } from '../src/snapshot';
 import { parseWorkSearch } from '../src/routing-state';
 import { projectFilteredWork, workFilterOptions } from '../src/work-filters';
+import { buildWorkProjection, selectWorkRows } from '../src/work-activity.mjs';
 
 function workItem(id: string, parent: string | null = null, extra: Record<string, unknown> = {}) {
   return {
@@ -23,9 +24,60 @@ function workItem(id: string, parent: string | null = null, extra: Record<string
   };
 }
 
-function snapshot(items: ReturnType<typeof workItem>[]) {
-  return normalizeTrackerSnapshot({ items, team: [], plans: [], decisions: [], releases: [] });
+function snapshot(items: ReturnType<typeof workItem>[], teamProjection = false) {
+  return normalizeTrackerSnapshot({
+    source: teamProjection ? { layout: 'team-projection-v1' } : undefined,
+    items,
+    team: [], plans: [], decisions: [], releases: [],
+  });
 }
+
+test('team projection search keeps only actual task matches and restores context-only ancestors', () => {
+  const data = snapshot([
+    workItem('grandparent-task', null, { title: 'Grandparent task', childIds: ['project-context'] }),
+    workItem('project-context', 'grandparent-task', { type: 'project', contextOnly: true, status: '', childIds: ['workstream-context'] }),
+    workItem('workstream-context', 'project-context', { type: 'workstream', contextOnly: true, status: '', childIds: ['child-task', 'task-context'] }),
+    workItem('child-task', 'workstream-context', { title: 'Retry notification delivery', childIds: [] }),
+    workItem('task-context', 'workstream-context', { type: 'task', contextOnly: true, status: '', title: 'Retry notification context', childIds: [] }),
+    workItem('unrelated-task', null, { title: 'Unrelated work', childIds: [] }),
+  ], true);
+  const search = parseWorkSearch({ q: 'retry notification' }, projectFilterOptions(data));
+  const result = projectFilteredWork(data, search);
+
+  assert.equal(result.matchCount, 1);
+  assert.deepEqual(result.items.map(item => item.id), ['grandparent-task', 'project-context', 'workstream-context', 'child-task']);
+  assert.deepEqual([...result.contextualIds].sort(), ['grandparent-task', 'project-context', 'workstream-context']);
+  assert.deepEqual(result.roots.map(item => item.id), ['grandparent-task']);
+  assert.deepEqual(workFilterOptions(data), {
+    owners: [{ value: 'don', label: 'Don Masakayan' }],
+    statuses: [{ value: 'active', label: 'Active' }],
+  });
+
+  const activity = buildWorkProjection({ items: data.items, evidence: [] });
+  const activityRows = selectWorkRows({
+    projection: activity,
+    eligibleIds: result.items.filter(item => !item.contextOnly && !result.contextualIds.has(item.id)).map(item => item.id),
+    activityFilter: 'all',
+  });
+  assert.deepEqual([...activityRows.matchIds], ['child-task']);
+  assert.deepEqual([...activityRows.contextIds], ['workstream-context', 'project-context', 'grandparent-task']);
+
+  const parentAndChildData = snapshot(data.items.map(item => item.id === 'grandparent-task'
+    ? { ...item, title: 'Retry notification parent' }
+    : item), true);
+  const parentAndChild = projectFilteredWork(parentAndChildData, parseWorkSearch({ q: 'retry notification' }, projectFilterOptions(parentAndChildData)));
+  assert.equal(parentAndChild.matchCount, 2);
+  assert.deepEqual(parentAndChild.items.map(item => item.id), ['grandparent-task', 'project-context', 'workstream-context', 'child-task']);
+  assert.deepEqual([...parentAndChild.contextualIds].sort(), ['project-context', 'workstream-context']);
+  const parentAndChildActivity = buildWorkProjection({ items: parentAndChildData.items, evidence: [] });
+  const parentAndChildRows = selectWorkRows({
+    projection: parentAndChildActivity,
+    eligibleIds: parentAndChild.items.filter(item => !item.contextOnly && !parentAndChild.contextualIds.has(item.id)).map(item => item.id),
+    activityFilter: 'all',
+  });
+  assert.deepEqual([...parentAndChildRows.matchIds], ['grandparent-task', 'child-task']);
+  assert.deepEqual([...parentAndChildRows.contextIds], ['workstream-context', 'project-context']);
+});
 
 test('matches all query tokens across fields and restores only needed graph context', () => {
   const data = snapshot([
