@@ -57,6 +57,16 @@ function scheduleLabel(start, due) {
   return dateRange(start, due) ?? 'No approved dates recorded';
 }
 
+function proposedScheduleLabel(row) {
+  const start = day(row?.entry?.timeline?.ownProposedStart);
+  const due = day(row?.entry?.timeline?.ownProposedDue);
+  if (!start && !due) return null;
+  const kind = row?.entry?.timeline?.ownProposedScheduleKind === 'checkpoint'
+    ? 'Proposed checkpoint'
+    : row?.entry?.timeline?.ownProposedScheduleKind === 'slice' ? 'Proposed slice' : 'Proposed schedule';
+  return `${kind} · ${dateRange(start, due)}`;
+}
+
 function sourceLabel(item, entry, hasChildSchedule, data) {
   const hasOwnSchedule = Boolean(day(entry?.timeline?.ownPlannedStart) || day(entry?.timeline?.ownPlannedDue));
   if (hasOwnSchedule) {
@@ -164,6 +174,7 @@ export function WorkGanttInvestigation({ row, data, onClose, onOpenFullDetails }
   const status = contextual ? null : text(item?.status) ?? text(entry?.status) ?? 'unknown';
   const outcome = text(item?.sections?.outcome) ?? text(item?.description);
   const hasChildSchedule = Boolean(child.start || child.due);
+  const proposedSchedule = proposedScheduleLabel(row);
 
   useEffect(() => {
     if (row?.id) closeRef.current?.focus();
@@ -212,6 +223,9 @@ export function WorkGanttInvestigation({ row, data, onClose, onOpenFullDetails }
         <DetailField icon={CalendarDays} label="Approved schedule">
           {scheduleLabel(own.start, own.due)}
         </DetailField>
+        {proposedSchedule ? <DetailField icon={CalendarDays} label="Proposed schedule">
+          {proposedSchedule}
+        </DetailField> : null}
         {rowHasChildren(row) ? (
           <DetailField icon={CalendarDays} label="Child schedule">
             {scheduleLabel(child.start, child.due)}

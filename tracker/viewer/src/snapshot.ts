@@ -35,6 +35,10 @@ export interface TrackerHealth extends SnapshotRecord {
 export interface TrackerSchedule extends SnapshotRecord {
   plannedStart: string | null;
   plannedEnd: string | null;
+  proposedStart: string | null;
+  proposedEnd: string | null;
+  proposedScheduleKind: 'span' | 'slice' | 'checkpoint' | null;
+  proposedExplicit: boolean;
   forecastStart: string | null;
   forecastEndMin: string | null;
   forecastEndMax: string | null;

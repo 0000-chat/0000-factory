@@ -401,6 +401,47 @@ test('task-only approval remains valid while proposed dates and operational fiel
   assert.equal(acceptanceState(item, [item, prerequisite], {}, []).approved, true);
 });
 
+test('accepted tasks may carry explicit proposed dates without changing approval digests', () => {
+  const item = approvedRecord('accepted-proposal', {
+    commitment: 'accepted',
+    accepted_from: 'planned',
+    proposed_start: '2026-10-10',
+    proposed_end: '2026-10-10',
+    proposed_schedule_kind: 'checkpoint'
+  });
+  const digest = item.data.approval_digest;
+  assert.equal(acceptanceState(item, [item], {}, []).approved, true);
+  assert.equal(taskApprovalDigest(item), digest);
+
+  item.data.proposed_end = '2026-10-14';
+  item.data.proposed_schedule_kind = 'span';
+  assert.equal(taskApprovalDigest(item), digest);
+  assert.equal(acceptanceState(item, [item], {}, []).approved, true);
+
+  const invalidKind = record('invalid-proposal-kind', {
+    proposed_start: '2026-10-10',
+    proposed_end: '2026-10-12',
+    proposed_schedule_kind: 'window'
+  });
+  assert.match(validateTracker({ items: [invalidKind] }).join('\n'), /proposed_schedule_kind must be span, slice, or checkpoint/);
+
+  const invalidCheckpoint = record('invalid-checkpoint-proposal', {
+    proposed_start: '2026-10-10',
+    proposed_end: '2026-10-12',
+    proposed_schedule_kind: 'checkpoint'
+  });
+  assert.match(validateTracker({ items: [invalidCheckpoint] }).join('\n'), /checkpoint proposed dates must have equal proposed_start and proposed_end/);
+
+  const incompleteProposal = record('incomplete-proposal', { proposed_start: '2026-10-10' });
+  assert.match(validateTracker({ items: [incompleteProposal] }).join('\n'), /proposed_start and proposed_end must be provided together/);
+
+  const invalidRange = record('invalid-proposal-range', {
+    proposed_start: '2026-10-12',
+    proposed_end: '2026-10-10'
+  });
+  assert.match(validateTracker({ items: [invalidRange] }).join('\n'), /proposed_end must be >= proposed_start/);
+});
+
 test('the same item advances from approved draft readiness to planned and then accepted', () => {
   const unapprovedPlanned = record('unapproved-planned', { commitment: 'planned' });
   const unapprovedState = acceptanceState(unapprovedPlanned, [unapprovedPlanned], {}, []);

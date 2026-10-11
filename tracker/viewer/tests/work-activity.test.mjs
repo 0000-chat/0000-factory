@@ -246,6 +246,38 @@ test('approved schedules roll up independently from observed, proposed, and expl
   assert.equal(projection.get('proposal').timeline.forecastStart, '2026-11-03');
 });
 
+test('accepted tasks retain explicit proposed spans and checkpoints separately from approved dates', () => {
+  const projection = buildWorkProjection({
+    items: [
+      item('accepted-proposal', {
+        schedule: {
+          approved: true,
+          plannedStart: '2026-10-01',
+          plannedEnd: '2026-10-05',
+          proposedStart: '2026-10-08',
+          proposedEnd: '2026-10-08',
+          proposedScheduleKind: 'checkpoint',
+          proposedExplicit: true,
+        },
+      }),
+    ],
+    evidence: [],
+    now: '2026-10-01',
+  });
+  const timeline = projection.get('accepted-proposal').timeline;
+  assert.deepEqual([
+    timeline.ownPlannedStart,
+    timeline.ownPlannedDue,
+    timeline.ownProposedStart,
+    timeline.ownProposedDue,
+    timeline.ownProposedScheduleKind,
+    timeline.ownProposedExplicit,
+  ], ['2026-10-01', '2026-10-05', '2026-10-08', '2026-10-08', 'checkpoint', true]);
+  assert.equal(timeline.plannedStart, '2026-10-01');
+  assert.equal(timeline.proposedStart, '2026-10-08');
+  assert.equal(timeline.proposedEnd, '2026-10-08');
+});
+
 test('separately approved draft schedules count as planned while missing endpoints remain partial', () => {
   const projection = buildWorkProjection({
     items: [

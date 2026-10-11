@@ -57,6 +57,7 @@ import {
   manilaTodayForChart,
   paddedGanttDateRange,
   primaryWorkMark,
+  proposedEnvelopeLabel,
   shortWorkDate,
   workGanttDepthExpansion,
   workMarkDescription,
@@ -597,15 +598,15 @@ function WorkGanttTimeline({
     // Parent proposed ranges compete with the approved parent/child tracks in
     // the compact schedule. They remain available through the full work
     // details surface while the default chart stays approved-focused.
-    const marks = sourceMarks.filter(mark => !row.hasChildren || mark.sourceKind !== 'proposed');
+    const marks = sourceMarks.filter(mark => !row.hasChildren || mark.sourceKind !== 'proposed' || mark.acceptedProposal === true);
     const visibleMarks = marks.filter(mark => (showActivity || mark.sourceKind !== 'observed') && (showForecast || mark.sourceKind !== 'forecast'));
-    const collapsedChildEnvelope = row.collapsed && row.hasChildren
-      ? (row.childApprovedEnvelope ?? (showActivity ? row.childSummaryEnvelope : null))
-      : null;
-    const summaryMarks = collapsedChildEnvelope?.marks ?? [];
+    const collapsedChildEnvelopes = row.collapsed && row.hasChildren
+      ? [row.childApprovedEnvelope, row.childProposedEnvelope, showActivity ? row.childObservedEnvelope : null].filter(Boolean)
+      : [];
+    const summaryMarks = collapsedChildEnvelopes.flatMap(envelope => envelope.marks ?? []);
     const visibleSummaryMarks = summaryMarks
         .filter(mark => (showActivity || mark.sourceKind !== 'observed') && (showForecast || mark.sourceKind !== 'forecast'))
-        .filter(mark => mark.sourceKind !== 'proposed');
+        .filter(mark => mark.sourceKind !== 'proposed' || mark.acceptedProposal === true);
     return {
       ...row,
       marks: visibleMarks,
@@ -851,7 +852,7 @@ function WorkGanttTimelineContent({
             const rollups = row.collapsed && row.hasChildren
               ? placeWorkGanttRollups(visibleChildIntervals.length ? visibleChildIntervals : row.childRollups ?? [])
               : { positionedRollups: [], overflowCount: 0 };
-            const rollupSummary = `Direct approved child schedules · ${row.eligibleChildCount ?? 0} eligible child${row.eligibleChildCount === 1 ? '' : 'ren'} · ${row.undatedChildCount ?? 0} undated`;
+            const rollupSummary = `Direct child schedules · ${row.eligibleChildCount ?? 0} eligible child${row.eligibleChildCount === 1 ? '' : 'ren'} · ${row.undatedChildCount ?? 0} undated`;
             const rollupSources = [...new Set(visibleChildIntervals.map(interval => interval.sourceKind))].join(', ');
             const rollupIntervals = visibleChildIntervals.map(interval => `${interval.sourceKind} ${interval.startDay}–${interval.endDay}`).join('; ');
             const rollupDescription = rollups.overflowCount
@@ -859,12 +860,13 @@ function WorkGanttTimelineContent({
                 + (rollupSources ? ` Sources: ${rollupSources}.` : '')
                 + (rollupIntervals ? ` Intervals: ${rollupIntervals}.` : '')
               : rollupSummary + (rollupIntervals ? ` · Intervals: ${rollupIntervals}.` : '');
-            const childSummaryEnvelope = row.childSummaryEnvelope;
             const childApprovedEnvelope = row.childApprovedEnvelope;
-            const visibleChildSummaryEnvelope = childApprovedEnvelope ?? (showActivity ? childSummaryEnvelope : null);
-            const collapsedSummaryEnvelope = childApprovedEnvelope;
-            const collapsedActivityEnvelope = !childApprovedEnvelope && showActivity && childSummaryEnvelope?.primaryKind === 'observed'
-              ? childSummaryEnvelope
+            const childObservedEnvelope = row.childObservedEnvelope;
+            const childProposedEnvelope = row.childProposedEnvelope;
+            const visibleChildSummaryEnvelope = childApprovedEnvelope ?? (showActivity ? childObservedEnvelope : null);
+            const collapsedSummaryEnvelope = childApprovedEnvelope ?? childProposedEnvelope;
+            const collapsedActivityEnvelope = !childApprovedEnvelope && showActivity
+              ? childObservedEnvelope
               : null;
             const collapsedEnvelope = collapsedSummaryEnvelope;
             const parentEnvelopeLeft = row.parentEnvelope
@@ -908,6 +910,7 @@ function WorkGanttTimelineContent({
             const hasOwnApprovedPlan = Boolean(row.ownApprovedMark);
             const missingDatesSuffix = row.childSummaryIncomplete ? ' · missing dates' : '';
             const childLabel = childApprovedEnvelope ? `Child schedule · ${workGanttRangeLabel(childApprovedEnvelope)}` : null;
+            const proposedChildLabel = childProposedEnvelope ? `${proposedEnvelopeLabel(childProposedEnvelope)} · ${workGanttRangeLabel(childProposedEnvelope)}` : null;
             const planLabel = row.ownApprovedMark ? `Plan · ${workGanttRangeLabel(row.ownApprovedMark)}` : null;
             const trackLabelLeft = mark => {
               const left = mark ? dayLeft(mark, chartStartDay, pixelsPerDay) : envelopeLeft;
@@ -943,6 +946,15 @@ function WorkGanttTimelineContent({
                 <span className="work-gantt-parent-track-label work-gantt-parent-track-label-plan" style={{ left: trackLabelLeft(row.ownApprovedMark) }}>{planLabel}</span>
                 <span className="work-gantt-parent-track-label work-gantt-parent-track-label-child" style={{ left: trackLabelLeft(childApprovedEnvelope) }}>{childLabel}</span>
               </> : null}
+              {row.collapsed && childProposedEnvelope ? <span
+                className="work-gantt-child-proposed-summary"
+                data-work-parent-id={row.id}
+                data-parent-state="collapsed"
+                data-summary-source-kind="proposed"
+                aria-label={`${title} · ${proposedChildLabel}${missingDatesSuffix}`}
+                title={`${title} · ${proposedChildLabel}${missingDatesSuffix}`}
+                style={{ left: `${dayLeft(childProposedEnvelope, chartStartDay, pixelsPerDay)}px`, width: `${Math.max(3, dayWidth(childProposedEnvelope, pixelsPerDay))}px` }}
+              ><span className="work-gantt-child-proposed-summary-label">{proposedChildLabel}</span></span> : null}
               {row.collapsed && collapsedActivityEnvelope ? <span
                 className="work-gantt-child-activity-summary"
                 data-work-parent-id={row.id}
@@ -1008,6 +1020,18 @@ function WorkGanttTimelineContent({
                 className="work-gantt-child-summary-bracket-label"
                 style={{ left: `${Math.max(4, dayWidth(visibleChildSummaryEnvelope, pixelsPerDay) + 6)}px` }}
               >Recorded activity · {workGanttRangeLabel(visibleChildSummaryEnvelope)}</span></span> : null}
+              {row.isExpanded && childProposedEnvelope ? <button
+                className="work-gantt-child-summary-bracket work-gantt-child-proposed-summary"
+                type="button"
+                data-work-parent-id={row.id}
+                data-parent-state="expanded"
+                data-summary-source-kind="proposed"
+                aria-label={`Open details for ${title} · ${proposedChildLabel}${missingDatesSuffix}`}
+                title={`${title} · ${proposedChildLabel}${missingDatesSuffix}`}
+                style={{ left: `${dayLeft(childProposedEnvelope, chartStartDay, pixelsPerDay)}px`, width: `${Math.max(3, dayWidth(childProposedEnvelope, pixelsPerDay))}px` }}
+                onClick={() => onSelect(row.id)}
+                onPointerDown={event => event.stopPropagation()}
+              ><span className="work-gantt-child-summary-bracket-label">{proposedChildLabel}</span></button> : null}
               {row.isExpanded && hasOwnApprovedPlan && childApprovedEnvelope ? <span
                 className="work-gantt-parent-track-label work-gantt-parent-track-label-expanded-plan"
                 style={{ left: trackLabelLeft(row.ownApprovedMark) }}
@@ -1428,7 +1452,7 @@ export function WorkGantt({
         <i className="legend-dot forecast" aria-hidden="true" />{showForecast ? 'Hide forecast' : 'Show forecast'}
       </button>
       {!forecastAvailable ? <span id={`work-gantt-forecast-status${forecastStatusId}`} className="work-gantt-forecast-status" role="status">No forecast dates recorded for visible work.</span> : null}
-      <span className="schedule-readonly">Dates come from approved plans and qualifying source activity.</span>
+      <span className="schedule-readonly">Dates come from approved plans, explicit proposals, and qualifying source activity.</span>
     </div>
     <WorkGanttDeadlines releases={releases} />
     {!hasDisplayedMarks ? <div className="schedule-empty work-gantt-empty">
