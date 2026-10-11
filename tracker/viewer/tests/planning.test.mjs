@@ -161,6 +161,36 @@ test('progress counts only complete Don confirmations tied to the approved revis
   assert.equal(deriveProgress('project-orbit', [stale, open], [plan]).percent, 0);
 });
 
+test('milestone progress uses each instance approval alias list', () => {
+  const item = acceptedItem({ id: 'project-orbit', type: 'project', plan: 'milestone-plan' });
+  const plan = approvedPlan();
+  plan.data.approved_by = 'team-lead';
+  const complete = milestone('complete', 1, 'complete', {
+    approval_state: 'approved',
+    approved_by: 'team-lead',
+    confirmation_state: 'confirmed',
+    confirmed_by: 'team-lead',
+    confirmed_at: '2026-09-30T11:00:00Z',
+    confirmation_ref: 'grok://interaction/complete',
+    confirmation_source: 'grok-ui',
+    confirmed_revision: 'r1',
+    evidence_ref: 'commit:abc'
+  });
+  const digest = milestonePlanApprovalDigest(plan, [complete]);
+  plan.data.approval_digest = digest;
+  complete.data.approval_digest = digest;
+  const records = {
+    items: [item], plans: [plan], milestones: [complete], history: [], decisions: [],
+    releases: [], updates: [], capacities: [], legacyApprovals: {}
+  };
+
+  const generic = buildTrackerData(records);
+  const configured = buildTrackerData(records, { approverIds: ['team-lead'] });
+  assert.equal(generic.items[0].progress.scoped, false);
+  assert.equal(configured.items[0].progress.scoped, true);
+  assert.equal(configured.items[0].progress.percent, 100);
+});
+
 test('approval digest changes when milestone scope, weight, or completion condition changes', () => {
   const plan = approvedPlan();
   const first = milestone('first', 1, 'approved');

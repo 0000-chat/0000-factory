@@ -9,6 +9,7 @@ import type { TrackerRouterContext } from './router-context';
 import type { TrackerSnapshot } from './snapshot';
 import { cn } from './lib/utils';
 import { formatUrl, teamPath } from './navigation';
+import { useViewerIdentity } from './viewer-identity';
 
 export interface PersonLinkProps {
   value: string | null | undefined;
@@ -18,6 +19,7 @@ export interface PersonLinkProps {
   className?: string;
   children?: ReactNode;
   data?: TrackerSnapshot;
+  assignment?: boolean;
 }
 
 function textValue(value: unknown): string {
@@ -85,10 +87,16 @@ interface PersonLinkContentProps extends PersonLinkProps {
 }
 
 function PersonLinkContent({ routerAvailable, ...props }: PersonLinkContentProps) {
-  const { data, value, name, avatar = false, pill = false, className, children } = props;
+  const { data, value, name, avatar = false, pill = false, className, children, assignment = false } = props;
+  const viewerIdentity = useViewerIdentity();
   const team = data?.team ?? [];
   const person = resolvePerson(team, value, name);
   const label = displayLabel(person, value, name);
+  const viewerPerson = viewerIdentity.kind === 'ready' && viewerIdentity.actor.kind === 'human'
+    ? viewerIdentity.actor.person
+    : null;
+  const assignedToViewer = assignment && person !== null && viewerPerson !== null
+    && textValue(person.id) !== '' && textValue(person.id) === textValue(viewerPerson.id);
 
   if (!person) {
     return <span className={cn('person-link person-link-plain', className)}><span className="person-link-label">{children ?? label}</span></span>;
@@ -103,7 +111,11 @@ function PersonLinkContent({ routerAvailable, ...props }: PersonLinkContentProps
     ? sessionBrowseFilters.restoreTeam(teamFilterOptions(data))
     : { q: '', organization: 'all' as const };
   const linkClassName = cn('person-link', pill ? undefined : className);
-  const linkContent = labelContent(label, children, person, avatar, pill);
+  const assignedLabel = assignedToViewer ? `${label}, Assigned to you` : children ? label : undefined;
+  const linkContent = <>
+    {labelContent(label, children, person, avatar, pill)}
+    {assignedToViewer ? <span className="person-link-assigned" data-testid="assigned-to-you" title="Assigned to you" aria-label="Assigned to you">You</span> : null}
+  </>;
   const stopBubble = (event: { stopPropagation: () => void }) => event.stopPropagation();
   const stopKeyboardBubble = (event: { key?: string; stopPropagation: () => void }) => {
     if (event.key === 'Enter' || event.key === ' ') event.stopPropagation();
@@ -114,7 +126,7 @@ function PersonLinkContent({ routerAvailable, ...props }: PersonLinkContentProps
       to="/team/$memberSlug"
       params={{ memberSlug: slug }}
       search={search}
-      aria-label={children ? label : undefined}
+      aria-label={assignedLabel}
       onPointerDown={stopBubble}
       onClick={stopBubble}
       onKeyDown={stopKeyboardBubble}
@@ -125,7 +137,7 @@ function PersonLinkContent({ routerAvailable, ...props }: PersonLinkContentProps
     <a
       className={linkClassName}
       href={formatUrl(teamPath(slug), compactTeamSearch(search, data ? teamFilterOptions(data) : {}))}
-      aria-label={children ? label : undefined}
+      aria-label={assignedLabel}
       onPointerDown={stopBubble}
       onClick={stopBubble}
       onKeyDown={stopKeyboardBubble}

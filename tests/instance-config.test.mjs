@@ -82,6 +82,35 @@ test('version 1 settings parse as nested, frozen site data', () => {
   assert.throws(() => { parsed.browser.storeId = 'changed'; }, TypeError);
 });
 
+test('approval aliases are validated, normalized, and isolated per instance', () => {
+  const defaults = parseInstanceConfig(settings());
+  assert.deepEqual(defaults.model.approverIds, ['don', 'owner']);
+  assert.equal(Object.isFrozen(defaults.model.approverIds), true);
+
+  const configured = parseInstanceConfig(settings({
+    id: 'configured',
+    browser: {
+      namespace: 'configured',
+      storeId: 'configured-store',
+      themeKey: 'configured-theme',
+      editLockPrefix: 'configured-edit',
+      publishLockName: 'configured-publish',
+      unscheduledCollapsedKey: 'configured.unscheduled',
+      activityPausedKey: 'configured.activity',
+    },
+    model: { approvalProtocol: 'don-v1', approverIds: ['Team-Lead', 'review-owner'] },
+  }));
+  assert.deepEqual(configured.model.approverIds, ['team-lead', 'review-owner']);
+  assert.notStrictEqual(configured.model.approverIds, defaults.model.approverIds);
+
+  for (const approverIds of [null, [], ['team-lead', 'TEAM-LEAD'], ['bad alias']]) {
+    assert.throws(
+      () => parseInstanceConfig(settings({ model: { approvalProtocol: 'don-v1', approverIds } })),
+      /settings\.model\.approverIds/u,
+    );
+  }
+});
+
 test('weekly planning is an optional, strictly typed instance feature', () => {
   const disabled = parseInstanceConfig(settings({ features: { weeklyPlanning: false } }));
   assert.deepEqual(disabled.features, { weeklyPlanning: false });

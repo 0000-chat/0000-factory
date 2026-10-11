@@ -1,12 +1,13 @@
 import { refs } from './model.mjs';
 import { isAccepted } from './planning.mjs';
+import { taskCodeForId } from './task-codes.mjs';
 
 function isCurrent(item) {
   return item.data.status !== 'done';
 }
 
 function link(item, suffix = '') {
-  return `[${item.data.id}](../../${item.path})${suffix}`;
+  return `[${item.data.id} (${taskCodeForId(item.data.id)})](../../${item.path})${suffix}`;
 }
 
 function table(headers, rows) {

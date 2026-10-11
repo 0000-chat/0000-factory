@@ -3,10 +3,31 @@
  * shape. The adapter deliberately leaves canonical-only collections empty and
  * does not synthesize approval, decision, history, or publication records.
  */
+import { taskCodeForId } from '../tracker/task-codes.mjs';
+
 const EMPTY_SOURCE_DIGEST = `sha256:${'0'.repeat(64)}`;
 
-export function buildTeamProjectionSnapshot(projection, source = {}) {
+export function buildTeamProjectionSnapshot(projection, source = {}, companion = null) {
   const initialized = projection.sourcePlanDigest !== EMPTY_SOURCE_DIGEST || projection.tasks.length > 0;
+  const directory = Array.isArray(companion?.directory) ? companion.directory : [];
+  const directoryById = new Map(directory.map(entry => [entry.id, entry]));
+  const metadataByTaskId = new Map((Array.isArray(companion?.taskMetadata) ? companion.taskMetadata : []).map(entry => [entry.taskId, entry]));
+  const schedulesByTaskId = new Map((companion?.staleSchedule ? [] : Array.isArray(companion?.schedules) ? companion.schedules : []).map(entry => [entry.taskId, entry]));
+  const teamProfiles = directory.map(entry => ({
+    id: entry.id,
+    slug: entry.id,
+    handle: entry.id,
+    name: entry.displayName,
+    fullName: entry.displayName,
+    aliases: [],
+    githubHandle: null,
+    avatar: entry.avatar,
+    avatarUrl: entry.avatar ? `/avatars/${entry.avatar}` : null,
+    status: 'projected',
+    organizationIds: [],
+    organizations: [],
+    verifiedLabel: true,
+  }));
   const contextNodes = new Map();
   for (const node of projection.contextNodes ?? []) {
     const existing = contextNodes.get(node.id);
@@ -14,14 +35,15 @@ export function buildTeamProjectionSnapshot(projection, source = {}) {
     contextNodes.set(node.id, node);
   }
 
-  const sharedItem = ({ id, title, type, status, owner = null, parent = null, contextOnly = false }) => ({
+  const sharedItem = ({ id, title, type, status, owner = null, ownerName = null, parent = null, contextOnly = false, metadata = null }) => ({
     id,
+    referenceCode: taskCodeForId(id),
     title: title ?? id,
     type,
     status,
-    phase: null,
+    phase: metadata?.phase ?? null,
     owner,
-    ownerName: owner,
+    ownerName: ownerName ?? owner,
     parent,
     dependsOn: [],
     updatedAt: null,
@@ -30,7 +52,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}) {
     bucket: 'other',
     archived: false,
     completed: !contextOnly && status === 'done',
-    commitment: null,
+    commitment: metadata?.commitment ?? null,
     plan: null,
     sourcePath: null,
     sections: {
@@ -49,7 +71,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}) {
     linked: { decisions: [], releases: [], updates: [] },
     progress: { scoped: false, percent: null, milestones: [] },
     health: {
-      state: 'unknown',
+      state: metadata?.healthState ?? 'unknown',
       reason: contextOnly ? 'Structural context only.' : 'Team projection has no health assessment.',
       missingInformation: contextOnly ? 'Only structural context is shared.' : 'Health evidence is outside this projection.',
       suggestedAction: contextOnly ? 'Select a shared task to view actionable work.' : 'Coordinate the next step with the assigned owner.',
@@ -76,8 +98,12 @@ export function buildTeamProjectionSnapshot(projection, source = {}) {
 
   const items = projection.tasks.map(task => {
     const evidence = task.evidenceLinks.join('\n');
-    const plannedEnd = task.approvedDate ?? null;
+    const metadata = metadataByTaskId.get(task.taskId) ?? null;
+    const schedule = schedulesByTaskId.get(task.taskId) ?? null;
+    const plannedStart = schedule?.approvedStart ?? null;
+    const plannedEnd = schedule?.approvedEnd ?? task.approvedDate ?? null;
     const forecastEnd = task.forecastDate ?? null;
+    const ownerProfile = directoryById.get(task.assignee);
     return {
       ...sharedItem({
         id: task.taskId,
@@ -85,7 +111,9 @@ export function buildTeamProjectionSnapshot(projection, source = {}) {
         type: 'task',
         status: task.status,
         owner: task.assignee ?? null,
+        ownerName: ownerProfile?.displayName ?? task.assignee ?? null,
         parent: task.parentId ?? null,
+        metadata,
       }),
       target: plannedEnd,
       sections: {
@@ -103,6 +131,11 @@ export function buildTeamProjectionSnapshot(projection, source = {}) {
         assignee: task.assignee ?? null,
         reviewer: task.reviewer ?? null,
         approvedDate: task.approvedDate ?? null,
+        approvedStart: plannedStart,
+        approvedEnd: plannedEnd,
+        commitment: metadata?.commitment ?? null,
+        phase: metadata?.phase ?? null,
+        healthState: metadata?.healthState ?? null,
         forecastDate: task.forecastDate ?? null,
         checkpoint: task.checkpoint ?? null,
         dependencies: task.dependencies.map(({ summary }) => summary),
@@ -110,13 +143,13 @@ export function buildTeamProjectionSnapshot(projection, source = {}) {
         parentId: task.parentId ?? null,
       },
       schedule: {
-        plannedStart: null,
+        plannedStart,
         plannedEnd,
         forecastStart: null,
         forecastEndMin: forecastEnd,
         forecastEndMax: forecastEnd,
-        provisional: true,
-        approved: false,
+        provisional: plannedEnd === null,
+        approved: plannedEnd !== null,
       },
       blockers: task.status === 'blocked' ? [{ id: task.taskId, reason: task.nextStep ?? 'Blocked' }] : [],
     };
@@ -168,7 +201,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}) {
     items,
     plans: [],
     deliveryRecords: [],
-    people: [],
+    people: teamProfiles,
     history: [],
     migrations: [],
     capacities: [],
@@ -176,6 +209,6 @@ export function buildTeamProjectionSnapshot(projection, source = {}) {
     releases: [],
     updates: [],
     activityEvidence: [],
-    team: [],
+    team: teamProfiles,
   };
 }

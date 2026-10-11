@@ -201,7 +201,7 @@ export function validateDataSource({ files, instance } = {}) {
   }
 
   const records = loadTrackerFromFiles(selected);
-  const issues = [...validateTracker(records), ...validateTaskOwners(records, registry)];
+  const issues = [...validateTracker(records, { approverIds: sourceInstance.model.approverIds }), ...validateTaskOwners(records, registry)];
   if (records.items.length > 0 && records.migrations.length !== 1) {
     issues.push('Expected current items and exactly one unified-work migration manifest.');
   }

@@ -25,9 +25,9 @@ const ROOT_KEYS = [
 const BRANDING_KEYS = ['name', 'title', 'description', 'markText', 'homeLabel', 'loadingLabel', 'faviconPath'];
 const GITHUB_KEYS = ['owner', 'repo', 'branch'];
 const TRACKER_DATA_KEYS = ['folderPath', 'layout', 'evidence'];
-const TEAM_DATA_KEYS = ['folderPath', 'layout', 'projectionPath', 'evidence', 'projectionLinkPolicy'];
+const TEAM_DATA_KEYS = ['folderPath', 'layout', 'projectionPath', 'companionPath', 'evidence', 'projectionLinkPolicy'];
 const PROJECTION_LINK_POLICY_KEYS = ['allowedEvidenceHosts', 'forbiddenGitHubRepositories'];
-const MODEL_KEYS = ['approvalProtocol'];
+const MODEL_KEYS = ['approvalProtocol', 'approverIds'];
 const BROWSER_KEYS = [
   'namespace', 'storeId', 'themeKey', 'editLockPrefix', 'publishLockName',
   'unscheduledCollapsedKey', 'activityPausedKey',
@@ -288,6 +288,17 @@ function actorId(value, path) {
   return text(value, path, { min: 1, max: 128, pattern: ACTOR_PATTERN });
 }
 
+/** @param {unknown} value @param {string} path */
+function approverIds(value, path) {
+  if (value === undefined) return Object.freeze(['don', 'owner']);
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new InstanceConfigError(path, 'must be a non-empty array');
+  }
+  const result = value.map((candidate, index) => actorId(candidate, `${path}[${index}]`).toLowerCase());
+  if (new Set(result).size !== result.length) throw new InstanceConfigError(path, 'must not contain duplicate approver IDs');
+  return result;
+}
+
 /** @param {unknown} value @param {string} path @param {string} namespace @param {{separator?: string}} [options] */
 function browserKey(value, path, namespace, { separator = '' } = {}) {
   const result = text(value, path, { min: 1, max: 160 });
@@ -345,6 +356,9 @@ function parseData(value, path) {
     folderPath: normalizeRepositoryPath(value.folderPath, `${path}.folderPath`, { allowEmpty: true }),
     layout: INSTANCE_TEAM_LAYOUT,
     projectionPath: normalizeRepositoryPath(value.projectionPath, `${path}.projectionPath`),
+    companionPath: value.companionPath === undefined || value.companionPath === null
+      ? null
+      : normalizeRepositoryPath(value.companionPath, `${path}.companionPath`),
     evidence: parseEvidence(value.evidence, `${path}.evidence`),
     projectionLinkPolicy: parseProjectionLinkPolicy(value.projectionLinkPolicy, `${path}.projectionLinkPolicy`),
   };
@@ -498,6 +512,7 @@ export function parseInstanceConfig(value) {
     data,
     model: {
       approvalProtocol: literal(modelInput.approvalProtocol, 'settings.model.approvalProtocol', INSTANCE_APPROVAL_PROTOCOL),
+      approverIds: approverIds(modelInput.approverIds, 'settings.model.approverIds'),
     },
     browser: {
       namespace,
@@ -667,8 +682,8 @@ export function parseInstanceCatalog(value) {
  * @property {string} id
  * @property {{name:string,title:string,description:string,markText:string,homeLabel:string,loadingLabel:string,faviconPath:string}} branding
  * @property {{owner:string,repo:string,branch:string}} github
- * @property {{folderPath:string,layout:'tracker-v1',evidence:{kind:'none'}|{kind:'grok-bot-v1'}}|{folderPath:string,layout:'team-projection-v1',projectionPath:string,evidence:{kind:'none'},projectionLinkPolicy:{allowedEvidenceHosts:string[],forbiddenGitHubRepositories:string[]}}} data
- * @property {{approvalProtocol:'don-v1'}} model
+ * @property {{folderPath:string,layout:'tracker-v1',evidence:{kind:'none'}|{kind:'grok-bot-v1'}}|{folderPath:string,layout:'team-projection-v1',projectionPath:string,companionPath:string|null,evidence:{kind:'none'},projectionLinkPolicy:{allowedEvidenceHosts:string[],forbiddenGitHubRepositories:string[]}}} data
+ * @property {{approvalProtocol:'don-v1',approverIds:readonly string[]}} model
  * @property {{namespace:string,storeId:string,themeKey:string,editLockPrefix:string,publishLockName:string,unscheduledCollapsedKey:string,activityPausedKey:string}} browser
  * @property {{kind:'unconfigured'}|{kind:'ready',teamDomain:string,audience:string,readerEmails:string[],readerEmailDomains:string[],service:{kind:'disabled'}|{kind:'enabled',clientId:string}}} access
  * @property {{kind:'disabled'}|{kind:'github-app',publisherEmail:string,recordActorId:string,operations:'existing-task-edits-v1'}} publish

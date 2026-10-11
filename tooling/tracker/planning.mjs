@@ -8,7 +8,11 @@ import { extractMarkdownSections, extractMarkdownTitle } from './markdown.mjs';
  * digest; prose that merely mentions approval is never authoritative.
  */
 
-export const DON_APPROVER_IDS = new Set(['don', 'owner']);
+// The generic engine accepts the historical fixture aliases by default. Sites
+// may provide an instance-scoped alias list when their approval records use a
+// different stable actor ID; callers must pass that list explicitly.
+export const DEFAULT_DON_APPROVER_IDS = Object.freeze(['don', 'owner']);
+export const DON_APPROVER_IDS = DEFAULT_DON_APPROVER_IDS;
 export const APPROVAL_SOURCES = new Set(['codex-chat', 'chatgpt-chat', 'grok-ui', 'authenticated-edit']);
 export const CONFIRMATION_SOURCES = new Set(['grok-ui', 'authenticated-edit']);
 export const APPROVED_PARTS = new Set(['task', 'assignment', 'schedule']);
@@ -102,8 +106,10 @@ export function confirmationData(data = {}) {
   return { state, confirmedBy, confirmedAt, reference, evidence, revision, source };
 }
 
-export function isDonIdentity(value) {
-  return DON_APPROVER_IDS.has(String(value ?? '').trim().toLowerCase());
+export function isDonIdentity(value, approverIds = DEFAULT_DON_APPROVER_IDS) {
+  const identity = String(value ?? '').trim().toLowerCase();
+  const ids = approverIds instanceof Set ? approverIds : new Set(approverIds ?? DEFAULT_DON_APPROVER_IDS);
+  return ids.has(identity);
 }
 
 export function isUtcTimestamp(value) {
@@ -114,10 +120,10 @@ export function isUtcTimestamp(value) {
   return date.toISOString() === `${match[1]}.${(match[2] ?? '').padEnd(3, '0')}Z`;
 }
 
-export function hasDonApproval(data = {}, prefix = '') {
+export function hasDonApproval(data = {}, prefix = '', approverIds = DEFAULT_DON_APPROVER_IDS) {
   const approval = approvalData(data, prefix);
   return Boolean(
-    isDonIdentity(approval.approvedBy)
+    isDonIdentity(approval.approvedBy, approverIds)
       && isUtcTimestamp(approval.approvedAt)
       && approval.reference
       && approval.revision
@@ -127,10 +133,10 @@ export function hasDonApproval(data = {}, prefix = '') {
   );
 }
 
-export function hasDonConfirmation(data = {}, expectedRevision = null) {
+export function hasDonConfirmation(data = {}, expectedRevision = null, approverIds = DEFAULT_DON_APPROVER_IDS) {
   const confirmation = confirmationData(data);
   return confirmation.state === 'confirmed'
-    && isDonIdentity(confirmation.confirmedBy)
+    && isDonIdentity(confirmation.confirmedBy, approverIds)
     && isUtcTimestamp(confirmation.confirmedAt)
     && Boolean(confirmation.revision)
     && (!expectedRevision || confirmation.revision === expectedRevision)
@@ -244,10 +250,10 @@ function milestoneWeight(milestone) {
   return numberValue((milestone?.data ?? milestone ?? {}).weight);
 }
 
-function planIsApproved(plan) {
+function planIsApproved(plan, { approverIds } = {}) {
   if (!plan) return false;
   const data = plan.data ?? plan;
-  return scalarValue(data.status) === 'approved' && hasDonApproval(data);
+  return scalarValue(data.status) === 'approved' && hasDonApproval(data, '', approverIds);
 }
 
 export function milestonePlanApprovalDigest(plan, milestones = []) {
@@ -274,7 +280,7 @@ export function milestonePlanApprovalDigest(plan, milestones = []) {
   });
 }
 
-function milestoneView(milestone, approvedPlan) {
+function milestoneView(milestone, approvedPlan, { approverIds } = {}) {
   const data = milestone.data ?? milestone;
   const confirmation = confirmationData(data);
   const approval = approvalData(data);
@@ -311,13 +317,13 @@ function milestoneView(milestone, approvedPlan) {
       approvedPlanId
         && planIdForMilestone(milestone) === approvedPlanId
         && scalarValue(data.status) === 'complete'
-        && hasDonConfirmation(data, planRevision)
+        && hasDonConfirmation(data, planRevision, approverIds)
     ),
     sourcePath: milestone.path ?? null
   };
 }
 
-export function approvedMilestonePlan(itemId, milestones = [], plans = []) {
+export function approvedMilestonePlan(itemId, milestones = [], plans = [], options = {}) {
   const itemMilestones = milestones.filter(milestone => (milestone.data ?? milestone).item === itemId);
   const plansById = new Map(plans.map(plan => [plan.data?.id ?? plan.id, plan]));
   const groups = new Map();
@@ -334,13 +340,13 @@ export function approvedMilestonePlan(itemId, milestones = [], plans = []) {
     const planDigest = approvalData(plan?.data ?? plan ?? {}).digest;
     const includedStatuses = new Set(['approved', 'complete', 'needs-reverification']);
     const included = group.filter(milestone => includedStatuses.has(scalarValue((milestone.data ?? milestone).status)));
-    if (planIsApproved(plan) && planRevision && planDigest && group.length > 0
+    if (planIsApproved(plan, options) && planRevision && planDigest && group.length > 0
       && included.length === group.length
       && milestonePlanApprovalDigest(plan, group) === planDigest
       && group.every(milestone => (
         milestoneWeight(milestone) !== null
         && scalarValue((milestone.data ?? milestone).approval_state) === 'approved'
-        && hasDonApproval(milestone.data ?? milestone)
+        && hasDonApproval(milestone.data ?? milestone, '', options.approverIds)
         && approvalData(milestone.data ?? milestone).revision === planRevision
         && approvalData(milestone.data ?? milestone).digest === planDigest
       ))) {
@@ -350,10 +356,10 @@ export function approvedMilestonePlan(itemId, milestones = [], plans = []) {
   return null;
 }
 
-export function deriveProgress(itemId, milestones = [], plans = []) {
+export function deriveProgress(itemId, milestones = [], plans = [], options = {}) {
   const itemMilestones = milestones.filter(milestone => (milestone.data ?? milestone).item === itemId);
-  const approved = approvedMilestonePlan(itemId, milestones, plans);
-  const views = itemMilestones.map(milestone => milestoneView(milestone, approved));
+  const approved = approvedMilestonePlan(itemId, milestones, plans, options);
+  const views = itemMilestones.map(milestone => milestoneView(milestone, approved, options));
   if (!approved || approved.milestones.length === 0) {
     return { scoped: false, percent: null, milestones: views, approvedPlanId: null };
   }
@@ -364,11 +370,11 @@ export function deriveProgress(itemId, milestones = [], plans = []) {
   const planRevision = approvalData(approved.plan?.data ?? approved.plan ?? {}).revision;
   const allVerified = approved.milestones.every(milestone => {
     const data = milestone.data ?? milestone;
-    return scalarValue(data.status) === 'complete' && hasDonConfirmation(data, planRevision);
+    return scalarValue(data.status) === 'complete' && hasDonConfirmation(data, planRevision, options.approverIds);
   });
   const completedWeight = approved.milestones.reduce((sum, milestone) => {
     const data = milestone.data ?? milestone;
-    return scalarValue(data.status) === 'complete' && hasDonConfirmation(data, planRevision)
+    return scalarValue(data.status) === 'complete' && hasDonConfirmation(data, planRevision, options.approverIds)
       ? sum + milestoneWeight(milestone) : sum;
   }, 0);
   const percent = allVerified ? 100 : Math.min(99, Math.floor((completedWeight / totalWeight) * 100));

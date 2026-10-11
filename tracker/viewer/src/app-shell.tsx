@@ -42,6 +42,7 @@ import {
   validatedReturnTo,
 } from './navigation';
 import { isTeamProjection } from './team-mode';
+import { useViewerIdentity, ViewerIdentityProvider } from './viewer-identity';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -136,6 +137,23 @@ function NotFoundPage() {
   return <section className="surface-card empty-hero route-not-found"><h1>Page not found</h1><p>This route is not part of the tracker.</p><Link to="/work" search={parseWorkSearch({})}>Return to Work</Link></section>;
 }
 
+function ViewerIdentitySummary() {
+  const identity = useViewerIdentity();
+  if (identity.kind === 'loading') {
+    return <div className="sidebar-identity" data-testid="viewer-identity"><span className="sidebar-identity-label">Signed-in identity</span><strong>Checking identity…</strong></div>;
+  }
+  if (identity.kind === 'unavailable') {
+    return <div className="sidebar-identity sidebar-identity-unavailable" data-testid="viewer-identity"><span className="sidebar-identity-label">Signed-in identity</span><strong>Identity unavailable</strong><small>{identity.message}</small></div>;
+  }
+  if (identity.actor.kind === 'service') {
+    return <div className="sidebar-identity" data-testid="viewer-identity"><span className="sidebar-identity-label">Signed-in identity</span><strong>Service identity</strong><small>Read-only access</small></div>;
+  }
+  const name = typeof identity.actor.person?.name === 'string' && identity.actor.person.name.trim() !== ''
+    ? identity.actor.person.name
+    : 'Signed-in user';
+  return <div className="sidebar-identity" data-testid="viewer-identity"><span className="sidebar-identity-label">Signed-in identity</span><strong>{name}</strong><small>{identity.actor.email ?? 'Verified directory identity'}</small></div>;
+}
+
 function Sidebar({
   data,
   teamProjection,
@@ -184,11 +202,12 @@ function Sidebar({
         {teamProjection ? null : <Link className={navClass('reports')} data-slot="tabs-trigger" data-state={active('reports') ? 'active' : 'inactive'} to="/reports" search={reportsSearch} aria-current={active('reports') ? 'page' : undefined}><BarChart3 size={16} aria-hidden="true" />Reports</Link>}
       </div>
     </nav>
+    <ViewerIdentitySummary />
     <ThemeControl />
   </aside>;
 }
 
-export function AppShell() {
+function AppShellContent() {
   const { data, taskEdit } = useRouteContext({ from: '__root__' });
   const teamProjection = isTeamProjection(data);
   const location = useRouterState({ select: state => state.location });
@@ -509,4 +528,9 @@ export function AppShell() {
 
 export function TrackerNotFound() {
   return <NotFoundPage />;
+}
+
+export function AppShell() {
+  const { data } = useRouteContext({ from: '__root__' });
+  return <ViewerIdentityProvider team={data.team}><AppShellContent /></ViewerIdentityProvider>;
 }

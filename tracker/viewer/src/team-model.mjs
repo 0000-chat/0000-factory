@@ -1,5 +1,5 @@
 import { isAccepted } from './view-model.mjs';
-import { resolvePerson } from './person-identity.ts';
+import { avatarAssetPath, resolvePerson } from './person-identity.ts';
 
 function dateMillis(value) {
   const time = Date.parse(String(value ?? ''));
@@ -164,19 +164,54 @@ export function buildTeamDirectory(profiles, items, { teamProjection = false } =
 }
 
 /**
- * Team projections intentionally omit the canonical roster. Keep the Team
- * surface useful by exposing only assignee IDs that occur in the projection;
- * a human name is used only when the projected task supplied one.
+ * Team projections intentionally omit the canonical roster. A validated safe
+ * companion may supply display metadata; without it, expose only assignee IDs
+ * that occur in the projection and use a task-supplied human name.
  */
-export function projectedTeamProfiles(items) {
+export function projectedTeamProfiles(items, directory = []) {
   const profiles = new Map();
+  for (const entry of Array.isArray(directory) ? directory : []) {
+    const id = String(entry?.id ?? '').trim();
+    const displayName = String(entry?.displayName ?? '').trim();
+    if (!id || !displayName || profiles.has(id)) continue;
+    profiles.set(id, {
+      id,
+      slug: id,
+      handle: id,
+      name: displayName,
+      fullName: displayName,
+      status: 'projected',
+      githubHandle: null,
+      avatar: typeof entry?.avatar === 'string' ? entry.avatar : null,
+      avatarUrl: avatarAssetPath(entry?.avatar),
+      aliases: [],
+      organizations: [],
+      organizationIds: [],
+      current: null,
+      strongAt: null,
+      experience: null,
+      bestAssignments: null,
+      preference: null,
+      slackTitle: null,
+      githubUrl: null,
+      slackUrl: null,
+      verifiedLabel: true,
+    });
+  }
   for (const item of Array.isArray(items) ? items : []) {
     const id = String(item?.owner ?? '').trim();
     if (!id || id.toLowerCase() === 'unassigned') continue;
     const candidateName = String(item?.ownerName ?? '').trim();
     const hasVerifiedName = candidateName && candidateName !== id;
     const current = profiles.get(id);
-    if (current && (!hasVerifiedName || current.verifiedLabel)) continue;
+    if (current) {
+      if (!current.verifiedLabel && hasVerifiedName) {
+        current.name = candidateName;
+        current.fullName = candidateName;
+        current.verifiedLabel = true;
+      }
+      continue;
+    }
     profiles.set(id, {
       id,
       slug: id,

@@ -98,6 +98,42 @@ test('populated synthetic routes show work, plans, reports, and team data', asyn
   expect(pageErrors).toEqual([]);
 });
 
+test('Gantt keeps schedule controls compact and opens row investigation', async ({ page }) => {
+  const pageErrors = watchPageErrors(page);
+  await openRoute(page, '/work');
+
+  await expect(page.getByText('Work activity timeline', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Show activity', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Show forecast', exact: true })).toBeVisible();
+
+  const row = page.getByRole('button', { name: /Open details for Synthetic foundation task/ }).first();
+  await expect(row).toBeVisible();
+  await row.click();
+
+  const investigation = page.getByTestId('work-gantt-investigation');
+  await expect(investigation).toBeVisible();
+  await expect(investigation.getByRole('heading', { name: 'Synthetic foundation task', exact: true, level: 2 })).toBeVisible();
+  await expect(investigation.getByText('Approved schedule', { exact: true })).toBeVisible();
+  await expect(investigation.getByRole('button', { name: 'Open full details', exact: true })).toBeVisible();
+  await investigation.getByRole('button', { name: 'Close work item investigation', exact: true }).click();
+  await expect(investigation).toBeHidden();
+  expect(pageErrors).toEqual([]);
+});
+
+test('synthetic signed-in identity marks only its exact assigned owner', async ({ page }) => {
+  await page.route('**/api/me', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ schemaVersion: 1, actor: { kind: 'human', personId: ' fixture-don ' } }),
+  }));
+  await openRoute(page, '/work?mode=table');
+
+  await expect(page.getByTestId('viewer-identity')).toContainText('Fixture Don');
+  const assignedRow = page.locator('.work-table-wrap tr').filter({ hasText: 'Synthetic foundation task' });
+  await expect(assignedRow.getByTestId('assigned-to-you')).toHaveCount(1);
+  await expect(assignedRow.getByRole('link')).toHaveAttribute('aria-label', /Assigned to you/);
+});
+
 test('local title drafts survive a reload and field locks coordinate two tabs', async ({ page }) => {
   const id = projectId();
   await openRoute(page, `/work/${itemId}`);

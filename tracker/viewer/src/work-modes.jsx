@@ -129,7 +129,7 @@ function CalendarEvent({ feature, item, team, selectedId, onSelect }) {
         <CalendarItem feature={feature} />
         <span className="calendar-event-kind">{dateFeatureLabel(feature)}</span>
       </button>
-      {assigned ? <span className={`calendar-event-assignee${person ? '' : ' calendar-event-assignee-unmatched'}`}><PersonLink value={item.owner} name={item.ownerName} avatar className="calendar-event-assignee-link">{person ? <span className="profile-visually-hidden">{ownerLabel}</span> : undefined}</PersonLink></span> : null}
+      {assigned ? <span className={`calendar-event-assignee${person ? '' : ' calendar-event-assignee-unmatched'}`}><PersonLink value={item.owner} name={item.ownerName} avatar assignment className="calendar-event-assignee-link">{person ? <span className="profile-visually-hidden">{ownerLabel}</span> : undefined}</PersonLink></span> : null}
     </div>
   );
 }
@@ -232,18 +232,24 @@ export function CalendarView({
   );
 }
 
-function statusColumn(item) {
+export function statusColumn(item) {
   const status = String(item?.status ?? '').trim().toLowerCase().replaceAll('_', '-');
   if (item?.completed === true || status === 'done' || status === 'complete' || status === 'completed') return 'done';
   if (status === 'queued') return 'queued';
-  if (status === 'active') return 'active';
+  if (status === 'active' || status === 'started') return 'active';
   if (status === 'blocked') return 'blocked';
   return null;
+}
+
+export function statusLabel(item) {
+  const status = String(item?.status ?? '').trim();
+  return status || 'Status not recorded';
 }
 
 function KanbanTask({ item, selectedId, onSelect }) {
   const selected = item.id === selectedId;
   const assigned = item.owner && item.owner !== 'unassigned';
+  const rawStatus = String(item.status ?? '').trim();
   return (
     <div className="kanban-task-shell">
       <button
@@ -253,12 +259,13 @@ function KanbanTask({ item, selectedId, onSelect }) {
         aria-current={selected ? 'true' : undefined}
       >
         <span className="kanban-task-title">{item.title}</span>
+        {rawStatus ? <span className="kanban-task-status">{rawStatus}</span> : null}
         <span className={`kanban-commitment${!isAccepted(item) ? ' kanban-commitment-proposed' : ''}`}>
           {commitmentLabel(item)}
         </span>
         <span className="kanban-task-id">{item.id}</span>
       </button>
-      {assigned ? <div className="kanban-task-assignee"><PersonLink value={item.owner} name={item.ownerName} avatar className="kanban-owner-link" /></div> : null}
+      {assigned ? <div className="kanban-task-assignee"><PersonLink value={item.owner} name={item.ownerName} avatar assignment className="kanban-owner-link" /></div> : null}
     </div>
   );
 }
@@ -331,7 +338,7 @@ export function KanbanView({
             {unmapped.map((item) => (
               <li key={item.id}>
                 <button type="button" onClick={() => onSelect(item.id)}>
-                  <span><strong>{item.title}</strong><small>{String(item.status ?? 'Status not recorded')} · {commitmentLabel(item)}</small></span>
+                  <span><strong>{item.title}</strong><small>{statusLabel(item)} · {commitmentLabel(item)}</small></span>
                   <ChevronRight size={16} aria-hidden="true" />
                 </button>
               </li>

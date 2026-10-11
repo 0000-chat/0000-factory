@@ -80,6 +80,7 @@ export interface TrackerRelease extends SnapshotRecord {
 
 export interface TrackerItem extends SnapshotRecord {
   id: string;
+  referenceCode?: string;
   title: string;
   type?: string;
   status: string;

@@ -12,6 +12,8 @@ export const GANTT_DEFAULT_ZOOM = 100;
 export const GANTT_MIN_ZOOM = 0.001;
 export const GANTT_MAX_ZOOM = 200;
 export const GANTT_ZOOM_STEP = 0.001;
+export const GANTT_DAILY_COLUMN_WIDTH = 30;
+const GANTT_DATE_TICK_MIN_WIDTH = 28;
 export const GANTT_FIT_PADDING_DAYS = 2;
 const GANTT_ZOOM_DECIMALS = 3;
 const GANTT_ZOOM_SCALE = 10 ** GANTT_ZOOM_DECIMALS;
@@ -88,6 +90,16 @@ export function fitZoomForGanttDateRange(startDay, endDay, viewportWidth, column
   return clampGanttZoom(Math.floor((width / (padded.days * column)) * 100 * GANTT_ZOOM_SCALE) / GANTT_ZOOM_SCALE);
 }
 
+/** Choose a readable interval for daily date labels at the current chart zoom. */
+export function ganttDateTickInterval(zoom, columnWidth = GANTT_DAILY_COLUMN_WIDTH, minTickWidth = GANTT_DATE_TICK_MIN_WIDTH) {
+  const numericZoom = Number(zoom);
+  const width = Number(columnWidth);
+  const minimum = Number(minTickWidth);
+  if (!Number.isFinite(numericZoom) || numericZoom <= 0 || !Number.isFinite(width) || width <= 0
+    || !Number.isFinite(minimum) || minimum <= 0) return 1;
+  return Math.max(1, Math.ceil(minimum / (width * numericZoom / 100)));
+}
+
 function formatUtcDay(date) {
   return [
     String(date.getUTCFullYear()).padStart(4, '0'),
@@ -130,7 +142,12 @@ function inOrder(startDay, endDay) {
   return validDay(startDay) && validDay(endDay) && startDay <= endDay;
 }
 
-function makeMark(entry, kind, startDay, endDay, { point = false, inferred = false } = {}) {
+function makeMark(entry, kind, startDay, endDay, {
+  point = false,
+  inferred = false,
+  dueDay = null,
+  partial = entry.timeline.partial === true,
+} = {}) {
   if (!inOrder(startDay, endDay)) return null;
   const chartEndDay = addCalendarDay(endDay);
   const startAt = chartDateForDay(startDay);
@@ -145,19 +162,57 @@ function makeMark(entry, kind, startDay, endDay, { point = false, inferred = fal
     kind: kind === 'observed' ? 'baseline' : kind,
     sourceKind: kind,
     laneKey: kind,
-    dueDay: kind === 'approved' || kind === 'observed' ? entry.timeline.plannedDue ?? null : null,
+    dueDay: dueDay ?? (kind === 'approved' || kind === 'observed' ? entry.timeline.plannedDue ?? null : null),
     startAt,
     endAt,
     startDay,
     endDay,
     point,
     inferred,
-    partial: entry.timeline.partial === true,
+    partial,
     overdueCalendarDays: entry.timeline.overdueCalendarDays ?? 0,
     observedOverrun: kind === 'observed'
-      && Boolean(entry.timeline.plannedDue)
-      && endDay > entry.timeline.plannedDue,
+      && Boolean(dueDay ?? entry.timeline.plannedDue)
+      && endDay > (dueDay ?? entry.timeline.plannedDue),
   };
+}
+
+/** Build the approved schedule recorded directly on an entry, excluding descendant rollups. */
+export function approvedPlanMarkForWorkEntry(entry) {
+  if (!entry?.id || !entry.timeline) return null;
+  const timeline = entry.timeline;
+  const startDay = timeline.ownPlannedStart ?? null;
+  const dueDay = timeline.ownPlannedDue ?? null;
+  const partial = Boolean(startDay) !== Boolean(dueDay);
+  if (!dueDay) return null;
+  if (startDay && startDay <= dueDay) {
+    return makeMark(entry, 'approved', startDay, dueDay, { dueDay, partial });
+  }
+  return makeMark(entry, 'approved', dueDay, dueDay, { point: true, dueDay, partial });
+}
+
+/** Build source marks recorded directly on a grouping item, excluding descendant rollups. */
+export function directMarksForWorkEntry(entry) {
+  if (!entry?.id || !entry.timeline) return [];
+  const timeline = entry.timeline;
+  const marks = [];
+  const approved = approvedPlanMarkForWorkEntry(entry);
+  if (approved) marks.push(approved);
+
+  const observedStart = entry.own?.firstDate ?? null;
+  const observedEnd = entry.own?.lastDate ?? null;
+  if (observedStart && observedEnd && observedStart <= observedEnd) {
+    marks.push(makeMark(entry, 'observed', observedStart, observedEnd, {
+      dueDay: timeline.ownPlannedDue ?? null,
+    }));
+  }
+  if (timeline.ownProposedStart && timeline.ownProposedDue) {
+    marks.push(makeMark(entry, 'proposed', timeline.ownProposedStart, timeline.ownProposedDue));
+  }
+  if (timeline.ownForecastStart && timeline.ownForecastDue) {
+    marks.push(makeMark(entry, 'forecast', timeline.ownForecastStart, timeline.ownForecastDue));
+  }
+  return marks;
 }
 
 /** Build source-backed interval marks for one full-projection entry. */
@@ -204,6 +259,15 @@ export function primaryWorkMark(marks) {
     if (mark) return mark;
   }
   return null;
+}
+
+export function hasForecastMarks(projection, ids) {
+  const entries = asProjectionMap(projection);
+  const candidates = ids && typeof ids[Symbol.iterator] === 'function' ? ids : entries.keys();
+  for (const id of candidates) {
+    if (marksForWorkEntry(entries.get(id)).some(mark => mark.sourceKind === 'forecast')) return true;
+  }
+  return false;
 }
 
 function asProjectionMap(projection) {
@@ -462,6 +526,16 @@ function rowPreorder(projection, tree, expandedIds, contextualIds, {
     const subtreeIds = projectionSubtreeIds(projectionChildren, row.id);
     const subtreeMarks = visibleSourceMarks(projection, subtreeIds, showForecast);
     const envelope = sourceEnvelope(subtreeMarks);
+    const descendantIds = subtreeIds.filter(id => id !== row.id);
+    const descendantMarks = visibleSourceMarks(projection, descendantIds, showForecast);
+    const childApprovedEnvelope = sourceEnvelope(descendantMarks.filter(mark => mark.sourceKind === 'approved'));
+    const ownApprovedMark = approvedPlanMarkForWorkEntry(row.entry);
+    const childSummaryIncomplete = row.hasChildren && descendantIds.some(descendantId => {
+      const descendant = projection.get(descendantId);
+      if (!descendant) return false;
+      const hasApprovedDates = marksForWorkEntry(descendant).some(mark => mark.sourceKind === 'approved');
+      return !hasApprovedDates || descendant.timeline.partial === true;
+    });
     const immediateChildren = projectionChildren.get(row.id) ?? [];
     const childSummaryIntervals = immediateChildren.flatMap(childId => (
       visibleSourceMarks(projection, [childId], showForecast).map(mark => ({ ...mark, childId }))
@@ -475,7 +549,13 @@ function rowPreorder(projection, tree, expandedIds, contextualIds, {
     row.visibleDescendantRowIndex = row.lastVisibleDescendantRowIndex;
     row.isExpanded = row.hasChildren && !row.collapsed;
     row.subtreeIds = subtreeIds;
+    row.descendantIds = descendantIds;
     row.childSummaryIntervals = childSummaryIntervals;
+    row.childSummaryEnvelope = sourceEnvelope(descendantMarks);
+    row.childApprovedEnvelope = childApprovedEnvelope;
+    row.childSummaryIncomplete = childSummaryIncomplete;
+    row.ownApprovedMark = ownApprovedMark;
+    row.ownApprovedIncomplete = row.hasChildren && Boolean(row.entry.timeline.ownPlannedStart) !== Boolean(row.entry.timeline.ownPlannedDue);
     row.parentEnvelope = envelope;
     row.envelopeStartDay = envelope?.startDay ?? null;
     row.envelopeEndDay = envelope?.endDay ?? null;

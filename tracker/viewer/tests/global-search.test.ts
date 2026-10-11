@@ -81,6 +81,13 @@ test('uses stable IDs for duplicate title ties and creates encoded canonical lin
   assert.equal(groups.find(group => group.kind === 'person')?.results[0]?.href, `/team/${encodeURIComponent(memberSlug)}`);
 });
 
+test('searches work by short reference code and exposes it in the result', () => {
+  const data = snapshot({ items: [item('fixture-project', 'Synthetic project', { referenceCode: 'T-RTUDWH' })] });
+  const result = searchSnapshot(data, 't-rtudwh').find(group => group.kind === 'work')?.results[0];
+  assert.equal(result?.id, 'fixture-project');
+  assert.equal(result?.referenceCode, 'T-RTUDWH');
+});
+
 test('handles missing optional metadata and gives work lifecycle states explicit subtitles', () => {
   const data = snapshot({
     items: [

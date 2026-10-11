@@ -62,6 +62,7 @@ test('builds a parent tree with a synthetic project expanded and direct child co
   const { fixture, data } = await builtData();
   const project = data.items.find(item => item.id === 'fixture-project');
   assert.ok(project);
+  assert.equal(project.referenceCode, 'T-RTUDWH');
   assert.deepEqual(data.defaultExpanded, []);
   assert.equal(data.rootsByBucket.other.includes('fixture-project'), true);
   assert.equal(project.childSummary.done, 0);

@@ -183,7 +183,9 @@ function childRefs(item) {
 }
 
 function statusOf(item) {
-  return text(item?.status ?? item?.data?.status) ?? 'unknown';
+  const status = text(item?.status ?? item?.data?.status);
+  if (item?.contextOnly === true || item?.teamProjection?.contextOnly === true) return status ?? '';
+  return status ?? 'unknown';
 }
 
 function isCompleted(item, status = statusOf(item)) {
@@ -488,6 +490,10 @@ export function buildWorkProjection({ items = [], evidence = [], now = new Date(
     const timeline = {
       ownPlannedStart: schedule.plannedStart,
       ownPlannedDue: schedule.plannedDue,
+      ownProposedStart: schedule.proposedStart,
+      ownProposedDue: schedule.proposedEnd,
+      ownForecastStart: schedule.forecastStart,
+      ownForecastDue: schedule.forecastEnd,
       plannedStart,
       plannedDue,
       observedStart,
