@@ -218,11 +218,50 @@ test('reader normalizes the standing projection contract without exporting audit
   assert.doesNotThrow(() => parsePlanningArchive(archive));
 });
 
+test('standing hierarchy preserves safe ancestor context while keeping task fields explicit', () => {
+  const project = { id: 'project-alpha', title: 'Project Alpha', kind: 'project', parentId: null };
+  const workstream = { id: 'workstream-alpha', title: 'Workstream Alpha', kind: 'workstream', parentId: project.id };
+  const hierarchical = {
+    ...standingProjection([standingTask({ taskId: 'task-alpha', parentId: workstream.id })]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [project, workstream],
+  };
+  const root = writeFixture(hierarchical);
+  const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json' });
+  assert.equal(loaded.projection.tasks[0].parentId, workstream.id);
+  assert.deepEqual(loaded.projection.contextNodes, [project, workstream]);
+
+  const snapshot = buildTeamProjectionSnapshot(loaded.projection);
+  assert.deepEqual(snapshot.rootsByBucket.other, [project.id]);
+  assert.deepEqual(snapshot.defaultExpanded, [project.id, workstream.id]);
+  const projectItem = snapshot.items.find(item => item.id === project.id);
+  const workstreamItem = snapshot.items.find(item => item.id === workstream.id);
+  const taskItem = snapshot.items.find(item => item.id === 'task-alpha');
+  assert.equal(projectItem.contextOnly, true);
+  assert.equal(projectItem.type, 'project');
+  assert.equal(projectItem.parent, null);
+  assert.deepEqual(projectItem.childIds, [workstream.id]);
+  assert.equal(workstreamItem.contextOnly, true);
+  assert.equal(workstreamItem.parent, project.id);
+  assert.deepEqual(workstreamItem.childIds, ['task-alpha']);
+  assert.equal(taskItem.contextOnly, undefined);
+  assert.equal(taskItem.type, 'task');
+  assert.equal(taskItem.parent, workstream.id);
+  assert.equal(taskItem.teamProjection.parentId, workstream.id);
+});
+
 test('standing projection validates its explicit public contract and disabled publish barrier', () => {
   const invalidTaskField = standingProjection();
   invalidTaskField.tasks[0].scope = 'legacy field is not standing input';
   const invalidFieldRoot = writeFixture(invalidTaskField);
   assert.throws(() => readTeamProjection({ dataRoot: invalidFieldRoot, projectionPath: 'team/projection.json' }), /unknown field/u);
+
+  const v1HierarchyField = standingProjection();
+  v1HierarchyField.tasks[0].parentId = null;
+  const v1HierarchyFieldRoot = writeFixture(v1HierarchyField);
+  assert.throws(() => readTeamProjection({ dataRoot: v1HierarchyFieldRoot, projectionPath: 'team/projection.json' }), /unknown field/u);
 
   const invalidPublish = standingProjection();
   invalidPublish.publish.activationEnabled = true;
@@ -243,6 +282,39 @@ test('standing projection validates its explicit public contract and disabled pu
   privateStanding.tasks[0].description = 'password: private-value';
   const privateStandingRoot = writeFixture(privateStanding);
   assert.throws(() => readTeamProjection({ dataRoot: privateStandingRoot, projectionPath: 'team/projection.json' }), /team-safe string/u);
+
+  const unknownParent = {
+    ...standingProjection([standingTask({ parentId: 'missing-parent' })]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [],
+  };
+  const unknownParentRoot = writeFixture(unknownParent);
+  assert.throws(() => readTeamProjection({ dataRoot: unknownParentRoot, projectionPath: 'team/projection.json' }), /must reference a task or context ancestor node/u);
+
+  const cyclicContext = {
+    ...standingProjection([standingTask({ parentId: 'context-a' })]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [
+      { id: 'context-a', title: 'Context A', kind: 'workstream', parentId: 'context-b' },
+      { id: 'context-b', title: 'Context B', kind: 'project', parentId: 'context-a' },
+    ],
+  };
+  const cyclicContextRoot = writeFixture(cyclicContext);
+  assert.throws(() => readTeamProjection({ dataRoot: cyclicContextRoot, projectionPath: 'team/projection.json' }), /parent cycle/u);
+
+  const privateContext = {
+    ...standingProjection([standingTask({})]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [{ id: 'context-private', title: 'Private', kind: 'project', parentId: null, privateNotes: 'must not cross boundary' }],
+  };
+  const privateContextRoot = writeFixture(privateContext);
+  assert.throws(() => readTeamProjection({ dataRoot: privateContextRoot, projectionPath: 'team/projection.json' }), /unknown field|private\/control/u);
 });
 
 test('standing projection builds the production viewer payload and browser archive contract', () => {
@@ -269,6 +341,46 @@ test('standing projection builds the production viewer payload and browser archi
     assert.equal(archive.entries.length, 1);
     assert.equal(archive.entries[0].plan.outcomes[0].approvedDate, '2026-10-18');
     assert.equal(archive.entries[0].plan.outcomes[0].status, 'active');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(output, { recursive: true, force: true });
+  }
+});
+
+test('hierarchical standing projection builds context rows and breadcrumbs without private task data', () => {
+  const hierarchical = {
+    ...standingProjection([standingTask({ taskId: 'task-alpha', parentId: 'workstream-alpha' })]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [
+      { id: 'project-alpha', title: 'Project Alpha', kind: 'project', parentId: null },
+      { id: 'workstream-alpha', title: 'Workstream Alpha', kind: 'workstream', parentId: 'project-alpha' },
+    ],
+  };
+  const root = writeFixture(hierarchical);
+  const output = mkdtempSync(join(tmpdir(), 'standing-hierarchy-output-'));
+  try {
+    writeFileSync(join(root, 'settings.json'), `${JSON.stringify(teamSettings(), null, 2)}\n`);
+    buildSnapshot({
+      engineRoot: resolve(import.meta.dir, '..'),
+      instancePath: join(root, 'settings.json'),
+      dataRepo: root,
+      output,
+      builtAt: '2026-10-11T00:00:00Z',
+    });
+    const dataText = readFileSync(join(output, 'assets/data.json'), 'utf8');
+    const data = JSON.parse(dataText);
+    const byId = new Map(data.items.map(item => [item.id, item]));
+    assert.deepEqual(data.rootsByBucket.other, ['project-alpha']);
+    assert.deepEqual(data.defaultExpanded, ['project-alpha', 'workstream-alpha']);
+    assert.equal(byId.get('project-alpha').contextOnly, true);
+    assert.equal(byId.get('project-alpha').parent, null);
+    assert.equal(byId.get('workstream-alpha').parent, 'project-alpha');
+    assert.equal(byId.get('task-alpha').parent, 'workstream-alpha');
+    assert.equal(byId.get('task-alpha').contextOnly, undefined);
+    assert.equal(dataText.includes('approvalDigest'), false);
+    assert.equal(dataText.includes('activationEnabled'), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(output, { recursive: true, force: true });

@@ -108,6 +108,8 @@ export interface TrackerItem extends SnapshotRecord {
   ownerName?: string | null;
   phase?: string | null;
   target?: string | null;
+  /** Structural-only context supplied by a team projection. */
+  contextOnly?: boolean;
 }
 
 export interface TrackerPlan extends SnapshotRecord {
