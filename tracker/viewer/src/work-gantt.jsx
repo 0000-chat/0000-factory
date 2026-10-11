@@ -606,10 +606,10 @@ function WorkGanttTimeline({
     // details surface while the default chart stays approved-focused.
     const marks = sourceMarks.filter(mark => !row.hasChildren || mark.sourceKind !== 'proposed' || mark.acceptedProposal === true);
     const visibleMarks = marks.filter(mark => (showActivity || mark.sourceKind !== 'observed') && (showForecast || mark.sourceKind !== 'forecast'));
-    const collapsedChildEnvelope = row.collapsed && row.hasChildren
-      ? (row.childApprovedEnvelope ?? (showActivity ? row.childSummaryEnvelope : null))
-      : null;
-    const summaryMarks = collapsedChildEnvelope?.marks ?? [];
+    const collapsedChildEnvelopes = row.collapsed && row.hasChildren
+      ? [row.childApprovedEnvelope, row.childProposedEnvelope, showActivity ? row.childObservedEnvelope : null].filter(Boolean)
+      : [];
+    const summaryMarks = collapsedChildEnvelopes.flatMap(envelope => envelope.marks ?? []);
     const visibleSummaryMarks = summaryMarks
         .filter(mark => (showActivity || mark.sourceKind !== 'observed') && (showForecast || mark.sourceKind !== 'forecast'))
         .filter(mark => mark.sourceKind !== 'proposed' || mark.acceptedProposal === true);
@@ -866,13 +866,13 @@ function WorkGanttTimelineContent({
                 + (rollupSources ? ` Sources: ${rollupSources}.` : '')
                 + (rollupIntervals ? ` Intervals: ${rollupIntervals}.` : '')
               : rollupSummary + (rollupIntervals ? ` · Intervals: ${rollupIntervals}.` : '');
-            const childSummaryEnvelope = row.childSummaryEnvelope;
             const childApprovedEnvelope = row.childApprovedEnvelope;
+            const childObservedEnvelope = row.childObservedEnvelope;
             const childProposedEnvelope = row.childProposedEnvelope;
-            const visibleChildSummaryEnvelope = childApprovedEnvelope ?? (showActivity ? childSummaryEnvelope : null);
+            const visibleChildSummaryEnvelope = childApprovedEnvelope ?? (showActivity ? childObservedEnvelope : null);
             const collapsedSummaryEnvelope = childApprovedEnvelope ?? childProposedEnvelope;
-            const collapsedActivityEnvelope = !childApprovedEnvelope && showActivity && childSummaryEnvelope?.primaryKind === 'observed'
-              ? childSummaryEnvelope
+            const collapsedActivityEnvelope = !childApprovedEnvelope && showActivity
+              ? childObservedEnvelope
               : null;
             const collapsedEnvelope = collapsedSummaryEnvelope;
             const parentEnvelopeLeft = row.parentEnvelope

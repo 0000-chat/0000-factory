@@ -235,6 +235,8 @@ test('accepted proposed marks keep their kind and remain visible in parent rollu
   const child = entry('child', {
     plannedStart: '2026-10-01',
     plannedDue: '2026-10-03',
+    observedStart: '2026-10-04',
+    observedEnd: '2026-10-04',
     proposedStart: '2026-10-08',
     proposedEnd: '2026-10-08',
     ownProposedScheduleKind: 'checkpoint',
@@ -254,6 +256,8 @@ test('accepted proposed marks keep their kind and remain visible in parent rollu
   const parentRow = model.rows.find(row => row.id === parent.id);
   assert.equal(parentRow?.childApprovedEnvelope?.startDay, '2026-10-01');
   assert.equal(parentRow?.childApprovedEnvelope?.endDay, '2026-10-03');
+  assert.equal(parentRow?.childObservedEnvelope?.startDay, '2026-10-04');
+  assert.equal(parentRow?.childObservedEnvelope?.endDay, '2026-10-04');
   assert.equal(parentRow?.childProposedEnvelope?.startDay, '2026-10-08');
   assert.equal(parentRow?.childProposedEnvelope?.endDay, '2026-10-08');
   assert.equal(parentRow?.childProposedEnvelope?.primaryKind, 'proposed');

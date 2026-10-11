@@ -549,6 +549,7 @@ function rowPreorder(projection, tree, expandedIds, contextualIds, {
     const descendantIds = subtreeIds.filter(id => id !== row.id);
     const descendantMarks = visibleSourceMarks(projection, descendantIds, showForecast);
     const childApprovedEnvelope = sourceEnvelope(descendantMarks.filter(mark => mark.sourceKind === 'approved'));
+    const childObservedEnvelope = sourceEnvelope(descendantMarks.filter(mark => mark.sourceKind === 'observed'));
     const childProposedEnvelope = sourceEnvelope(descendantMarks.filter(mark => mark.sourceKind === 'proposed' && mark.acceptedProposal === true));
     const ownApprovedMark = approvedPlanMarkForWorkEntry(row.entry);
     const childSummaryIncomplete = row.hasChildren && descendantIds.some(descendantId => {
@@ -574,6 +575,7 @@ function rowPreorder(projection, tree, expandedIds, contextualIds, {
     row.childSummaryIntervals = childSummaryIntervals;
     row.childSummaryEnvelope = sourceEnvelope(descendantMarks);
     row.childApprovedEnvelope = childApprovedEnvelope;
+    row.childObservedEnvelope = childObservedEnvelope;
     row.childProposedEnvelope = childProposedEnvelope;
     row.childSummaryIncomplete = childSummaryIncomplete;
     row.ownApprovedMark = ownApprovedMark;
