@@ -147,6 +147,8 @@ function makeMark(entry, kind, startDay, endDay, {
   inferred = false,
   dueDay = null,
   partial = entry.timeline.partial === true,
+  proposedScheduleKind = null,
+  acceptedProposal = false,
 } = {}) {
   if (!inOrder(startDay, endDay)) return null;
   const chartEndDay = addCalendarDay(endDay);
@@ -154,11 +156,14 @@ function makeMark(entry, kind, startDay, endDay, {
   const endAt = chartDateForDay(chartEndDay);
   if (!startAt || !endAt) return null;
 
+  const status = kind === 'proposed' && proposedScheduleKind === 'checkpoint'
+    ? { ...MARK_STATUS.proposed, id: 'proposed-checkpoint', name: 'Proposed checkpoint' }
+    : MARK_STATUS[kind];
   return {
     id: entry.id + ':' + kind,
     itemId: entry.id,
-    name: MARK_STATUS[kind].name,
-    status: MARK_STATUS[kind],
+    name: status.name,
+    status,
     kind: kind === 'observed' ? 'baseline' : kind,
     sourceKind: kind,
     laneKey: kind,
@@ -169,6 +174,8 @@ function makeMark(entry, kind, startDay, endDay, {
     endDay,
     point,
     inferred,
+    proposedScheduleKind: kind === 'proposed' ? proposedScheduleKind : null,
+    acceptedProposal: kind === 'proposed' && acceptedProposal,
     partial,
     overdueCalendarDays: entry.timeline.overdueCalendarDays ?? 0,
     observedOverrun: kind === 'observed'
@@ -207,7 +214,10 @@ export function directMarksForWorkEntry(entry) {
     }));
   }
   if (timeline.ownProposedStart && timeline.ownProposedDue) {
-    marks.push(makeMark(entry, 'proposed', timeline.ownProposedStart, timeline.ownProposedDue));
+    marks.push(makeMark(entry, 'proposed', timeline.ownProposedStart, timeline.ownProposedDue, {
+      proposedScheduleKind: timeline.ownProposedScheduleKind ?? null,
+      acceptedProposal: timeline.ownProposedExplicit === true,
+    }));
   }
   if (timeline.ownForecastStart && timeline.ownForecastDue) {
     marks.push(makeMark(entry, 'forecast', timeline.ownForecastStart, timeline.ownForecastDue));
@@ -240,7 +250,10 @@ export function marksForWorkEntry(entry) {
   }
 
   if (timeline.proposedStart && timeline.proposedEnd) {
-    const mark = makeMark(entry, 'proposed', timeline.proposedStart, timeline.proposedEnd);
+    const mark = makeMark(entry, 'proposed', timeline.proposedStart, timeline.proposedEnd, {
+      proposedScheduleKind: timeline.ownProposedScheduleKind ?? null,
+      acceptedProposal: timeline.ownProposedExplicit === true,
+    });
     if (mark) marks.push(mark);
   }
 
@@ -528,7 +541,7 @@ function rowPreorder(projection, tree, expandedIds, contextualIds, {
     const envelope = sourceEnvelope(subtreeMarks);
     const descendantIds = subtreeIds.filter(id => id !== row.id);
     const descendantMarks = visibleSourceMarks(projection, descendantIds, showForecast);
-    const childApprovedEnvelope = sourceEnvelope(descendantMarks.filter(mark => mark.sourceKind === 'approved'));
+    const childApprovedEnvelope = sourceEnvelope(descendantMarks.filter(mark => mark.sourceKind === 'approved' || mark.acceptedProposal === true));
     const ownApprovedMark = approvedPlanMarkForWorkEntry(row.entry);
     const childSummaryIncomplete = row.hasChildren && descendantIds.some(descendantId => {
       const descendant = projection.get(descendantId);
@@ -679,7 +692,7 @@ export function workMarkDescription(mark) {
     : mark.sourceKind === 'observed'
       ? 'Observed activity' + (mark.observedOverrun ? ' after approved due date' : '')
       : mark.sourceKind === 'proposed'
-        ? 'Proposed schedule'
+        ? mark.proposedScheduleKind === 'checkpoint' ? 'Proposed checkpoint' : 'Proposed schedule'
         : 'Forecast';
   const overdue = mark.sourceKind === 'approved' && mark.overdueCalendarDays > 0
     ? ' · ' + mark.overdueCalendarDays + ' calendar days overdue'

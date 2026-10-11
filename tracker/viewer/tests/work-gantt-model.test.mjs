@@ -19,6 +19,7 @@ import {
   marksForWorkEntry,
   primaryWorkMark,
   shortWorkDate,
+  workMarkDescription,
   workGanttDepthExpansion,
   workMarkLabel,
 } from '../src/work-gantt-model.mjs';
@@ -227,6 +228,30 @@ test('approved and observed end dates include their final calendar cell', () => 
   assert.equal(observed.endAt.getDate(), 4);
   assert.equal(workMarkLabel(approved), '10/2');
   assert.equal(shortWorkDate('2026-10-03'), '10/3');
+});
+
+test('accepted proposed marks keep their kind and remain visible in parent rollups', () => {
+  const parent = entry('parent', {}, { childIds: ['child'] });
+  const child = entry('child', {
+    proposedStart: '2026-10-08',
+    proposedEnd: '2026-10-08',
+    ownProposedScheduleKind: 'checkpoint',
+    ownProposedExplicit: true,
+  }, { parentId: 'parent' });
+  const proposal = marksForWorkEntry(child).find(mark => mark.sourceKind === 'proposed');
+  assert.equal(proposal?.acceptedProposal, true);
+  assert.equal(proposal?.proposedScheduleKind, 'checkpoint');
+  assert.match(proposal?.status?.name ?? '', /checkpoint/i);
+  assert.match(workMarkDescription(proposal), /Proposed checkpoint/);
+
+  const model = buildWorkGanttModel({
+    projection: new Map([[parent.id, parent], [child.id, child]]),
+    visibleIds: new Set([parent.id, child.id]),
+    expandedIds: new Set(),
+  });
+  const parentRow = model.rows.find(row => row.id === parent.id);
+  assert.equal(parentRow?.childApprovedEnvelope?.startDay, '2026-10-08');
+  assert.equal(parentRow?.childApprovedEnvelope?.endDay, '2026-10-08');
 });
 
 test('missing approved due does not create a plan and keeps an explicit forecast source-backed', () => {

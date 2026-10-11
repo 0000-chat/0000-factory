@@ -64,6 +64,7 @@ function ScheduleInline({ item }) {
   const minimum = schedule.forecastEndMin || schedule.forecastEndMax;
   const maximum = schedule.forecastEndMax || schedule.forecastEndMin;
   if (minimum || maximum) return <span className="tree-forecast" title="Recorded forecast end">Forecast · {formatDate(minimum)}{maximum && maximum !== minimum ? `–${formatDate(maximum)}` : ''}</span>;
+  if (schedule.proposedEnd) return <span className="tree-forecast tree-proposed" title={schedule.proposedScheduleKind === 'checkpoint' ? 'Proposed checkpoint end' : 'Proposed schedule end'}>{schedule.proposedScheduleKind === 'checkpoint' ? 'Checkpoint' : 'Proposed'} · {formatDate(schedule.proposedEnd)}</span>;
   if (schedule.plannedEnd && schedule.approved === true && isAccepted(item)) return <span className="tree-forecast tree-baseline" title="Approved baseline end">Baseline · {formatDate(schedule.plannedEnd)}</span>;
   if (schedule.plannedEnd && !isAccepted(item)) return <span className="tree-forecast tree-proposed" title="Proposed end">{commitmentLabel(item)} · {formatDate(schedule.plannedEnd)}</span>;
   return <span className="tree-forecast" title="No approved or forecast dates">Unscheduled</span>;

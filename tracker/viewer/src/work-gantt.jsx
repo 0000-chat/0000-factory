@@ -597,7 +597,7 @@ function WorkGanttTimeline({
     // Parent proposed ranges compete with the approved parent/child tracks in
     // the compact schedule. They remain available through the full work
     // details surface while the default chart stays approved-focused.
-    const marks = sourceMarks.filter(mark => !row.hasChildren || mark.sourceKind !== 'proposed');
+    const marks = sourceMarks.filter(mark => !row.hasChildren || mark.sourceKind !== 'proposed' || mark.acceptedProposal === true);
     const visibleMarks = marks.filter(mark => (showActivity || mark.sourceKind !== 'observed') && (showForecast || mark.sourceKind !== 'forecast'));
     const collapsedChildEnvelope = row.collapsed && row.hasChildren
       ? (row.childApprovedEnvelope ?? (showActivity ? row.childSummaryEnvelope : null))
@@ -605,7 +605,7 @@ function WorkGanttTimeline({
     const summaryMarks = collapsedChildEnvelope?.marks ?? [];
     const visibleSummaryMarks = summaryMarks
         .filter(mark => (showActivity || mark.sourceKind !== 'observed') && (showForecast || mark.sourceKind !== 'forecast'))
-        .filter(mark => mark.sourceKind !== 'proposed');
+        .filter(mark => mark.sourceKind !== 'proposed' || mark.acceptedProposal === true);
     return {
       ...row,
       marks: visibleMarks,
@@ -851,7 +851,7 @@ function WorkGanttTimelineContent({
             const rollups = row.collapsed && row.hasChildren
               ? placeWorkGanttRollups(visibleChildIntervals.length ? visibleChildIntervals : row.childRollups ?? [])
               : { positionedRollups: [], overflowCount: 0 };
-            const rollupSummary = `Direct approved child schedules · ${row.eligibleChildCount ?? 0} eligible child${row.eligibleChildCount === 1 ? '' : 'ren'} · ${row.undatedChildCount ?? 0} undated`;
+            const rollupSummary = `Direct child schedules · ${row.eligibleChildCount ?? 0} eligible child${row.eligibleChildCount === 1 ? '' : 'ren'} · ${row.undatedChildCount ?? 0} undated`;
             const rollupSources = [...new Set(visibleChildIntervals.map(interval => interval.sourceKind))].join(', ');
             const rollupIntervals = visibleChildIntervals.map(interval => `${interval.sourceKind} ${interval.startDay}–${interval.endDay}`).join('; ');
             const rollupDescription = rollups.overflowCount
@@ -1428,7 +1428,7 @@ export function WorkGantt({
         <i className="legend-dot forecast" aria-hidden="true" />{showForecast ? 'Hide forecast' : 'Show forecast'}
       </button>
       {!forecastAvailable ? <span id={`work-gantt-forecast-status${forecastStatusId}`} className="work-gantt-forecast-status" role="status">No forecast dates recorded for visible work.</span> : null}
-      <span className="schedule-readonly">Dates come from approved plans and qualifying source activity.</span>
+      <span className="schedule-readonly">Dates come from approved plans, explicit proposals, and qualifying source activity.</span>
     </div>
     <WorkGanttDeadlines releases={releases} />
     {!hasDisplayedMarks ? <div className="schedule-empty work-gantt-empty">

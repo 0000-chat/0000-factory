@@ -87,6 +87,9 @@ function scheduleFields(data = {}) {
   return {
     plannedStart: dateOrNull(data.planned_start),
     plannedEnd: dateOrNull(data.planned_end),
+    proposedStart: dateOrNull(data.proposed_start),
+    proposedEnd: dateOrNull(data.proposed_end),
+    proposedScheduleKind: textOrNull(data.proposed_schedule_kind),
     forecastStart: dateOrNull(data.forecast_start),
     forecastEndMin: dateOrNull(data.forecast_end_min),
     forecastEndMax: dateOrNull(data.forecast_end_max),
@@ -96,10 +99,12 @@ function scheduleFields(data = {}) {
 
 function scheduleFor(data, { approved = false, preserveProposed = false } = {}) {
   const fields = scheduleFields(data);
+  const proposedExplicit = Boolean(fields.proposedStart || fields.proposedEnd);
   return {
     ...fields,
     plannedStart: approved || preserveProposed ? fields.plannedStart : null,
     plannedEnd: approved || preserveProposed ? fields.plannedEnd : null,
+    proposedExplicit,
     approved: Boolean(approved)
   };
 }

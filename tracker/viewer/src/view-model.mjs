@@ -382,9 +382,27 @@ export function scheduleFeatures(items) {
     const proposed = !isAccepted(item);
     const label = commitmentLabel(item);
     const baseline = scheduleDate(schedule.plannedStart ?? schedule.planned_start) && scheduleDate(schedule.plannedEnd ?? schedule.planned_end);
+    const explicitProposedStart = scheduleDate(schedule.proposedStart ?? schedule.proposed_start);
+    const explicitProposedEnd = scheduleDate(schedule.proposedEnd ?? schedule.proposed_end);
     const forecastStart = scheduleDate(schedule.forecastStart ?? schedule.forecast_start);
     const forecastEnd = scheduleDate(schedule.forecastEndMax ?? schedule.forecastEndMin ?? schedule.forecast_end_max ?? schedule.forecast_end_min);
-    if (baseline && (proposed || schedule.approved === true)) {
+    if (explicitProposedStart && explicitProposedEnd) {
+      const kind = schedule.proposedScheduleKind ?? schedule.proposed_schedule_kind;
+      const kindLabel = kind === 'checkpoint' ? 'Proposed checkpoint' : 'Proposed schedule';
+      features.push({
+        id: `${item.id}-explicit-proposed`,
+        name: `${kindLabel} · ${item.title}`,
+        startAt: explicitProposedStart,
+        endAt: explicitProposedEnd,
+        status: { id: kind === 'checkpoint' ? 'proposed-checkpoint' : 'proposed', name: kindLabel, color: 'var(--proposed)' },
+        itemId: item.id,
+        kind: 'proposed',
+        proposed: true,
+        proposedScheduleKind: kind === 'checkpoint' ? 'checkpoint' : 'span',
+        rangeLabel: `${schedule.proposedStart ?? schedule.proposed_start} → ${schedule.proposedEnd ?? schedule.proposed_end}`
+      });
+    }
+    if (baseline && !explicitProposedStart && !explicitProposedEnd && (proposed || schedule.approved === true)) {
       features.push({
         id: `${item.id}-${proposed ? `${commitmentOf(item)}-proposed` : 'approved'}`,
         name: `${proposed ? `${label} proposed` : 'Approved'} · ${item.title}`,
