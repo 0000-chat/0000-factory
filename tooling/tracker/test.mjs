@@ -406,7 +406,7 @@ test('accepted tasks may carry explicit proposed dates without changing approval
     commitment: 'accepted',
     accepted_from: 'planned',
     proposed_start: '2026-10-10',
-    proposed_end: '2026-10-12',
+    proposed_end: '2026-10-10',
     proposed_schedule_kind: 'checkpoint'
   });
   const digest = item.data.approval_digest;
@@ -423,7 +423,14 @@ test('accepted tasks may carry explicit proposed dates without changing approval
     proposed_end: '2026-10-12',
     proposed_schedule_kind: 'slice'
   });
-  assert.match(validateTracker({ items: [invalidKind] }).join('\n'), /proposed_schedule_kind must be span or checkpoint/);
+  assert.match(validateTracker({ items: [invalidKind] }).join('\n'), /proposed_schedule_kind must be span, slice, or checkpoint/);
+
+  const invalidCheckpoint = record('invalid-checkpoint-proposal', {
+    proposed_start: '2026-10-10',
+    proposed_end: '2026-10-12',
+    proposed_schedule_kind: 'checkpoint'
+  });
+  assert.match(validateTracker({ items: [invalidCheckpoint] }).join('\n'), /checkpoint proposed dates must have equal proposed_start and proposed_end/);
 
   const invalidRange = record('invalid-proposal-range', {
     proposed_start: '2026-10-12',

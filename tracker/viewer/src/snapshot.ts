@@ -37,7 +37,7 @@ export interface TrackerSchedule extends SnapshotRecord {
   plannedEnd: string | null;
   proposedStart: string | null;
   proposedEnd: string | null;
-  proposedScheduleKind: 'span' | 'checkpoint' | null;
+  proposedScheduleKind: 'span' | 'slice' | 'checkpoint' | null;
   proposedExplicit: boolean;
   forecastStart: string | null;
   forecastEndMin: string | null;

@@ -365,8 +365,8 @@ function validateItemPlanningFields(item, issues, { requireHealth = false } = {}
   parseTimestampField(d, 'health_reviewed_at', path, issues);
   for (const key of ['planned_start', 'planned_end', 'proposed_start', 'proposed_end', 'forecast_start', 'forecast_end_min', 'forecast_end_max']) parseDateField(d, key, path, issues);
   optionalScalar(d, 'proposed_schedule_kind', path, issues);
-  if (meaningful(d.proposed_schedule_kind) && !['span', 'checkpoint'].includes(d.proposed_schedule_kind)) {
-    issues.push(`${path}: proposed_schedule_kind must be span or checkpoint`);
+  if (meaningful(d.proposed_schedule_kind) && !['span', 'slice', 'checkpoint'].includes(d.proposed_schedule_kind)) {
+    issues.push(`${path}: proposed_schedule_kind must be span, slice, or checkpoint`);
   }
   parseBooleanField(d, 'schedule_provisional', path, issues);
   for (const key of ['effort_min', 'effort_max', 'remaining_effort_min', 'remaining_effort_max']) parseNumberField(d, key, path, issues);
@@ -374,6 +374,10 @@ function validateItemPlanningFields(item, issues, { requireHealth = false } = {}
   if (!isUnknown(d.remaining_effort_min) && !isUnknown(d.remaining_effort_max) && Number(d.remaining_effort_max) < Number(d.remaining_effort_min)) issues.push(`${path}: remaining_effort_max must be >= remaining_effort_min`);
   if (!isUnknown(d.planned_start) && !isUnknown(d.planned_end) && d.planned_end < d.planned_start) issues.push(`${path}: planned_end must be >= planned_start`);
   if (!isUnknown(d.proposed_start) && !isUnknown(d.proposed_end) && d.proposed_end < d.proposed_start) issues.push(`${path}: proposed_end must be >= proposed_start`);
+  if (d.proposed_schedule_kind === 'checkpoint' && (!isUnknown(d.proposed_start) || !isUnknown(d.proposed_end))
+    && (isUnknown(d.proposed_start) || isUnknown(d.proposed_end) || d.proposed_start !== d.proposed_end)) {
+    issues.push(`${path}: checkpoint proposed dates must have equal proposed_start and proposed_end`);
+  }
   if (!isUnknown(d.forecast_start) && !isUnknown(d.forecast_end_min) && d.forecast_end_min < d.forecast_start) issues.push(`${path}: forecast_end_min must be >= forecast_start`);
   if (!isUnknown(d.forecast_start) && !isUnknown(d.forecast_end_max) && d.forecast_end_max < d.forecast_start) issues.push(`${path}: forecast_end_max must be >= forecast_start`);
   if (!isUnknown(d.forecast_end_min) && !isUnknown(d.forecast_end_max) && d.forecast_end_max < d.forecast_end_min) issues.push(`${path}: forecast_end_max must be >= forecast_end_min`);

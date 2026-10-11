@@ -233,6 +233,8 @@ test('approved and observed end dates include their final calendar cell', () => 
 test('accepted proposed marks keep their kind and remain visible in parent rollups', () => {
   const parent = entry('parent', {}, { childIds: ['child'] });
   const child = entry('child', {
+    plannedStart: '2026-10-01',
+    plannedDue: '2026-10-03',
     proposedStart: '2026-10-08',
     proposedEnd: '2026-10-08',
     ownProposedScheduleKind: 'checkpoint',
@@ -250,8 +252,12 @@ test('accepted proposed marks keep their kind and remain visible in parent rollu
     expandedIds: new Set(),
   });
   const parentRow = model.rows.find(row => row.id === parent.id);
-  assert.equal(parentRow?.childApprovedEnvelope?.startDay, '2026-10-08');
-  assert.equal(parentRow?.childApprovedEnvelope?.endDay, '2026-10-08');
+  assert.equal(parentRow?.childApprovedEnvelope?.startDay, '2026-10-01');
+  assert.equal(parentRow?.childApprovedEnvelope?.endDay, '2026-10-03');
+  assert.equal(parentRow?.childProposedEnvelope?.startDay, '2026-10-08');
+  assert.equal(parentRow?.childProposedEnvelope?.endDay, '2026-10-08');
+  assert.equal(parentRow?.childProposedEnvelope?.primaryKind, 'proposed');
+  assert.equal(parentRow?.parentEnvelope?.primaryKind, 'mixed');
 });
 
 test('missing approved due does not create a plan and keeps an explicit forecast source-backed', () => {

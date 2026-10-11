@@ -24,6 +24,12 @@ const MARK_STATUS = {
   forecast: { id: 'forecast', name: 'Forecast', color: 'var(--forecast)' },
 };
 
+function proposedScheduleLabel(kind) {
+  if (kind === 'checkpoint') return 'Proposed checkpoint';
+  if (kind === 'slice') return 'Proposed slice';
+  return 'Proposed schedule';
+}
+
 function validDay(day) {
   if (typeof day !== 'string') return false;
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
@@ -156,8 +162,8 @@ function makeMark(entry, kind, startDay, endDay, {
   const endAt = chartDateForDay(chartEndDay);
   if (!startAt || !endAt) return null;
 
-  const status = kind === 'proposed' && proposedScheduleKind === 'checkpoint'
-    ? { ...MARK_STATUS.proposed, id: 'proposed-checkpoint', name: 'Proposed checkpoint' }
+  const status = kind === 'proposed'
+    ? { ...MARK_STATUS.proposed, id: `proposed-${proposedScheduleKind ?? 'span'}`, name: proposedScheduleLabel(proposedScheduleKind) }
     : MARK_STATUS[kind];
   return {
     id: entry.id + ':' + kind,
@@ -387,11 +393,12 @@ function sourceEnvelope(marks) {
   const startDay = dated.reduce((earliest, mark) => mark.startDay < earliest ? mark.startDay : earliest, dated[0].startDay);
   const endDay = dated.reduce((latest, mark) => mark.endDay > latest ? mark.endDay : latest, dated[0].endDay);
   const primary = primaryWorkMark(dated);
+  const sourceKinds = MARK_PRIORITY.filter(kind => dated.some(mark => mark.sourceKind === kind));
   return {
     startDay,
     endDay,
-    primaryKind: primary?.sourceKind ?? null,
-    sourceKinds: MARK_PRIORITY.filter(kind => dated.some(mark => mark.sourceKind === kind)),
+    primaryKind: sourceKinds.length > 1 ? 'mixed' : (primary?.sourceKind ?? null),
+    sourceKinds,
     marks: dated,
   };
 }
@@ -541,7 +548,8 @@ function rowPreorder(projection, tree, expandedIds, contextualIds, {
     const envelope = sourceEnvelope(subtreeMarks);
     const descendantIds = subtreeIds.filter(id => id !== row.id);
     const descendantMarks = visibleSourceMarks(projection, descendantIds, showForecast);
-    const childApprovedEnvelope = sourceEnvelope(descendantMarks.filter(mark => mark.sourceKind === 'approved' || mark.acceptedProposal === true));
+    const childApprovedEnvelope = sourceEnvelope(descendantMarks.filter(mark => mark.sourceKind === 'approved'));
+    const childProposedEnvelope = sourceEnvelope(descendantMarks.filter(mark => mark.sourceKind === 'proposed' && mark.acceptedProposal === true));
     const ownApprovedMark = approvedPlanMarkForWorkEntry(row.entry);
     const childSummaryIncomplete = row.hasChildren && descendantIds.some(descendantId => {
       const descendant = projection.get(descendantId);
@@ -566,6 +574,7 @@ function rowPreorder(projection, tree, expandedIds, contextualIds, {
     row.childSummaryIntervals = childSummaryIntervals;
     row.childSummaryEnvelope = sourceEnvelope(descendantMarks);
     row.childApprovedEnvelope = childApprovedEnvelope;
+    row.childProposedEnvelope = childProposedEnvelope;
     row.childSummaryIncomplete = childSummaryIncomplete;
     row.ownApprovedMark = ownApprovedMark;
     row.ownApprovedIncomplete = row.hasChildren && Boolean(row.entry.timeline.ownPlannedStart) !== Boolean(row.entry.timeline.ownPlannedDue);
@@ -692,7 +701,7 @@ export function workMarkDescription(mark) {
     : mark.sourceKind === 'observed'
       ? 'Observed activity' + (mark.observedOverrun ? ' after approved due date' : '')
       : mark.sourceKind === 'proposed'
-        ? mark.proposedScheduleKind === 'checkpoint' ? 'Proposed checkpoint' : 'Proposed schedule'
+        ? proposedScheduleLabel(mark.proposedScheduleKind)
         : 'Forecast';
   const overdue = mark.sourceKind === 'approved' && mark.overdueCalendarDays > 0
     ? ' · ' + mark.overdueCalendarDays + ' calendar days overdue'

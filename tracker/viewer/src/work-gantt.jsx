@@ -200,6 +200,13 @@ function workGanttRangeLabel(mark) {
   return start === end ? start : `${start}–${end}`;
 }
 
+function workGanttProposedLabel(envelope) {
+  const proposal = envelope?.marks?.find(mark => mark.sourceKind === 'proposed');
+  if (proposal?.proposedScheduleKind === 'checkpoint') return 'Proposed checkpoint';
+  if (proposal?.proposedScheduleKind === 'slice') return 'Proposed slice';
+  return 'Proposed schedule';
+}
+
 function sameIdsWithin(controlledIds, expandedIds, currentIds) {
   for (const id of controlledIds) {
     if (currentIds.has(id) !== expandedIds.has(id)) return false;
@@ -861,8 +868,9 @@ function WorkGanttTimelineContent({
               : rollupSummary + (rollupIntervals ? ` · Intervals: ${rollupIntervals}.` : '');
             const childSummaryEnvelope = row.childSummaryEnvelope;
             const childApprovedEnvelope = row.childApprovedEnvelope;
+            const childProposedEnvelope = row.childProposedEnvelope;
             const visibleChildSummaryEnvelope = childApprovedEnvelope ?? (showActivity ? childSummaryEnvelope : null);
-            const collapsedSummaryEnvelope = childApprovedEnvelope;
+            const collapsedSummaryEnvelope = childApprovedEnvelope ?? childProposedEnvelope;
             const collapsedActivityEnvelope = !childApprovedEnvelope && showActivity && childSummaryEnvelope?.primaryKind === 'observed'
               ? childSummaryEnvelope
               : null;
@@ -908,6 +916,7 @@ function WorkGanttTimelineContent({
             const hasOwnApprovedPlan = Boolean(row.ownApprovedMark);
             const missingDatesSuffix = row.childSummaryIncomplete ? ' · missing dates' : '';
             const childLabel = childApprovedEnvelope ? `Child schedule · ${workGanttRangeLabel(childApprovedEnvelope)}` : null;
+            const proposedChildLabel = childProposedEnvelope ? `${workGanttProposedLabel(childProposedEnvelope)} · ${workGanttRangeLabel(childProposedEnvelope)}` : null;
             const planLabel = row.ownApprovedMark ? `Plan · ${workGanttRangeLabel(row.ownApprovedMark)}` : null;
             const trackLabelLeft = mark => {
               const left = mark ? dayLeft(mark, chartStartDay, pixelsPerDay) : envelopeLeft;
@@ -943,6 +952,15 @@ function WorkGanttTimelineContent({
                 <span className="work-gantt-parent-track-label work-gantt-parent-track-label-plan" style={{ left: trackLabelLeft(row.ownApprovedMark) }}>{planLabel}</span>
                 <span className="work-gantt-parent-track-label work-gantt-parent-track-label-child" style={{ left: trackLabelLeft(childApprovedEnvelope) }}>{childLabel}</span>
               </> : null}
+              {row.collapsed && childProposedEnvelope ? <span
+                className="work-gantt-child-proposed-summary"
+                data-work-parent-id={row.id}
+                data-parent-state="collapsed"
+                data-summary-source-kind="proposed"
+                aria-label={`${title} · ${proposedChildLabel}${missingDatesSuffix}`}
+                title={`${title} · ${proposedChildLabel}${missingDatesSuffix}`}
+                style={{ left: `${dayLeft(childProposedEnvelope, chartStartDay, pixelsPerDay)}px`, width: `${Math.max(3, dayWidth(childProposedEnvelope, pixelsPerDay))}px` }}
+              ><span className="work-gantt-child-proposed-summary-label">{proposedChildLabel}</span></span> : null}
               {row.collapsed && collapsedActivityEnvelope ? <span
                 className="work-gantt-child-activity-summary"
                 data-work-parent-id={row.id}
@@ -1008,6 +1026,18 @@ function WorkGanttTimelineContent({
                 className="work-gantt-child-summary-bracket-label"
                 style={{ left: `${Math.max(4, dayWidth(visibleChildSummaryEnvelope, pixelsPerDay) + 6)}px` }}
               >Recorded activity · {workGanttRangeLabel(visibleChildSummaryEnvelope)}</span></span> : null}
+              {row.isExpanded && childProposedEnvelope ? <button
+                className="work-gantt-child-summary-bracket work-gantt-child-proposed-summary"
+                type="button"
+                data-work-parent-id={row.id}
+                data-parent-state="expanded"
+                data-summary-source-kind="proposed"
+                aria-label={`Open details for ${title} · ${proposedChildLabel}${missingDatesSuffix}`}
+                title={`${title} · ${proposedChildLabel}${missingDatesSuffix}`}
+                style={{ left: `${dayLeft(childProposedEnvelope, chartStartDay, pixelsPerDay)}px`, width: `${Math.max(3, dayWidth(childProposedEnvelope, pixelsPerDay))}px` }}
+                onClick={() => onSelect(row.id)}
+                onPointerDown={event => event.stopPropagation()}
+              ><span className="work-gantt-child-summary-bracket-label">{proposedChildLabel}</span></button> : null}
               {row.isExpanded && hasOwnApprovedPlan && childApprovedEnvelope ? <span
                 className="work-gantt-parent-track-label work-gantt-parent-track-label-expanded-plan"
                 style={{ left: trackLabelLeft(row.ownApprovedMark) }}

@@ -61,7 +61,9 @@ function proposedScheduleLabel(row) {
   const start = day(row?.entry?.timeline?.ownProposedStart);
   const due = day(row?.entry?.timeline?.ownProposedDue);
   if (!start && !due) return null;
-  const kind = row?.entry?.timeline?.ownProposedScheduleKind === 'checkpoint' ? 'Proposed checkpoint' : 'Proposed schedule';
+  const kind = row?.entry?.timeline?.ownProposedScheduleKind === 'checkpoint'
+    ? 'Proposed checkpoint'
+    : row?.entry?.timeline?.ownProposedScheduleKind === 'slice' ? 'Proposed slice' : 'Proposed schedule';
   return `${kind} · ${dateRange(start, due)}`;
 }
 

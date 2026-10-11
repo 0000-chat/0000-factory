@@ -426,8 +426,31 @@ test('planned dates stay proposed and scope-only accepted dates cannot become ba
   const accepted = syntheticRecord({ id: 'scope-only-dates', type: 'task', status: 'queued', phase: 'build', owner: 'unassigned', parent: '-', depends_on: '-', updated_at: '2026-10-01', commitment: 'accepted', accepted_from: 'planned', planned_start: '2026-10-01', planned_end: '2026-10-03', approval_state: 'approved', approved_parts: 'task', health_state: 'unknown', health_reason: 'review', missing_information: 'none', suggested_action: 'review', suggested_actor: 'don' });
   const data = buildTrackerData({ items: [planned, accepted], plans: [], history: [], migrations: [], decisions: [], releases: [], updates: [], milestones: [], capacities: [], legacyApprovals: {} });
   assert.deepEqual(data.items.find(item => item.id === 'planned-dates').schedule, {
-    plannedStart: '2026-10-01', plannedEnd: '2026-10-03', forecastStart: null, forecastEndMin: null, forecastEndMax: null, provisional: null, approved: false
+    plannedStart: '2026-10-01', plannedEnd: '2026-10-03', proposedStart: null, proposedEnd: null, proposedScheduleKind: null, proposedExplicit: false, forecastStart: null, forecastEndMin: null, forecastEndMax: null, provisional: null, approved: false
   });
   assert.equal(data.items.find(item => item.id === 'scope-only-dates').schedule.plannedStart, null);
   assert.equal(data.items.find(item => item.id === 'scope-only-dates').schedule.approved, false);
+});
+
+test('accepted explicit proposed dates stay separate from approved baselines and forecasts', () => {
+  const accepted = syntheticRecord({
+    id: 'accepted-proposed-dates', type: 'task', status: 'active', phase: 'build', owner: 'unassigned', parent: '-', depends_on: '-',
+    updated_at: '2026-10-01', commitment: 'accepted', accepted_from: 'planned', planned_start: '2026-10-01', planned_end: '2026-10-03',
+    proposed_start: '2026-10-08', proposed_end: '2026-10-08', proposed_schedule_kind: 'checkpoint', forecast_start: '2026-10-04', forecast_end_min: '2026-10-05',
+    approval_state: 'approved', approved_parts: 'task,schedule', health_state: 'unknown', health_reason: 'review', missing_information: 'none', suggested_action: 'review', suggested_actor: 'don'
+  });
+  const data = buildTrackerData({ items: [accepted], plans: [], history: [], migrations: [], decisions: [], releases: [], updates: [], milestones: [], capacities: [], legacyApprovals: {} });
+  assert.deepEqual(data.items[0].schedule, {
+    plannedStart: null,
+    plannedEnd: null,
+    proposedStart: '2026-10-08',
+    proposedEnd: '2026-10-08',
+    proposedScheduleKind: 'checkpoint',
+    proposedExplicit: true,
+    forecastStart: '2026-10-04',
+    forecastEndMin: '2026-10-05',
+    forecastEndMax: null,
+    provisional: null,
+    approved: false,
+  });
 });

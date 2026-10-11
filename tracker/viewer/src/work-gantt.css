@@ -201,6 +201,9 @@
 .work-gantt-child-summary-bracket::after { right: 0; }
 .work-gantt-child-summary-bracket:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
 .work-gantt-child-summary-bracket-label { position: absolute; top: 5px; left: 4px; color: var(--muted-foreground); font-size: 10px; font-weight: 650; line-height: 1.1; white-space: nowrap; }
+.work-gantt-child-proposed-summary { top: 43px; background: linear-gradient(to bottom, color-mix(in srgb, var(--proposed) 78%, transparent) 0, color-mix(in srgb, var(--proposed) 78%, transparent) 1px, transparent 1px); }
+.work-gantt-child-proposed-summary::before, .work-gantt-child-proposed-summary::after { background: color-mix(in srgb, var(--proposed) 78%, transparent); }
+.work-gantt-child-proposed-summary-label { position: absolute; top: 5px; left: 4px; color: var(--proposed); font-size: 10px; font-weight: 650; line-height: 1.1; white-space: nowrap; }
 .work-gantt-child-activity-summary { position: absolute; top: 15px; z-index: 5; box-sizing: border-box; display: block; min-width: 3px; height: 28px; overflow: visible; background: linear-gradient(to bottom, color-mix(in srgb, var(--warning) 78%, transparent) 0, color-mix(in srgb, var(--warning) 78%, transparent) 1px, transparent 1px); color: var(--warning); font-size: 10px; font-weight: 650; line-height: 1.1; pointer-events: none; }
 .work-gantt-child-activity-summary::before, .work-gantt-child-activity-summary::after { position: absolute; top: 0; width: 1px; height: 13px; background: color-mix(in srgb, var(--warning) 78%, transparent); content: ""; }
 .work-gantt-child-activity-summary::before { left: 0; }

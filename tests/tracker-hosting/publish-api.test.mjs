@@ -117,6 +117,9 @@ function syntheticItem(id, {
   ownerProposed = '-',
   plannedStart = '-',
   plannedEnd = '-',
+  proposedStart = '-',
+  proposedEnd = '-',
+  proposedScheduleKind = '-',
   scheduleProvisional = '-',
   project = 'fixture-project',
   approvedAt = null,
@@ -163,6 +166,9 @@ function syntheticItem(id, {
     'health_reviewed_at: 2026-10-03T00:00:00Z',
     `planned_start: ${plannedStart}`,
     `planned_end: ${plannedEnd}`,
+    `proposed_start: ${proposedStart}`,
+    `proposed_end: ${proposedEnd}`,
+    `proposed_schedule_kind: ${proposedScheduleKind}`,
     'forecast_start: -',
     'forecast_end_min: -',
     'forecast_end_max: -',
@@ -266,6 +272,9 @@ function currentSourceFiles() {
     approvedAt: '2026-10-03T00:00:00Z',
     approvedRevision: 'r1',
     approvedParts: 'task,assignment,schedule',
+    proposedStart: '2026-10-14',
+    proposedEnd: '2026-10-14',
+    proposedScheduleKind: 'checkpoint',
   };
   const taskIds = [DRAFT_TASK_ID, PLANNED_TASK_ID, EDIT_TASK_ID, ...RETAINED_ACCEPTED_IDS];
   while (taskIds.length < 94) taskIds.push(`fixture-support-${String(taskIds.length + 1).padStart(3, '0')}`);
@@ -862,6 +871,8 @@ describe('authenticated GitHub task publishing', () => {
     assert.equal(review?.requiresApproval, true);
     assert.ok(review?.retained.some(entry => entry.label === 'Project' && entry.value === String(baseline.data.project)));
     assert.ok(review?.retained.some(entry => entry.label === 'Approved revision' && entry.value === String(baseline.data.approved_revision ?? baseline.data.revision)));
+    assert.ok(review?.retained.some(entry => entry.label === 'Proposed start' && entry.value === '2026-10-14'));
+    assert.ok(review?.retained.some(entry => entry.label === 'Proposed schedule kind' && entry.value === 'checkpoint'));
 
     const result = await publish(world, id, [task], [{ taskId: task.id, reviewDigest: review.reviewDigest }]);
     assert.equal(result.response.status, 200, JSON.stringify(result.body));
@@ -914,6 +925,9 @@ describe('authenticated GitHub task publishing', () => {
       assert.equal(item?.data.approval_source, 'authenticated-edit');
       assert.equal(item?.data.planned_start, baseline.data.planned_start);
       assert.equal(item?.data.planned_end, baseline.data.planned_end);
+      assert.equal(item?.data.proposed_start, baseline.data.proposed_start);
+      assert.equal(item?.data.proposed_end, baseline.data.proposed_end);
+      assert.equal(item?.data.proposed_schedule_kind, baseline.data.proposed_schedule_kind);
       assert.equal(item?.data.schedule_provisional, baseline.data.schedule_provisional);
     }
     assert.equal(published.records.legacyApprovals?.[ACCEPTED_RUNTIME_TASK_ID] !== undefined, true);
