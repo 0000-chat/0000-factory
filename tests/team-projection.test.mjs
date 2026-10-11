@@ -259,6 +259,21 @@ test('reader accepts only the public projection and adapter returns an empty-can
   assert.doesNotThrow(() => parsePlanningArchive(archive));
 });
 
+test('team projection gives every task and context row a stable code and rejects collisions', () => {
+  const snapshot = buildTeamProjectionSnapshot({
+    ...projection([task('fixture-project', { parentId: 'fixture-context' })]),
+    contextNodes: [{ id: 'fixture-context', kind: 'project', title: 'Fixture context', parentId: null }],
+  });
+  assert.equal(snapshot.items.find(item => item.id === 'fixture-project')?.referenceCode, taskCodeForId('fixture-project'));
+  assert.equal(snapshot.items.find(item => item.id === 'fixture-context')?.referenceCode, taskCodeForId('fixture-context'));
+  assert.ok(snapshot.items.every(item => item.referenceCode));
+
+  assert.throws(() => buildTeamProjectionSnapshot(projection([
+    task('collision-canonical-13753'),
+    task('collision-canonical-34460'),
+  ])), /task reference code collision: T-47XGK6/u);
+});
+
 test('reader normalizes the standing projection contract without exporting audit or publish metadata', () => {
   const root = writeFixture(standingProjection());
   const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json' });

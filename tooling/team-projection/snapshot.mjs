@@ -3,7 +3,7 @@
  * shape. The adapter deliberately leaves canonical-only collections empty and
  * does not synthesize approval, decision, history, or publication records.
  */
-import { taskCodeForId } from '../tracker/task-codes.mjs';
+import { taskCodeForId, taskCodeIndex } from '../tracker/task-codes.mjs';
 
 const EMPTY_SOURCE_DIGEST = `sha256:${'0'.repeat(64)}`;
 
@@ -37,10 +37,14 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     if (existing) throw new Error(`duplicate context node ID ${node.id}`);
     contextNodes.set(node.id, node);
   }
+  const referenceCodes = new Map([...taskCodeIndex([
+    ...projection.tasks.map(task => task.taskId),
+    ...contextNodes.keys(),
+  ])].map(([code, id]) => [id, code]));
 
   const sharedItem = ({ id, title, type, status, owner = null, ownerName = null, parent = null, contextOnly = false, metadata = null }) => ({
     id,
-    referenceCode: taskCodeForId(id),
+    referenceCode: referenceCodes.get(id) ?? taskCodeForId(id),
     title: title ?? id,
     type,
     status,
