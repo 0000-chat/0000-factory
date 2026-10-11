@@ -121,7 +121,7 @@ report, screenshot, generated output, or private log to a change.
 
 ## Proposed schedule dates
 
-Task frontmatter may carry optional `proposed_start` and `proposed_end` dates
+Task frontmatter may carry paired `proposed_start` and `proposed_end` dates
 alongside the approved `planned_start` and `planned_end` fields. An optional
 `proposed_schedule_kind` labels the proposal as `span` (a whole-task range),
 `slice` (a partial-work window), or `checkpoint` (one proposed date). A
