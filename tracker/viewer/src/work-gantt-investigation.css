@@ -46,6 +46,8 @@
   overflow-wrap: anywhere;
 }
 
+.work-gantt-investigation-heading h2 .work-reference-code { display: block; margin-bottom: 4px; }
+
 .work-gantt-investigation-close {
   margin: -5px -8px 0 0;
   color: var(--muted-foreground);

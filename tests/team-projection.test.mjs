@@ -76,8 +76,8 @@ function task(taskId, overrides = {}) {
     title: `Task ${taskId}`,
     scope: 'A public scope',
     completionCondition: 'The public condition is met.',
-    assignee: 'alexi',
-    reviewer: 'don',
+    assignee: 'person-1',
+    reviewer: 'reviewer-1',
     status: 'started',
     nextStep: 'Continue the public next step.',
     approvedDate: null,
@@ -121,8 +121,8 @@ function standingTask(overrides = {}) {
     taskId: 'standing-task',
     title: 'Standing public task',
     description: 'A public standing task description.',
-    assignee: 'alexi',
-    reviewer: 'don',
+    assignee: 'person-1',
+    reviewer: 'reviewer-1',
     status: 'active',
     nextStep: 'Continue the public standing work.',
     completionCriteria: 'The public standing condition is met.',
@@ -143,7 +143,7 @@ function digest(value) {
 
 function fullTaskProjection(tasks = [
   {
-    taskId: 'don-task', title: 'Don-owned task', description: 'A safe team description.', assignee: 'don', reviewer: null,
+    taskId: 'owned-task', title: 'Owned task', description: 'A safe team description.', assignee: 'person-1', reviewer: null,
     status: 'active', nextStep: 'Review the public design.', completionCriteria: 'The review is recorded.', deadline: null, parentId: 'project-alpha',
   },
   {
@@ -237,7 +237,7 @@ test('reader accepts only the public projection and adapter returns an empty-can
   assert.equal(snapshot.items[0].sections.outcome, 'A public scope');
   assert.equal(snapshot.items[0].updatedAt, null);
   assert.equal(snapshot.items[0].completedAt, null);
-  assert.equal(snapshot.items[0].sections.reviewer, 'don');
+  assert.equal(snapshot.items[0].sections.reviewer, 'reviewer-1');
   assert.deepEqual(snapshot.items[0].teamProjection.dependencies, ['A public dependency summary.']);
   assert.equal(snapshot.items[0].approval.approvalRef, undefined);
   assert.equal(snapshot.decisions.length, 0);
@@ -295,25 +295,25 @@ test('reader normalizes the explicit full current-task copy without applying the
   const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json' });
   assert.equal(loaded.projection.kind, 'team-projection');
   assert.equal(loaded.projection.policyRevision, 'manual-full-current-task-copy-v1');
-  assert.deepEqual(loaded.projection.tasks.map(task => task.taskId), ['don-task', 'unassigned-task']);
-  assert.equal(loaded.projection.tasks[0].assignee, 'don');
+  assert.deepEqual(loaded.projection.tasks.map(task => task.taskId), ['owned-task', 'unassigned-task']);
+  assert.equal(loaded.projection.tasks[0].assignee, 'person-1');
   assert.equal(loaded.projection.tasks[1].assignee, null);
   assert.equal(loaded.projection.tasks[0].parentId, 'project-alpha');
   assert.deepEqual(loaded.projection.contextNodes, [{ id: 'project-alpha', kind: 'project', title: 'Project Alpha', parentId: null }]);
 
   const snapshot = buildTeamProjectionSnapshot(loaded.projection);
   const project = snapshot.items.find(item => item.id === 'project-alpha');
-  const donTask = snapshot.items.find(item => item.id === 'don-task');
+  const ownedTask = snapshot.items.find(item => item.id === 'owned-task');
   const unassignedTask = snapshot.items.find(item => item.id === 'unassigned-task');
   assert.equal(project.contextOnly, true);
-  assert.equal(donTask.owner, 'don');
+  assert.equal(ownedTask.owner, 'person-1');
   assert.equal(unassignedTask.owner, null);
-  assert.deepEqual(project.childIds, ['don-task', 'unassigned-task']);
+  assert.deepEqual(project.childIds, ['owned-task', 'unassigned-task']);
   assert.equal(JSON.stringify(snapshot).includes('approvalState'), false);
   assert.equal(JSON.stringify(snapshot).includes('private-true-excluded'), false);
   const archive = buildTeamProjectionPlanningArchive(loaded.projection);
   assert.equal(archive.entries[0].plan.outcomes.length, 2);
-  assert.deepEqual(archive.entries[0].plan.outcomes.map(outcome => outcome.owner), [{ personId: 'don' }, null]);
+  assert.deepEqual(archive.entries[0].plan.outcomes.map(outcome => outcome.owner), [{ personId: 'person-1' }, null]);
   assert.equal(archive.latestApprovedId, null);
 });
 
