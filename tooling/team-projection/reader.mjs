@@ -187,9 +187,6 @@ function validateStandingHierarchy(value) {
     if (node.parentId !== null && !knownIds.has(node.parentId)) {
       fail(`contextNodes[${nodeId}].parentId`, 'must reference a task or context ancestor node');
     }
-    if (node.parentId !== null && tasksById.has(node.parentId)) {
-      fail(`contextNodes[${nodeId}].parentId`, 'must reference a context ancestor node, not a task');
-    }
   }
 
   // A shared structural chain must remain acyclic so the viewer's tree and

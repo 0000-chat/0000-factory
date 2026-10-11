@@ -34,7 +34,8 @@ function snapshot(items: ReturnType<typeof workItem>[], teamProjection = false) 
 
 test('team projection search keeps only actual task matches and restores context-only ancestors', () => {
   const data = snapshot([
-    workItem('project-context', null, { type: 'project', contextOnly: true, status: '' }),
+    workItem('grandparent-task', null, { title: 'Grandparent task', childIds: ['project-context'] }),
+    workItem('project-context', 'grandparent-task', { type: 'project', contextOnly: true, status: '', childIds: ['workstream-context'] }),
     workItem('workstream-context', 'project-context', { type: 'workstream', contextOnly: true, status: '', childIds: ['child-task', 'task-context'] }),
     workItem('child-task', 'workstream-context', { title: 'Retry notification delivery', childIds: [] }),
     workItem('task-context', 'workstream-context', { type: 'task', contextOnly: true, status: '', title: 'Retry notification context', childIds: [] }),
@@ -44,9 +45,9 @@ test('team projection search keeps only actual task matches and restores context
   const result = projectFilteredWork(data, search);
 
   assert.equal(result.matchCount, 1);
-  assert.deepEqual(result.items.map(item => item.id), ['project-context', 'workstream-context', 'child-task']);
-  assert.deepEqual([...result.contextualIds].sort(), ['project-context', 'workstream-context']);
-  assert.deepEqual(result.roots.map(item => item.id), ['project-context']);
+  assert.deepEqual(result.items.map(item => item.id), ['grandparent-task', 'project-context', 'workstream-context', 'child-task']);
+  assert.deepEqual([...result.contextualIds].sort(), ['grandparent-task', 'project-context', 'workstream-context']);
+  assert.deepEqual(result.roots.map(item => item.id), ['grandparent-task']);
   assert.deepEqual(workFilterOptions(data), {
     owners: [{ value: 'don', label: 'Don Masakayan' }],
     statuses: [{ value: 'active', label: 'Active' }],
@@ -59,7 +60,7 @@ test('team projection search keeps only actual task matches and restores context
     activityFilter: 'all',
   });
   assert.deepEqual([...activityRows.matchIds], ['child-task']);
-  assert.deepEqual([...activityRows.contextIds], ['workstream-context', 'project-context']);
+  assert.deepEqual([...activityRows.contextIds], ['workstream-context', 'project-context', 'grandparent-task']);
 });
 
 test('matches all query tokens across fields and restores only needed graph context', () => {
