@@ -119,6 +119,17 @@ viewer bundles belong to OUTPUT. The repository includes no deployment or
 publishing command. Do not add a production checkout, provider token, browser
 report, screenshot, generated output, or private log to a change.
 
+## Proposed schedule dates
+
+Task frontmatter may carry optional `proposed_start` and `proposed_end` dates
+alongside the approved `planned_start` and `planned_end` fields. An optional
+`proposed_schedule_kind` labels the proposal as `span` (a whole-task range),
+`slice` (a partial-work window), or `checkpoint` (one proposed date). A
+checkpoint must use the same value for both proposed endpoints. Proposed dates
+are scheduling suggestions: they remain separate from planned dates, forecasts,
+approval state, and approval digests, including when an accepted task carries a
+later proposal. The Gantt renders them with proposed labels and styling.
+
 ## Development commands
 
 The engine's package scripts create temporary synthetic data roots:
