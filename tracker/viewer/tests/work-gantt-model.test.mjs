@@ -18,6 +18,7 @@ import {
   manilaTodayForChart,
   marksForWorkEntry,
   primaryWorkMark,
+  proposedEnvelopeLabel,
   shortWorkDate,
   workMarkDescription,
   workGanttDepthExpansion,
@@ -262,6 +263,10 @@ test('accepted proposed marks keep their kind and remain visible in parent rollu
   assert.equal(parentRow?.childProposedEnvelope?.endDay, '2026-10-08');
   assert.equal(parentRow?.childProposedEnvelope?.primaryKind, 'proposed');
   assert.equal(parentRow?.parentEnvelope?.primaryKind, 'mixed');
+  assert.equal(proposedEnvelopeLabel({ marks: [
+    { sourceKind: 'proposed', proposedScheduleKind: 'checkpoint' },
+    { sourceKind: 'proposed', proposedScheduleKind: 'slice' },
+  ] }), 'Proposed schedules');
 });
 
 test('missing approved due does not create a plan and keeps an explicit forecast source-backed', () => {

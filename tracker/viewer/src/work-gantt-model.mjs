@@ -24,10 +24,18 @@ const MARK_STATUS = {
   forecast: { id: 'forecast', name: 'Forecast', color: 'var(--forecast)' },
 };
 
-function proposedScheduleLabel(kind) {
+export function proposedScheduleLabel(kind) {
   if (kind === 'checkpoint') return 'Proposed checkpoint';
   if (kind === 'slice') return 'Proposed slice';
   return 'Proposed schedule';
+}
+
+export function proposedEnvelopeLabel(envelope) {
+  const kinds = new Set((envelope?.marks ?? [])
+    .filter(mark => mark.sourceKind === 'proposed')
+    .map(mark => mark.proposedScheduleKind ?? 'span'));
+  if (kinds.size > 1) return 'Proposed schedules';
+  return proposedScheduleLabel(kinds.values().next().value ?? null);
 }
 
 function validDay(day) {

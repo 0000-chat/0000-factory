@@ -57,6 +57,7 @@ import {
   manilaTodayForChart,
   paddedGanttDateRange,
   primaryWorkMark,
+  proposedEnvelopeLabel,
   shortWorkDate,
   workGanttDepthExpansion,
   workMarkDescription,
@@ -198,13 +199,6 @@ function workGanttRangeLabel(mark) {
   const start = shortWorkDate(mark.startDay);
   const end = shortWorkDate(mark.endDay);
   return start === end ? start : `${start}–${end}`;
-}
-
-function workGanttProposedLabel(envelope) {
-  const proposal = envelope?.marks?.find(mark => mark.sourceKind === 'proposed');
-  if (proposal?.proposedScheduleKind === 'checkpoint') return 'Proposed checkpoint';
-  if (proposal?.proposedScheduleKind === 'slice') return 'Proposed slice';
-  return 'Proposed schedule';
 }
 
 function sameIdsWithin(controlledIds, expandedIds, currentIds) {
@@ -916,7 +910,7 @@ function WorkGanttTimelineContent({
             const hasOwnApprovedPlan = Boolean(row.ownApprovedMark);
             const missingDatesSuffix = row.childSummaryIncomplete ? ' · missing dates' : '';
             const childLabel = childApprovedEnvelope ? `Child schedule · ${workGanttRangeLabel(childApprovedEnvelope)}` : null;
-            const proposedChildLabel = childProposedEnvelope ? `${workGanttProposedLabel(childProposedEnvelope)} · ${workGanttRangeLabel(childProposedEnvelope)}` : null;
+            const proposedChildLabel = childProposedEnvelope ? `${proposedEnvelopeLabel(childProposedEnvelope)} · ${workGanttRangeLabel(childProposedEnvelope)}` : null;
             const planLabel = row.ownApprovedMark ? `Plan · ${workGanttRangeLabel(row.ownApprovedMark)}` : null;
             const trackLabelLeft = mark => {
               const left = mark ? dayLeft(mark, chartStartDay, pixelsPerDay) : envelopeLeft;
