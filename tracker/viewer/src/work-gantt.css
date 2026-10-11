@@ -49,6 +49,8 @@
 .work-gantt-title-button { display: flex; width: 100%; min-width: 0; height: 20px; min-height: 20px; flex: 0 0 20px; align-items: center; gap: 5px; overflow: hidden; padding: 0 2px; border: 0; border-radius: 4px; color: var(--foreground); background: transparent; cursor: pointer; font: inherit; text-align: left; }
 .work-gantt-title-button:hover { background: color-mix(in srgb, var(--accent) 65%, transparent); }
 .work-gantt-title { min-width: 0; overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.work-gantt-reference-code { flex: 0 0 auto; }
+.work-gantt-parent-envelope-label .work-reference-code, .work-gantt-label .work-reference-code { margin-right: 5px; }
 .work-gantt-row-meta { flex: 0 0 auto; overflow: hidden; color: var(--muted-foreground); font-size: 11px; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
 .work-gantt-title-meta { display: inline-flex; min-width: 0; flex: 0 1 auto; align-items: center; gap: 4px; overflow: hidden; }
 .work-gantt-title-meta .work-gantt-row-meta { min-width: 0; flex: 0 1 auto; }

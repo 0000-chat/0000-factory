@@ -252,7 +252,7 @@ function KanbanTask({ item, selectedId, onSelect }) {
         onClick={() => onSelect(item.id)}
         aria-current={selected ? 'true' : undefined}
       >
-        <span className="kanban-task-title">{item.title}</span>
+        <span className="kanban-task-title">{item.referenceCode ? <code className="work-reference-code kanban-task-reference-code">{item.referenceCode}</code> : null}{item.title}</span>
         <span className={`kanban-commitment${!isAccepted(item) ? ' kanban-commitment-proposed' : ''}`}>
           {commitmentLabel(item)}
         </span>
@@ -331,7 +331,7 @@ export function KanbanView({
             {unmapped.map((item) => (
               <li key={item.id}>
                 <button type="button" onClick={() => onSelect(item.id)}>
-                  <span><strong>{item.title}</strong><small>{String(item.status ?? 'Status not recorded')} · {commitmentLabel(item)}</small></span>
+                  <span><strong>{item.referenceCode ? <code className="work-reference-code kanban-task-reference-code">{item.referenceCode}</code> : null}{item.title}</strong><small>{String(item.status ?? 'Status not recorded')} · {commitmentLabel(item)}</small></span>
                   <ChevronRight size={16} aria-hidden="true" />
                 </button>
               </li>
