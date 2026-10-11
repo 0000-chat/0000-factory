@@ -173,6 +173,7 @@ function teamContextForMatches(
   data: TrackerSnapshot,
   matchItems: TrackerItem[],
   scopedItems: TrackerItem[],
+  matchIds: ReadonlySet<string>,
 ): ReadonlySet<string> {
   const scopedIds = new Set(scopedItems.map(item => item.id));
   const contextualIds = new Set<string>();
@@ -184,7 +185,7 @@ function teamContextForMatches(
       if (!scopedIds.has(parentId)) break;
       const parent = data.itemById.get(parentId);
       if (!parent) break;
-      contextualIds.add(parent.id);
+      if (!matchIds.has(parent.id)) contextualIds.add(parent.id);
       parentId = parent.parent ?? null;
     }
   }
@@ -241,7 +242,7 @@ export function projectFilteredWork(
     : { ...item, commitment: '__filter_context__' });
   const restored = workVisibility(graphItems, '*', parsedWorkSearch.planned, parsedWorkSearch.drafts);
   const originalById = new Map(data.items.map(item => [item.id, item]));
-  const teamContextualIds = teamProjection ? teamContextForMatches(data, matchItems, scopedItems) : new Set<string>();
+  const teamContextualIds = teamProjection ? teamContextForMatches(data, matchItems, scopedItems, matchIds) : new Set<string>();
   const items = teamProjection
     ? scopedItems.filter(item => matchIds.has(item.id) || teamContextualIds.has(item.id))
     : restored.items
