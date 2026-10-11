@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
   mkdtempSync,
   mkdirSync,
@@ -129,6 +130,59 @@ function standingTask(overrides = {}) {
   };
 }
 
+function canonicalValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalValue(value[key])]));
+  return value;
+}
+
+function digest(value) {
+  return `sha256:${createHash('sha256').update(JSON.stringify(canonicalValue(value))).digest('hex')}`;
+}
+
+function fullTaskProjection(tasks = [
+  {
+    taskId: 'don-task', title: 'Don-owned task', description: 'A safe team description.', assignee: 'don', reviewer: null,
+    status: 'active', nextStep: 'Review the public design.', completionCriteria: 'The review is recorded.', deadline: null, parentId: 'project-alpha',
+  },
+  {
+    taskId: 'unassigned-task', title: 'Unassigned task', description: 'A safe team description.', assignee: null, reviewer: null,
+    status: 'queued', nextStep: 'Choose an owner.', completionCriteria: 'An owner is recorded.', deadline: null, parentId: 'project-alpha',
+  },
+]) {
+  const contextNodes = [{ id: 'project-alpha', kind: 'project', title: 'Project Alpha', parentId: null }];
+  const fields = ['taskId', 'title', 'description', 'assignee', 'reviewer', 'status', 'nextStep', 'completionCriteria', 'deadline'];
+  const scope = {
+    mode: 'one-time-current-task-copy', scope: 'all-current-canonical-task-records', sourceTaskKind: 'task',
+    includesDonOwned: true, includesUnassigned: true, privateRule: 'private-true-excluded',
+  };
+  const value = {
+    schemaVersion: 1,
+    kind: 'full-task-projection',
+    projectionId: 'full-task-projection',
+    revision: 'r-full-task-projection',
+    policyRevision: 'manual-full-current-task-copy-v1',
+    generatedAt: '2026-10-11T00:00:00Z',
+    hierarchyVersion: 1,
+    contextNodes,
+    tasks,
+    gaps: [],
+    audit: {
+      ...scope,
+      fieldsDigest: digest([...fields].sort()),
+      scopeDigest: digest(scope),
+      taskIdsDigest: digest(tasks.map(task => task.taskId).sort()),
+      taskCount: tasks.length,
+      contextNodeCount: contextNodes.length,
+      approvalState: 'preview',
+      decisionId: null,
+    },
+    publish: { initialProjectionDigest: null, reviewed: false, activationEnabled: false },
+  };
+  value.publish.initialProjectionDigest = digest({ ...value, publish: { ...value.publish, initialProjectionDigest: null } });
+  return value;
+}
+
 function writeFixture(value) {
   const root = mkdtempSync(join(tmpdir(), 'team-projection-'));
   mkdirSync(join(root, 'assets'), { recursive: true });
@@ -216,6 +270,53 @@ test('reader normalizes the standing projection contract without exporting audit
   assert.equal(archive.entries[0].plan.outcomes[0].approvedDate, '2026-10-18');
   assert.equal(JSON.stringify(archive).includes('approvalDigest'), false);
   assert.doesNotThrow(() => parsePlanningArchive(archive));
+});
+
+test('reader normalizes the explicit full current-task copy without applying the standing roster rule', () => {
+  const root = writeFixture(fullTaskProjection());
+  const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json' });
+  assert.equal(loaded.projection.kind, 'team-projection');
+  assert.equal(loaded.projection.policyRevision, 'manual-full-current-task-copy-v1');
+  assert.deepEqual(loaded.projection.tasks.map(task => task.taskId), ['don-task', 'unassigned-task']);
+  assert.equal(loaded.projection.tasks[0].assignee, 'don');
+  assert.equal(loaded.projection.tasks[1].assignee, null);
+  assert.equal(loaded.projection.tasks[0].parentId, 'project-alpha');
+  assert.deepEqual(loaded.projection.contextNodes, [{ id: 'project-alpha', kind: 'project', title: 'Project Alpha', parentId: null }]);
+
+  const snapshot = buildTeamProjectionSnapshot(loaded.projection);
+  const project = snapshot.items.find(item => item.id === 'project-alpha');
+  const donTask = snapshot.items.find(item => item.id === 'don-task');
+  const unassignedTask = snapshot.items.find(item => item.id === 'unassigned-task');
+  assert.equal(project.contextOnly, true);
+  assert.equal(donTask.owner, 'don');
+  assert.equal(unassignedTask.owner, null);
+  assert.deepEqual(project.childIds, ['don-task', 'unassigned-task']);
+  assert.equal(JSON.stringify(snapshot).includes('approvalState'), false);
+  assert.equal(JSON.stringify(snapshot).includes('private-true-excluded'), false);
+  const archive = buildTeamProjectionPlanningArchive(loaded.projection);
+  assert.equal(archive.entries[0].plan.outcomes.length, 2);
+  assert.deepEqual(archive.entries[0].plan.outcomes.map(outcome => outcome.owner), [{ personId: 'don' }, null]);
+  assert.equal(archive.latestApprovedId, null);
+});
+
+test('full current-task copy keeps strict fields and team-text safety', () => {
+  const unsafe = fullTaskProjection();
+  unsafe.tasks[0].description = 'api_key=sk-live-example';
+  unsafe.publish.initialProjectionDigest = digest({ ...unsafe, publish: { ...unsafe.publish, initialProjectionDigest: null } });
+  const unsafeRoot = writeFixture(unsafe);
+  assert.throws(() => readTeamProjection({ dataRoot: unsafeRoot, projectionPath: 'team/projection.json' }), /team-safe string/u);
+
+  const unknownField = fullTaskProjection();
+  unknownField.tasks[0].privateNotes = 'must not cross the boundary';
+  unknownField.publish.initialProjectionDigest = digest({ ...unknownField, publish: { ...unknownField.publish, initialProjectionDigest: null } });
+  const unknownFieldRoot = writeFixture(unknownField);
+  assert.throws(() => readTeamProjection({ dataRoot: unknownFieldRoot, projectionPath: 'team/projection.json' }), /unknown field|private\/control/u);
+
+  const invalidOwner = fullTaskProjection();
+  invalidOwner.tasks[0].assignee = '';
+  invalidOwner.publish.initialProjectionDigest = digest({ ...invalidOwner, publish: { ...invalidOwner.publish, initialProjectionDigest: null } });
+  const invalidOwnerRoot = writeFixture(invalidOwner);
+  assert.throws(() => readTeamProjection({ dataRoot: invalidOwnerRoot, projectionPath: 'team/projection.json' }), /exact canonical ID or null/u);
 });
 
 test('standing hierarchy preserves safe ancestor context while keeping task fields explicit', () => {

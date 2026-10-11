@@ -31,6 +31,25 @@ const STANDING_TASK_KEYS = [
   'nextStep', 'completionCriteria', 'deadline',
 ];
 const STANDING_HIERARCHY_TASK_KEYS = [...STANDING_TASK_KEYS, 'parentId'];
+const FULL_TASK_COPY_TOP_LEVEL_KEYS = [
+  'schemaVersion', 'kind', 'projectionId', 'revision', 'policyRevision',
+  'generatedAt', 'hierarchyVersion', 'contextNodes', 'tasks', 'gaps', 'audit', 'publish',
+];
+const FULL_TASK_COPY_AUDIT_KEYS = [
+  'mode', 'scope', 'sourceTaskKind', 'includesDonOwned', 'includesUnassigned',
+  'privateRule', 'fieldsDigest', 'scopeDigest', 'taskIdsDigest', 'taskCount',
+  'contextNodeCount', 'approvalState', 'decisionId',
+];
+const FULL_TASK_COPY_PUBLISH_KEYS = ['initialProjectionDigest', 'reviewed', 'activationEnabled'];
+const FULL_TASK_COPY_KIND = 'full-task-projection';
+const FULL_TASK_COPY_POLICY_REVISION = 'manual-full-current-task-copy-v1';
+const FULL_TASK_COPY_HIERARCHY_VERSION = 1;
+const FULL_TASK_COPY_STATUSES = new Set(['queued', 'started', 'active', 'blocked', 'done', 'unknown']);
+const FULL_TASK_COPY_FIELDS = Object.freeze([
+  'taskId', 'title', 'description', 'assignee', 'reviewer', 'status',
+  'nextStep', 'completionCriteria', 'deadline',
+]);
+const FULL_TASK_COPY_SCOPE = 'all-current-canonical-task-records';
 // Context nodes are deliberately structural-only. They use the viewer's
 // generic node names so an omitted parent can be shown in a breadcrumb/tree
 // without importing any task fields.
@@ -50,6 +69,11 @@ const TEXT_CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u;
 // Reject only credential-shaped material and explicit private-data canaries;
 // private/control fields are already excluded by the exact key allowlist.
 const PRIVATE_VALUE = /(?:https?:\/\/|(?:^|\s)[/~](?:home|root|private|secret)(?:\/|\b)|[?&#][\w.-]+=|-----BEGIN [^-]*PRIVATE KEY-----|\b(?:sk|pk|ghp_|github_pat_|xox[baprs]-)[a-z0-9_-]{12,}\b|\b(?:password|token|secret|credential)\s*[:=]\s*\S+|\bprivate[_ -](?:canary|sentinel|history|notes?|data)\b|\b(?:approval|receipt|don)[_ -](?:control|ref|receipt)\b)/iu;
+// Keep the one-time full-copy reader aligned with the canonical team-text
+// sanitizer. Ordinary product language remains valid; only URLs, private
+// paths, raw transcript markers, credential-shaped values, and token formats
+// are rejected.
+const FULL_TASK_COPY_PRIVATE_VALUE = /(?:\b(?:https?|ftp):\/\/|\bwww\.)|(?:^|[\s"'`])(?:~\/|\/(?:home|root|private|secret|tmp|users)(?:\/|$)|(?:private|secret|sensitive)[\\/][^\s]+)|\b(?:raw[\s_-]*(?:slack|meeting|notes?|transcript|source)|private[\s_-]*(?:notes?|transcript|source)|(?:slack|meeting)[\s_-]*(?:message|transcript|notes?))\b|\b(?:api[_ -]?key|access[_ -]?token|client[_ -]?secret|secret[_ -]?key|token|password|credential|private[_ -]?key)\s*[:=]\s*\S+|\bBearer\s+[A-Za-z0-9._~+/=-]{12,}|-----BEGIN [^-]*(?:PRIVATE|RSA|OPENSSH|EC)?[^-]*KEY-----|(?:\b(?:ghp_|github_pat_|xox[baprs]-|sk-(?:live|test)-|AKIA[0-9A-Z]{16}\b)[A-Za-z0-9._-]*)|(?:eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9._-]{5,}\.[A-Za-z0-9._-]{5,})/iu;
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/u;
 const WEEK = /^\d{4}-W(?:0[1-9]|[1-4]\d|5[0-3])$/u;
 const DIGEST = /^sha256:[a-f0-9]{64}$/u;
@@ -155,6 +179,63 @@ function validateStandingProjection(value) {
   return errors.length ? { valid: false, errors } : { valid: true, errors: [] };
 }
 
+function validateFullTaskProjection(value) {
+  const errors = [];
+  if (!isRecord(value)) return { valid: false, errors: ['projection: must be an object'] };
+  if (value.schemaVersion !== 1) errors.push('schemaVersion: must be 1');
+  if (value.kind !== FULL_TASK_COPY_KIND) errors.push(`kind: must be ${FULL_TASK_COPY_KIND}`);
+  if (value.policyRevision !== FULL_TASK_COPY_POLICY_REVISION) errors.push(`policyRevision: must be ${FULL_TASK_COPY_POLICY_REVISION}`);
+  if (value.hierarchyVersion !== FULL_TASK_COPY_HIERARCHY_VERSION) errors.push('hierarchyVersion: must be 1');
+  if (!isId(value.projectionId)) errors.push('projectionId: must be an ID');
+  if (!isId(value.revision)) errors.push('revision: must be an ID');
+  if (!isUtc(value.generatedAt)) errors.push('generatedAt: must be an ISO UTC timestamp');
+  if (!Array.isArray(value.tasks)) errors.push('tasks: must be an array');
+  if (!Array.isArray(value.contextNodes)) errors.push('contextNodes: must be an array');
+  if (!Array.isArray(value.gaps)) errors.push('gaps: must be an array');
+  if (!isRecord(value.audit)) errors.push('audit: must be an object');
+  if (!isRecord(value.publish)) errors.push('publish: must be an object');
+  return errors.length ? { valid: false, errors } : { valid: true, errors: [] };
+}
+
+function validateFullTaskMetadata(value) {
+  const taskIds = new Set(value.tasks.map(task => task.taskId));
+  value.gaps.forEach((gap, index) => {
+    const path = `gaps[${index}]`;
+    exactKeys(gap, STANDING_GAP_KEYS, path);
+    if (!isId(gap.taskId) || !taskIds.has(gap.taskId)) fail(`${path}.taskId`, 'must reference a known task ID');
+    safeText(gap.field, `${path}.field`, { nullable: false, max: 128 });
+    safeText(gap.reason, `${path}.reason`, { nullable: false, max: 256 });
+    safeText(gap.message, `${path}.message`, { nullable: false, max: 2_000 });
+  });
+
+  exactKeys(value.audit, FULL_TASK_COPY_AUDIT_KEYS, 'audit');
+  if (value.audit.mode !== 'one-time-current-task-copy') fail('audit.mode', 'must describe the one-time current-task copy');
+  if (value.audit.scope !== FULL_TASK_COPY_SCOPE) fail('audit.scope', 'must describe all current canonical task records');
+  if (value.audit.sourceTaskKind !== 'task') fail('audit.sourceTaskKind', 'must be task');
+  if (value.audit.includesDonOwned !== true || value.audit.includesUnassigned !== true) fail('audit', 'must include Don-owned and unassigned tasks');
+  if (value.audit.privateRule !== 'private-true-excluded') fail('audit.privateRule', 'must exclude only private:true tasks');
+  if (!Number.isInteger(value.audit.taskCount) || value.audit.taskCount !== value.tasks.length) fail('audit.taskCount', 'must match tasks');
+  if (!Number.isInteger(value.audit.contextNodeCount) || value.audit.contextNodeCount !== value.contextNodes.length) fail('audit.contextNodeCount', 'must match contextNodes');
+  if (value.audit.approvalState !== 'preview' || value.audit.decisionId !== null) fail('audit', 'must remain an unreviewed preview');
+  if (value.audit.fieldsDigest !== canonicalDigest([...FULL_TASK_COPY_FIELDS].sort())) fail('audit.fieldsDigest', 'does not match the full field contract');
+  if (!DIGEST.test(value.audit.scopeDigest)) fail('audit.scopeDigest', 'must be a digest');
+  const scopeInput = {
+    mode: 'one-time-current-task-copy',
+    scope: FULL_TASK_COPY_SCOPE,
+    sourceTaskKind: 'task',
+    includesDonOwned: true,
+    includesUnassigned: true,
+    privateRule: 'private-true-excluded',
+  };
+  if (value.audit.scopeDigest !== canonicalDigest(scopeInput)) fail('audit.scopeDigest', 'does not match the full-copy scope');
+  if (value.audit.taskIdsDigest !== canonicalDigest([...value.tasks].map(task => task.taskId).sort())) fail('audit.taskIdsDigest', 'does not match task IDs');
+
+  exactKeys(value.publish, FULL_TASK_COPY_PUBLISH_KEYS, 'publish');
+  if (!DIGEST.test(value.publish.initialProjectionDigest)) fail('publish.initialProjectionDigest', 'must be a digest');
+  if (value.publish.reviewed !== false || value.publish.activationEnabled !== false) fail('publish', 'must retain the disabled initial publish barrier');
+  if (value.publish.initialProjectionDigest !== fullTaskProjectionDigest(value)) fail('publish.initialProjectionDigest', 'does not match the full projection');
+}
+
 function validateStandingHierarchy(value) {
   const tasksById = new Map(value.tasks.map(task => [task.taskId, task]));
   const nodesById = new Map();
@@ -245,16 +326,16 @@ function exactKeys(value, allowed, path, { optional = [] } = {}) {
   }
 }
 
-function scanJson(value, path = '$', depth = 0) {
+function scanJson(value, path = '$', depth = 0, allowedKeyNames = null) {
   if (depth > TEAM_PROJECTION_MAX_DEPTH) fail(path, 'exceeds the maximum JSON depth');
   if (Array.isArray(value)) {
-    value.forEach((entry, index) => scanJson(entry, `${path}[${index}]`, depth + 1));
+    value.forEach((entry, index) => scanJson(entry, `${path}[${index}]`, depth + 1, allowedKeyNames));
     return;
   }
   if (isRecord(value)) {
     for (const [key, entry] of Object.entries(value)) {
-      if (PRIVATE_KEY.test(key)) fail(`${path}.${key}`, 'private/control field is forbidden');
-      scanJson(entry, `${path}.${key}`, depth + 1);
+      if (PRIVATE_KEY.test(key) && !allowedKeyNames?.has(key)) fail(`${path}.${key}`, 'private/control field is forbidden');
+      scanJson(entry, `${path}.${key}`, depth + 1, allowedKeyNames);
     }
   }
 }
@@ -265,6 +346,30 @@ function safeText(value, path, { nullable = true, max = 16_384 } = {}) {
     fail(path, 'is required');
   }
   if (typeof value !== 'string' || value.length > max || TEXT_CONTROL.test(value) || PRIVATE_VALUE.test(value)) fail(path, 'must be a team-safe string');
+}
+
+function safeFullTaskText(value, path) {
+  if (typeof value !== 'string' || value.length === 0 || Buffer.byteLength(value, 'utf8') > 1_000
+    || TEXT_CONTROL.test(value) || FULL_TASK_COPY_PRIVATE_VALUE.test(value)) {
+    fail(path, 'must be a team-safe string');
+  }
+}
+
+function sortJson(value) {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.keys(value).sort().map(key => [key, sortJson(value[key])]));
+}
+
+function canonicalDigest(value) {
+  return `sha256:${createHash('sha256').update(JSON.stringify(sortJson(value))).digest('hex')}`;
+}
+
+function fullTaskProjectionDigest(value) {
+  return canonicalDigest({
+    ...value,
+    publish: value.publish ? { ...value.publish, initialProjectionDigest: null } : value.publish,
+  });
 }
 
 function normalizeLinkPolicy(value) {
@@ -399,14 +504,50 @@ function normalizeStandingProjection(value, rawDigest) {
   };
 }
 
+function normalizeFullTaskProjection(value, rawDigest) {
+  return {
+    schemaVersion: 1,
+    kind: 'team-projection',
+    projectionId: value.projectionId,
+    week: weekFromTimestamp(value.generatedAt),
+    revision: value.revision,
+    policyRevision: value.policyRevision,
+    sourcePlanDigest: `sha256:${rawDigest}`,
+    generatedAt: value.generatedAt,
+    contextNodes: value.contextNodes.map(node => ({ ...node })),
+    tasks: value.tasks.map(task => ({
+      taskId: task.taskId,
+      title: task.title,
+      scope: task.description,
+      completionCondition: task.completionCriteria,
+      assignee: task.assignee,
+      reviewer: task.reviewer,
+      status: task.status,
+      nextStep: task.nextStep,
+      approvedDate: task.deadline?.label === 'approved' ? task.deadline.date : null,
+      forecastDate: task.deadline?.label === 'forecast' ? task.deadline.date : null,
+      checkpoint: null,
+      dependencies: [],
+      evidenceLinks: [],
+      parentId: task.parentId,
+    })),
+    omissions: [],
+  };
+}
+
 function validateStrictProjection(value, linkPolicy) {
-  scanJson(value);
   const standing = value?.kind === 'standing-team-projection';
+  const fullTaskCopy = value?.kind === FULL_TASK_COPY_KIND;
+  scanJson(value, '$', 0, fullTaskCopy ? new Set(FULL_TASK_COPY_AUDIT_KEYS) : null);
   const hierarchical = standing && value.schemaVersion === 2;
-  exactKeys(value, hierarchical ? STANDING_HIERARCHY_TOP_LEVEL_KEYS : standing ? STANDING_TOP_LEVEL_KEYS : TOP_LEVEL_KEYS, '$');
-  const result = standing ? validateStandingProjection(value) : validateLegacyProjection(value);
+  exactKeys(value, fullTaskCopy ? FULL_TASK_COPY_TOP_LEVEL_KEYS : hierarchical ? STANDING_HIERARCHY_TOP_LEVEL_KEYS : standing ? STANDING_TOP_LEVEL_KEYS : TOP_LEVEL_KEYS, '$');
+  const result = fullTaskCopy ? validateFullTaskProjection(value) : standing ? validateStandingProjection(value) : validateLegacyProjection(value);
   if (!result.valid) throw new TeamProjectionInputError(`team projection is invalid: ${result.errors.join('; ')}`);
-  if (standing) {
+  if (fullTaskCopy) {
+    validateFullTaskMetadata(value);
+    validateStandingHierarchy(value);
+    value.contextNodes.forEach((node, index) => safeFullTaskText(node.title, `contextNodes[${index}].title`));
+  } else if (standing) {
     validateStandingMetadata(value);
     if (hierarchical) validateStandingHierarchy(value);
   }
@@ -414,23 +555,33 @@ function validateStrictProjection(value, linkPolicy) {
   const ids = new Set();
   value.tasks.forEach((task, index) => {
     const path = `tasks[${index}]`;
-    exactKeys(task, hierarchical ? STANDING_HIERARCHY_TASK_KEYS : standing ? STANDING_TASK_KEYS : TASK_KEYS, path);
-    if (standing && task.deadline !== null) exactKeys(task.deadline, ['label', 'date'], `${path}.deadline`);
+    exactKeys(task, fullTaskCopy || hierarchical ? STANDING_HIERARCHY_TASK_KEYS : standing ? STANDING_TASK_KEYS : TASK_KEYS, path);
+    if ((fullTaskCopy || standing) && task.deadline !== null) exactKeys(task.deadline, ['label', 'date'], `${path}.deadline`);
     if (ids.has(task.taskId)) fail(`${path}.taskId`, `duplicate task ID ${task.taskId}`);
+    if (fullTaskCopy) {
+      if (!isId(task.taskId)) fail(`${path}.taskId`, 'must be an ID');
+      if (task.assignee !== null && !isId(task.assignee)) fail(`${path}.assignee`, 'must be an exact canonical ID or null');
+      if (task.reviewer !== null && !isId(task.reviewer)) fail(`${path}.reviewer`, 'must be an exact canonical ID or null');
+      if (!FULL_TASK_COPY_STATUSES.has(task.status)) fail(`${path}.status`, 'is invalid');
+      if (task.deadline !== null && (!isRecord(task.deadline) || !['approved', 'forecast'].includes(task.deadline.label) || !isDate(task.deadline.date))) {
+        fail(`${path}.deadline`, 'must be null or an approved/forecast date');
+      }
+    }
     ids.add(task.taskId);
-    for (const key of standing ? ['title', 'description', 'completionCriteria', 'nextStep'] : ['title', 'scope', 'completionCondition', 'nextStep']) safeText(task[key], `${path}.${key}`);
-    if (!standing) for (const key of ['dependencies', 'evidenceLinks']) {
+    if (fullTaskCopy) for (const key of ['title', 'description', 'completionCriteria', 'nextStep']) safeFullTaskText(task[key], `${path}.${key}`);
+    else for (const key of standing ? ['title', 'description', 'completionCriteria', 'nextStep'] : ['title', 'scope', 'completionCondition', 'nextStep']) safeText(task[key], `${path}.${key}`);
+    if (!standing && !fullTaskCopy) for (const key of ['dependencies', 'evidenceLinks']) {
       if (!Array.isArray(task[key])) fail(`${path}.${key}`, 'must be an array');
     }
-    if (!standing) task.dependencies.forEach((dependency, dependencyIndex) => {
+    if (!standing && !fullTaskCopy) task.dependencies.forEach((dependency, dependencyIndex) => {
       const dependencyPath = `${path}.dependencies[${dependencyIndex}]`;
       exactKeys(dependency, DEPENDENCY_KEYS, dependencyPath);
       safeText(dependency.summary, `${dependencyPath}.summary`, { nullable: false, max: 500 });
     });
-    if (!standing) task.evidenceLinks.forEach((link, linkIndex) => safeEvidenceLink(link, `${path}.evidenceLinks[${linkIndex}]`, linkPolicy));
+    if (!standing && !fullTaskCopy) task.evidenceLinks.forEach((link, linkIndex) => safeEvidenceLink(link, `${path}.evidenceLinks[${linkIndex}]`, linkPolicy));
   });
 
-  if (!standing) value.omissions.forEach((omission, index) => {
+  if (!standing && !fullTaskCopy) value.omissions.forEach((omission, index) => {
     const path = `omissions[${index}]`;
     exactKeys(omission, OMISSION_KEYS, path, { optional: ['taskId'] });
     if (omission.taskId !== undefined && omission.taskId !== null) {
@@ -485,9 +636,12 @@ export function readTeamProjection({ dataRoot, projectionPath, linkPolicy } = {}
   }
   const normalizedLinkPolicy = normalizeLinkPolicy(linkPolicy);
   validateStrictProjection(value, normalizedLinkPolicy);
+  const rawDigest = createHash('sha256').update(artifact.bytes).digest('hex');
   const projection = value.kind === 'standing-team-projection'
-    ? normalizeStandingProjection(value, createHash('sha256').update(artifact.bytes).digest('hex'))
-    : value;
+    ? normalizeStandingProjection(value, rawDigest)
+    : value.kind === FULL_TASK_COPY_KIND
+      ? normalizeFullTaskProjection(value, rawDigest)
+      : value;
   return Object.freeze({
     projection: Object.freeze(projection),
     path: projectionPath,
