@@ -175,6 +175,27 @@ test('builds real root and nested empty/populated data-only repositories', () =>
   }
 });
 
+test('tracker-v1 roster avatars are copied into the static output and missing declarations fail the build', () => {
+  const input = fixture({ id: 'tracker-v1-roster-avatar' });
+  const registryPath = join(input.data.dataRepo, 'tracker', 'people.json');
+  const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
+  registry.people[0].avatar = 'fixture-don.png';
+  writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+  mkdirSync(join(input.data.dataRepo, 'assets', 'avatars'), { recursive: true });
+  writeFileSync(
+    join(input.data.dataRepo, 'assets', 'avatars', 'fixture-don.png'),
+    Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+  );
+
+  const result = build(input);
+  assert.equal(result.data.team[0].avatarUrl, '/avatars/fixture-don.png');
+  assert.ok(existsSync(join(input.output, 'assets', 'avatars', 'fixture-don.png')));
+  assert.ok(manifest(input).artifactHashes['assets/avatars/fixture-don.png']);
+
+  rmSync(join(input.data.dataRepo, 'assets', 'avatars', 'fixture-don.png'));
+  assert.throws(() => build(input), /declared avatar is missing/u);
+});
+
 test('disabled weekly planning skips archive inputs and generated planning assets', () => {
   const input = fixture({ id: 'planning-disabled', weeklyPlanning: false });
   mkdirSync(join(input.data.dataRepo, 'planning'), { recursive: true });

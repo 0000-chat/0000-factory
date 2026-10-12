@@ -418,6 +418,7 @@ function loadTeamProjectionInputs({ engine, data, settingsPath, outputPath, load
     dataRoot: selectedRoot,
     companionPath: instance.data.companionPath,
     projection: selectedProjection.rawProjection,
+    expectedRosterDigest: instance.data.directoryRosterDigest,
   });
   const dataMeta = dataGitMetadata(data);
   const engineMeta = engineGitMetadata(engine);
@@ -582,6 +583,7 @@ function assertBuildInputsUnchanged(inputs) {
         dataRoot: selectedRoot,
         companionPath: inputs.instance.data.companionPath,
         projection: currentProjection.rawProjection,
+        expectedRosterDigest: inputs.instance.data.directoryRosterDigest,
       });
       if (!currentCompanion || currentCompanion.fileDigest !== inputs.companion?.fileDigest) {
         throw new Error('team companion input changed during build');
@@ -746,6 +748,9 @@ function updateManifest(outputPath) {
 }
 
 function renderStagedOutput(inputs, outputPath, data, provenance) {
+  const avatarNames = inputs.instance.data.layout === 'team-projection-v1'
+    ? inputs.companion?.directory?.map(entry => entry.avatar).filter(Boolean) ?? []
+    : inputs.records?.people?.map(person => person.avatar).filter(Boolean) ?? [];
   renderInstanceArtifacts({
     instance: inputs.instance,
     manifestDir: inputs.manifestDir,
@@ -754,7 +759,7 @@ function renderStagedOutput(inputs, outputPath, data, provenance) {
     provenance: {
       ...provenance,
       data,
-      avatarNames: inputs.companion?.directory?.map(entry => entry.avatar).filter(Boolean) ?? [],
+      avatarNames,
       ...(inputs.instance.features.weeklyPlanning ? { planningArchive: inputs.planningArchive } : {}),
     },
   });

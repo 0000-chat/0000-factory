@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { readTeamCompanion, validateTeamCompanion } from '../tooling/team-projection/companion.mjs';
+import { readTeamProjection } from '../tooling/team-projection/reader.mjs';
 import { buildTeamProjectionSnapshot } from '../tooling/team-projection/snapshot.mjs';
 import { buildWorkProjection } from '../tracker/viewer/src/work-activity.mjs';
 import { buildWorkGanttModel } from '../tracker/viewer/src/work-gantt-model.mjs';
@@ -72,6 +73,54 @@ function projection() {
   };
 }
 
+function fullTaskProjection() {
+  const tasks = [
+    {
+      taskId: 'full-approved', title: 'Approved full task', description: 'Approved description', assignee: 'person-1', reviewer: null,
+      status: 'active', nextStep: 'Approved next step', completionCriteria: 'Approved completion', deadline: { label: 'approved', date: '2026-10-20' }, parentId: 'full-project',
+    },
+    {
+      taskId: 'full-forecast', title: 'Forecast full task', description: 'Forecast description', assignee: null, reviewer: 'person-1',
+      status: 'queued', nextStep: 'Forecast next step', completionCriteria: 'Forecast completion', deadline: { label: 'forecast', date: '2026-10-27' }, parentId: 'full-project',
+    },
+  ];
+  const contextNodes = [{ id: 'full-project', kind: 'project', title: 'Full project', parentId: null }];
+  const fields = ['taskId', 'title', 'description', 'assignee', 'reviewer', 'status', 'nextStep', 'completionCriteria', 'deadline'];
+  const scope = {
+    mode: 'one-time-current-task-copy', scope: 'all-current-canonical-task-records', sourceTaskKind: 'task',
+    includesDonOwned: true, includesUnassigned: true, privateRule: 'private-true-excluded',
+  };
+  const policy = {
+    ...scope, policyRevision: 'manual-full-current-task-copy-v1', hierarchyVersion: 1,
+    hierarchyContextFields: ['id', 'kind', 'title', 'parentId'], fields: [...fields].sort(),
+  };
+  const value = {
+    schemaVersion: 1, kind: 'full-task-projection', projectionId: 'full-directory-only', revision: 'r-full-directory-only',
+    policyRevision: 'manual-full-current-task-copy-v1', generatedAt: '2026-10-12T00:00:00Z', hierarchyVersion: 1,
+    contextNodes, tasks, gaps: [], audit: {
+      ...scope, fieldsDigest: digest([...fields].sort()), scopeDigest: digest(scope), policyDigest: digest(policy),
+      selectionDigest: digest({ ...scope, taskIds: tasks.map(task => task.taskId).sort() }), taskIdsDigest: digest(tasks.map(task => task.taskId).sort()),
+      taskCount: tasks.length, contextNodeCount: contextNodes.length, approvalState: 'preview', decisionId: null,
+    }, publish: { initialProjectionDigest: null, reviewed: false, activationEnabled: false },
+  };
+  value.publish.initialProjectionDigest = digest({ ...value, publish: { ...value.publish, initialProjectionDigest: null } });
+  return value;
+}
+
+function directoryOnlyCompanion(projectionValue) {
+  const value = {
+    schemaVersion: 1, kind: 'team-safe-companion', mode: 'directory-only-v3',
+    projectionDigest: digest({ ...projectionValue, publish: { ...projectionValue.publish, initialProjectionDigest: null } }),
+    projectionRevision: projectionValue.revision, policyRevision: projectionValue.policyRevision, generatedAt: '2026-10-12T00:00:00Z',
+    directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }], schedules: [], taskMetadata: [],
+    audit: {
+      directoryRule: 'approved-roster-safe-display-metadata-only', scheduleRule: 'directory-only-no-task-schedules',
+      sourceTaskCount: projectionValue.tasks.length, rosterDigest: digest(['person-1']),
+    }, publish: { reviewed: false, activationEnabled: false },
+  };
+  return { ...value, companionDigest: digest(value) };
+}
+
 test('companion metadata drives safe identity and approved endpoint rendering', () => {
   const value = companion();
   assert.equal(validateTeamCompanion(value).valid, true);
@@ -85,6 +134,63 @@ test('companion metadata drives safe identity and approved endpoint rendering', 
   assert.equal(item.phase, 'build');
   assert.equal(item.health.state, 'on-track');
   assert.equal(snapshot.team[0].avatarUrl, '/avatars/person-1.webp');
+});
+
+test('directory-only v3 binds full task input while preserving canonical task fields and dates', () => {
+  const projectionValue = fullTaskProjection();
+  const companionValue = directoryOnlyCompanion(projectionValue);
+  const root = join(CHECK_ROOT, 'directory-only-v3');
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, 'projection.json'), `${JSON.stringify(projectionValue)}\n`, { mode: 0o600 });
+  writeFileSync(join(root, 'companion.json'), `${JSON.stringify(companionValue)}\n`, { mode: 0o600 });
+  try {
+    const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'projection.json', linkPolicy: { allowedEvidenceHosts: [], forbiddenGitHubRepositories: [] } });
+    assert.deepEqual(loaded.rawProjection, projectionValue);
+    const companionRead = readTeamCompanion({
+      dataRoot: root,
+      companionPath: 'companion.json',
+      projection: loaded.rawProjection,
+      expectedRosterDigest: digest(['person-1']),
+    });
+    assert.equal(companionRead.directoryOnly, true);
+    assert.deepEqual(companionRead.schedules, []);
+    assert.deepEqual(companionRead.taskMetadata, []);
+    const snapshot = buildTeamProjectionSnapshot(loaded.projection, {}, companionRead);
+    assert.equal(snapshot.people.length, 1);
+    assert.equal(snapshot.people[0].avatarUrl, '/avatars/person-1.webp');
+    const approved = snapshot.items.find(item => item.id === 'full-approved');
+    const forecast = snapshot.items.find(item => item.id === 'full-forecast');
+    assert.deepEqual({
+      title: approved.title, description: approved.sections.outcome, status: approved.status, nextStep: approved.sections.nextStep,
+      completion: approved.sections.completionCondition, owner: approved.owner, reviewer: approved.teamProjection.reviewer,
+      target: approved.target, approvedDate: approved.teamProjection.approvedDate, parent: approved.parent,
+    }, {
+      title: 'Approved full task', description: 'Approved description', status: 'active', nextStep: 'Approved next step',
+      completion: 'Approved completion', owner: 'person-1', reviewer: null, target: '2026-10-20', approvedDate: '2026-10-20', parent: 'full-project',
+    });
+    assert.deepEqual({
+      title: forecast.title, description: forecast.sections.outcome, status: forecast.status, nextStep: forecast.sections.nextStep,
+      completion: forecast.sections.completionCondition, owner: forecast.owner, reviewer: forecast.teamProjection.reviewer,
+      target: forecast.target, forecastDate: forecast.teamProjection.forecastDate, parent: forecast.parent,
+    }, {
+      title: 'Forecast full task', description: 'Forecast description', status: 'queued', nextStep: 'Forecast next step',
+      completion: 'Forecast completion', owner: null, reviewer: 'person-1', target: null, forecastDate: '2026-10-27', parent: 'full-project',
+    });
+    const untrusted = readTeamCompanion({ dataRoot: root, companionPath: 'companion.json', projection: loaded.rawProjection });
+    assert.deepEqual(untrusted.directory, []);
+    assert.equal(untrusted.trustedRosterMismatch, true);
+    const wrongRoster = readTeamCompanion({
+      dataRoot: root,
+      companionPath: 'companion.json',
+      projection: loaded.rawProjection,
+      expectedRosterDigest: digest(['different-person']),
+    });
+    assert.deepEqual(wrongRoster.directory, []);
+    assert.equal(wrongRoster.trustedRosterMismatch, true);
+  } finally {
+    unlinkSync(join(root, 'projection.json'));
+    unlinkSync(join(root, 'companion.json'));
+  }
 });
 
 test('a valid companion schedule allowlist clears omitted baseline deadlines', () => {

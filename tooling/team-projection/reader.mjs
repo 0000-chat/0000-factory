@@ -670,7 +670,9 @@ export function readTeamProjection({ dataRoot, projectionPath, linkPolicy } = {}
     // Keep the validated source shape available to optional companion
     // consumers. The adapter projection is normalized for the viewer, while
     // the companion binds to the exact standing projection contract.
-    rawProjection: value.kind === 'standing-team-projection' ? Object.freeze(value) : null,
+    rawProjection: value.kind === 'standing-team-projection' || value.kind === FULL_TASK_COPY_KIND
+      ? Object.freeze(value)
+      : null,
     path: projectionPath,
     digest: createHash('sha256').update(artifact.bytes).digest('hex'),
     bytes: artifact.bytes.byteLength,
