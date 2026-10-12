@@ -1,5 +1,5 @@
 import { manilaDay } from './work-activity.mjs';
-import { dependenciesOf } from './view-model.mjs';
+import { dependenciesOf, isAccepted } from './view-model.mjs';
 
 const MARK_PRIORITY = ['approved', 'observed', 'proposed', 'forecast'];
 const DAY_MS = 86400000;
@@ -699,10 +699,40 @@ function ownerLabelOf(row, itemsById, ownerKey) {
   return String(item?.ownerName ?? row?.entry?.ownerName ?? ownerKey).trim() || ownerKey;
 }
 
+function ownerWorkKind(item) {
+  const value = item?.type ?? item?.data?.type;
+  const kind = String(value ?? '').trim().toLowerCase();
+  return kind === 'project' || kind === 'workstream' ? kind : null;
+}
+
+function hasDirectOwnerWork(row, item) {
+  const timeline = row?.entry?.timeline ?? {};
+  const own = row?.entry?.own ?? {};
+  const hasOwnSchedule = Boolean(
+    timeline.ownPlannedStart
+    || timeline.ownPlannedDue
+    || timeline.ownProposedStart
+    || timeline.ownProposedDue,
+  );
+  const hasOwnActivity = Boolean(own.firstDate || own.lastDate || own.evidenceIds?.length);
+  return isAccepted(item) && (hasOwnSchedule || hasOwnActivity);
+}
+
+function isOwnerWorkloadRow(row, item) {
+  if (!row) return false;
+  const directContainerWork = row.hasChildren
+    && ownerWorkKind(item) !== null
+    && hasDirectOwnerWork(row, item);
+  if (directContainerWork) return true;
+  if (row.contextual || item?.contextOnly === true) return false;
+  if (!row.hasChildren) return true;
+  return false;
+}
+
 /**
- * Build deterministic owner buckets for compact schedule views. Only leaf
- * rows become workload rows; hierarchy parents remain available through the
- * ordinary tree view and are represented on each leaf as context metadata.
+ * Build deterministic owner buckets for compact schedule views. Leaf rows and
+ * accepted project/workstream records with their own schedules or evidence
+ * become workload rows; inherited-only hierarchy containers remain context.
  * Canonical leaf IDs are preserved exactly once and dependency edges continue
  * to use those IDs.
  */
@@ -711,7 +741,10 @@ export function buildWorkOwnerGroups(rows = [], itemsById = new Map()) {
   const groups = new Map();
   for (const row of rows) {
     const item = itemMap.get(row?.id);
-    if (!row || row.hasChildren || row.contextual || item?.contextOnly === true) continue;
+    if (!isOwnerWorkloadRow(row, item)) continue;
+    const directContainerWork = row.hasChildren
+      && ownerWorkKind(item) !== null
+      && hasDirectOwnerWork(row, item);
     const ownerKey = ownerKeyOf(row, itemMap);
     let group = groups.get(ownerKey);
     if (!group) {
@@ -721,7 +754,12 @@ export function buildWorkOwnerGroups(rows = [], itemsById = new Map()) {
     const contextTitles = (row.ancestorIds ?? [])
       .map(id => itemMap.get(id)?.title ?? rows.find(candidate => candidate.id === id)?.entry?.title)
       .filter(Boolean);
-    group.rows.push({ ...row, ownerGroupKey: ownerKey, ownerContextLabel: contextTitles.join(' / ') || null });
+    group.rows.push({
+      ...row,
+      contextual: directContainerWork ? false : row.contextual,
+      ownerGroupKey: ownerKey,
+      ownerContextLabel: contextTitles.join(' / ') || null,
+    });
   }
   return [...groups.values()].sort((left, right) => left.ownerKey.localeCompare(right.ownerKey));
 }

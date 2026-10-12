@@ -73,6 +73,7 @@
 .work-gantt-title-button { display: flex; grid-column: 1; width: 100%; min-width: 0; height: 24px; min-height: 20px; align-items: center; gap: 5px; overflow: hidden; padding: 0 2px; border: 0; border-radius: 4px; color: var(--foreground); background: transparent; cursor: pointer; font: inherit; text-align: left; }
 .work-gantt-title-button:hover { background: color-mix(in srgb, var(--accent) 65%, transparent); }
 .work-gantt-title { min-width: 0; overflow: hidden; flex: 1 1 auto; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.work-gantt-kind { flex: 0 0 auto; overflow: hidden; padding: 2px 4px; border-radius: 3px; color: var(--muted-foreground); background: var(--muted); font-size: 10px; font-weight: 650; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
 .work-gantt-reference-code { flex: 0 0 auto; }
 .work-gantt-parent-envelope-label .work-reference-code, .work-gantt-expanded-parent-label-text .work-reference-code, .work-gantt-label .work-reference-code { margin-right: 5px; }
 .tracker-work-gantt .work-gantt-sidebar-row[data-title-overflow="true"]::after { position: absolute; top: calc(100% - 3px); left: 28px; z-index: 60; display: none; width: max-content; max-width: min(420px, calc(100vw - 36px)); padding: 6px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--card); box-shadow: 0 8px 20px color-mix(in srgb, var(--foreground) 14%, transparent); color: var(--foreground); content: attr(data-full-title); font-size: 12px; font-weight: 650; line-height: 1.25; pointer-events: none; white-space: normal; }
@@ -112,6 +113,7 @@
 
 .tracker-work-gantt .work-gantt-feature-list { box-sizing: border-box; width: 100%; }
 .work-gantt-row-body { position: relative; width: 100%; min-width: 100%; }
+.work-gantt-focus-week { position: absolute; top: 0; bottom: 0; z-index: 0; border-right: 1px solid color-mix(in srgb, var(--primary) 35%, transparent); border-left: 1px solid color-mix(in srgb, var(--primary) 35%, transparent); background: color-mix(in srgb, var(--primary) 7%, transparent); pointer-events: none; }
 .work-gantt-feature-row-wrap { position: relative; box-sizing: border-box; width: 100%; min-width: 100%; height: var(--gantt-row-height); overflow: visible; border-bottom: 1px solid color-mix(in srgb, var(--border) 38%, transparent); }
 .work-gantt-feature-row-wrap[data-highlight="selected"] { background: color-mix(in srgb, var(--accent) 48%, transparent); }
 .work-gantt-feature-row-wrap[data-highlight="related"] { background: color-mix(in srgb, var(--accent) 28%, transparent); }

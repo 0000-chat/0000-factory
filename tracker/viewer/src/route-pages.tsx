@@ -23,7 +23,7 @@ import { WorkManagerControls } from './work-manager-controls';
 import { clearManagerPreset, createWorkManagerRouteState, enterManagerPreset, hasManagerAdvancedRefinements, workManagerExpansionFingerprint } from './work-manager-controller-state';
 import { isTeamProjection } from './team-mode';
 import { projectedTeamProfiles } from './team-model.mjs';
-import { manilaTodayKey, shiftWorkWeek, workWeekForManilaDay, workWeekFromSearch, workflowSearch } from './work-week';
+import { manilaTodayKey, shiftWorkWeek, workWindowForFocusWeek, workWeekForManilaDay, workWeekFromSearch, workflowSearch } from './work-week';
 
 let managerPresetStateForSession = createWorkManagerRouteState();
 
@@ -56,6 +56,60 @@ function workVisibleItems(items: TrackerItem[], data: ReturnType<typeof useSnaps
   return completed ? scoped : scoped.filter(item => !item.completed || hasOpenDescendant(item, data));
 }
 
+function hasDirectScheduleDate(item: TrackerItem): boolean {
+  const schedule = item.schedule;
+  return [
+    schedule.plannedStart,
+    schedule.plannedEnd,
+    schedule.proposedStart,
+    schedule.proposedEnd,
+    schedule.forecastStart,
+    schedule.forecastEndMin,
+    schedule.forecastEndMax,
+  ].some(value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/u.test(value.trim()));
+}
+
+function findActiveUndatedItems(
+  data: ReturnType<typeof useSnapshot>,
+  search: ReturnType<typeof parseWorkSearch>,
+  projection: ReturnType<typeof buildWorkProjection>,
+): TrackerItem[] {
+  const ownerMatches = (item: TrackerItem) => search.owners.length === 0 || search.owners.some(owner => {
+    const itemOwner = item.owner && item.owner.toLowerCase() !== 'unassigned' ? item.owner : '__unassigned__';
+    return itemOwner === owner || itemOwner.toLowerCase() === owner.toLowerCase();
+  });
+  return getScopeItems(data.items, search.scope === 'all' ? '*' : search.scope)
+    .filter(item => {
+      const type = item.type?.toLowerCase();
+      const isContainer = type === 'project' || type === 'workstream';
+      const owner = item.owner?.trim().toLowerCase();
+      const isOwnedContainer = isContainer && Boolean(owner) && owner !== 'unassigned';
+      const own = projection.get(item.id)?.own;
+      const hasOwnActivity = Boolean(own?.evidenceIds?.length || own?.firstDate || own?.lastDate);
+      const hasDirectWork = scheduleFeatures([item]).length > 0 || hasDirectScheduleDate(item);
+      const eligible = type === 'task'
+        ? scheduleFeatures([item]).length === 0
+        : isOwnedContainer && (hasOwnActivity || hasDirectWork);
+      return eligible && item.status.toLowerCase() === 'active' && isAccepted(item) && !item.completed && ownerMatches(item);
+    });
+}
+
+function filteredActiveUndatedItems(
+  data: ReturnType<typeof useSnapshot>,
+  search: ReturnType<typeof parseWorkSearch>,
+  projection: ReturnType<typeof buildWorkProjection>,
+): TrackerItem[] {
+  const candidates = findActiveUndatedItems(data, search, projection);
+  const filtered = projectFilteredWork(data, {
+    ...search,
+    from: undefined,
+    to: undefined,
+    undated: 'include',
+    completed: false,
+  });
+  return candidates.filter(item => filtered.visibleIds.has(item.id) && !filtered.contextualIds.has(item.id));
+}
+
 export function WorkPage() {
   const data = useSnapshot();
   const teamProjection = isTeamProjection(data);
@@ -72,6 +126,7 @@ export function WorkPage() {
   const routeSearch = parseWorkSearch(location.search, options);
   const workflow = routeSearch.workflow ?? 'standard';
   const selectedWeek = workWeekFromSearch(routeSearch);
+  const focusWindow = workflow === 'this-week' ? workWindowForFocusWeek(selectedWeek) : null;
   // Workflow defaults are applied once when entering a workflow. After that,
   // URL state is authoritative so view tabs and refinements remain sticky.
   const search = routeSearch;
@@ -85,9 +140,44 @@ export function WorkPage() {
   const visible = useMemo(() => {
     const candidateSearch: WorkSearch = workflow === 'next-week'
       ? { ...search, from: undefined, to: undefined, undated: 'include' }
+      : workflow === 'this-week' && focusWindow
+        ? { ...search, from: focusWindow.start, to: focusWindow.end }
       : search;
-    return projectFilteredWork(data, candidateSearch);
-  }, [data, search, workflow]);
+    const base = projectFilteredWork(data, candidateSearch);
+    if (workflow !== 'this-week' || focusWindow === null) return base;
+    const undated = filteredActiveUndatedItems(data, search, projection);
+    // Completed rows qualify by recorded activity in the four-week context;
+    // remove schedule bounds here so an activity-backed completion is not
+    // discarded merely because its original schedule was outside the context
+    // (or undated). The source-backed activity check below remains the gate.
+    const completedSearch = { ...candidateSearch, from: undefined, to: undefined, undated: 'include' as const, completed: true };
+    const completedInWindow = new Set(data.items
+      .filter(item => item.completed)
+      .filter(item => {
+        const lastDate = projection.get(item.id)?.own.lastDate;
+        return typeof lastDate === 'string' && lastDate >= focusWindow.start && lastDate <= focusWindow.end;
+      })
+      .map(item => item.id));
+    const completed = projectFilteredWork(data, completedSearch).items.filter(item => completedInWindow.has(item.id));
+    const baseIds = new Set(base.items.map(item => item.id));
+    const extras = [...new Map([...undated, ...completed].map(item => [item.id, item])).values()]
+      .filter(item => !baseIds.has(item.id));
+    if (!extras.length) return base;
+    const ids = baseIds;
+    const contextualIds = new Set(base.contextualIds);
+    for (const item of extras) {
+      ids.add(item.id);
+      let parentId = item.parent ?? null;
+      while (parentId) {
+        ids.add(parentId);
+        contextualIds.add(parentId);
+        parentId = data.itemById.get(parentId)?.parent ?? null;
+      }
+    }
+    const items = data.items.filter(item => ids.has(item.id));
+    const roots = items.filter(item => !item.parent || !data.itemById.has(item.parent));
+    return { ...base, items, roots, visibleIds: new Set(items.map(item => item.id)), contextualIds, matchCount: base.matchCount + extras.length };
+  }, [data, focusWindow, projection, search, workflow]);
   const managerScopeIds = useMemo(() => new Set(getScopeItems(
     data.items,
     search.scope === 'all' ? '*' : search.scope,
@@ -161,11 +251,15 @@ export function WorkPage() {
   const displayedIds: ReadonlySet<string> = applyActivityFilter
     ? new Set([...activityRows.visibleIds].filter(id => visible.visibleIds.has(id) && (dailyAttentionIds === null || dailyAttentionIds.has(id))))
     : visible.visibleIds;
+  const explicitVisibleWorkloadIds = useMemo(
+    () => new Set(visible.items.filter(item => !visible.contextualIds.has(item.id)).map(item => item.id)),
+    [visible.contextualIds, visible.items],
+  );
   const displayedContextualIds: ReadonlySet<string> = useMemo(() => {
-    if (!applyActivityFilter) return visible.contextualIds;
+    if (!applyActivityFilter) return new Set([...visible.contextualIds].filter(id => !explicitVisibleWorkloadIds.has(id)));
     return new Set([...visible.contextualIds, ...activityRows.contextIds]
-      .filter(id => displayedIds.has(id)));
-  }, [activityRows.contextIds, applyActivityFilter, displayedIds, visible.contextualIds]);
+      .filter(id => displayedIds.has(id) && !explicitVisibleWorkloadIds.has(id)));
+  }, [activityRows.contextIds, applyActivityFilter, displayedIds, explicitVisibleWorkloadIds, visible.contextualIds]);
   const candidateIds = useMemo(() => {
     if (workflow !== 'next-week') return null;
     return new Set([...managerProjection.byId.values()]
@@ -209,13 +303,9 @@ export function WorkPage() {
   const finalContextualIds = new Set([...displayedContextualIds].filter(id => finalVisibleIds.has(id)));
   const undatedActiveItems = useMemo(() => {
     if (workflow !== 'this-week') return [];
-    const ownerMatches = (item: TrackerItem) => search.owners.length === 0 || search.owners.some(owner => {
-      const itemOwner = item.owner && item.owner.toLowerCase() !== 'unassigned' ? item.owner : '__unassigned__';
-      return itemOwner === owner || itemOwner.toLowerCase() === owner.toLowerCase();
-    });
-    return getScopeItems(data.items, search.scope === 'all' ? '*' : search.scope)
-      .filter(item => item.type === 'task' && item.status.toLowerCase() === 'active' && isAccepted(item) && !item.completed && ownerMatches(item) && scheduleFeatures([item]).length === 0);
-  }, [data.items, search.owners, search.scope, workflow]);
+    return filteredActiveUndatedItems(data, search, projection)
+      .filter(item => scheduleFeatures([item]).length === 0);
+  }, [data, projection, search, workflow]);
   const update = (changes: SearchInput) => {
     const next = parseWorkSearch({ ...search, ...changes }, options);
     void navigate({ to: '/work', search: next, replace: true });
@@ -298,6 +388,7 @@ export function WorkPage() {
     navigationControls={<NavigationDateControls date={search.date} onChange={update} />}
     navigationDate={search.date}
     selectedWeek={selectedWeek}
+    focusWindow={focusWindow}
     workflow={workflow}
     onWorkflowChange={updateWorkflow}
     onWeekChange={updateWeek}

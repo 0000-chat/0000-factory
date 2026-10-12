@@ -105,7 +105,14 @@ test('Gantt keeps schedule controls compact and opens row investigation', async 
   await openRoute(page, '/work');
 
   await expect(page.getByText('Work activity timeline', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Show activity', exact: true })).toBeVisible();
+  const activityToggle = page.getByRole('button', { name: 'Hide recorded activity', exact: true });
+  await expect(activityToggle).toBeVisible();
+  await expect(activityToggle).toHaveAttribute('aria-pressed', 'true');
+  await activityToggle.click();
+  const showActivityToggle = page.getByRole('button', { name: 'Show recorded activity', exact: true });
+  await expect(showActivityToggle).toHaveAttribute('aria-pressed', 'false');
+  await showActivityToggle.click();
+  await expect(page.getByRole('button', { name: 'Hide recorded activity', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('button', { name: 'Show forecast', exact: true })).toBeVisible();
 
   const row = page.getByRole('button', { name: /Open details for Synthetic foundation task/ }).first();
