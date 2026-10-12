@@ -2,7 +2,8 @@
 .gantt-feature-tooltip, .gantt-marker-tooltip, .work-gantt-tooltip { max-width: min(340px, calc(100vw - 24px)); line-height: 1.35; white-space: normal; }
 .work-gantt-legend { align-items: center; gap: 8px 14px; }
 .work-gantt-legend .schedule-readonly { margin-left: auto; }
-.work-gantt-legend-observed { background: var(--warning); }
+.work-gantt-legend-plan { background: var(--work-gantt-plan-color, color-mix(in srgb, var(--primary) 30%, var(--card))); }
+.work-gantt-legend-observed { background: var(--work-gantt-actual-color, var(--primary)); }
 .work-gantt-activity-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; color: var(--muted-foreground); background: transparent; cursor: pointer; font: inherit; font-size: 0.7rem; }
 .work-gantt-activity-toggle:hover { color: var(--foreground); }
 .work-gantt-activity-toggle:focus-visible { border-radius: 4px; outline: 2px solid var(--ring); outline-offset: 3px; }

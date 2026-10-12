@@ -1263,15 +1263,14 @@ export function WorkGantt({
 
   return <TooltipProvider delayDuration={350}><div className={'schedule-view work-gantt-view' + (presentationMode ? ' work-gantt-presentation-mode' : '')} data-presentation-mode={presentationMode ? 'true' : undefined}>
     <div className="schedule-legend work-gantt-legend">
-      <span><i className="legend-dot baseline" />Approved plan</span>
+      <span><i className="legend-dot work-gantt-legend-plan" />Light schedule</span>
       <button
         className="work-gantt-activity-toggle"
         type="button"
         aria-pressed={showActivity}
         onClick={() => setShowActivity(value => !value)}
       aria-label={showActivity ? 'Hide recorded activity' : 'Show recorded activity'}
-      ><i className="legend-dot work-gantt-legend-observed" aria-hidden="true" />Recorded activity · {showActivity ? 'Hide' : 'Show'}</button>
-      <span><i className="legend-dot proposed" />Proposed schedule</span>
+      ><i className="legend-dot work-gantt-legend-observed" aria-hidden="true" />Dark actual activity · {showActivity ? 'Hide' : 'Show'}</button>
       <button
         className="work-gantt-forecast-toggle"
         type="button"
@@ -1279,7 +1278,7 @@ export function WorkGantt({
         aria-describedby={forecastAvailable ? undefined : `work-gantt-forecast-status${forecastStatusId}`}
         onClick={() => setShowForecast(value => !value)}
       >
-        <i className="legend-dot forecast" aria-hidden="true" />{showForecast ? 'Hide forecast' : 'Show forecast'}
+        {showForecast ? 'Hide forecast dates' : 'Include forecast dates'}
       </button>
       {!forecastAvailable ? <span id={`work-gantt-forecast-status${forecastStatusId}`} className="work-gantt-forecast-status" role="status">No forecast dates recorded for visible work.</span> : null}
       <span className="schedule-readonly">Dates come from approved plans, explicit proposals, and qualifying source activity.</span>
