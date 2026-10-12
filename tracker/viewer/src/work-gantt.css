@@ -75,8 +75,6 @@
 .work-gantt-title { min-width: 0; overflow: hidden; flex: 1 1 auto; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .work-gantt-reference-code { flex: 0 0 auto; }
 .work-gantt-parent-envelope-label .work-reference-code, .work-gantt-expanded-parent-label-text .work-reference-code, .work-gantt-label .work-reference-code { margin-right: 5px; }
-.tracker-work-gantt .work-gantt-sidebar-row[data-title-overflow="true"]::after { position: absolute; top: calc(100% - 3px); left: 28px; z-index: 60; display: none; width: max-content; max-width: min(420px, calc(100vw - 36px)); padding: 6px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--card); box-shadow: 0 8px 20px color-mix(in srgb, var(--foreground) 14%, transparent); color: var(--foreground); content: attr(data-full-title); font-size: 12px; font-weight: 650; line-height: 1.25; pointer-events: none; white-space: normal; }
-.tracker-work-gantt .work-gantt-sidebar-row[data-title-overflow="true"]:hover::after, .tracker-work-gantt .work-gantt-sidebar-row[data-title-overflow="true"]:focus-within::after { display: block; }
 .work-gantt-row-meta { flex: 0 0 auto; overflow: hidden; color: var(--muted-foreground); font-size: 11px; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
 .work-gantt-title-meta { display: none; min-width: 0; flex: 0 1 auto; align-items: center; gap: 4px; overflow: hidden; }
 .work-gantt-title-meta .work-gantt-row-meta { min-width: 0; flex: 0 1 auto; }
@@ -132,9 +130,6 @@
 .work-gantt-expanded-parent-label-text { display: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work-gantt-expanded-parent-label:hover { background: color-mix(in srgb, var(--accent) 65%, transparent); }
 .work-gantt-expanded-parent-label:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-.work-gantt-parent-envelope[data-label-overflow="true"], .work-gantt-expanded-parent-label[data-label-overflow="true"] { overflow: visible; }
-.work-gantt-parent-envelope[data-label-overflow="true"]::after, .work-gantt-expanded-parent-label[data-label-overflow="true"]::after { position: absolute; top: calc(100% + 3px); left: 0; z-index: 40; display: none; width: max-content; max-width: min(320px, calc(100vw - 36px)); padding: 5px 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--card); box-shadow: 0 7px 18px color-mix(in srgb, var(--foreground) 14%, transparent); color: var(--foreground); content: attr(data-full-label); font-size: 11px; font-weight: 650; line-height: 1.25; pointer-events: none; white-space: normal; }
-.work-gantt-parent-envelope[data-label-overflow="true"]:hover::after, .work-gantt-parent-envelope[data-label-overflow="true"]:focus-visible::after, .work-gantt-expanded-parent-label[data-label-overflow="true"]:hover::after, .work-gantt-expanded-parent-label[data-label-overflow="true"]:focus-visible::after { display: block; }
 .work-gantt-expanded-parent-label[data-parent-completed="true"] { color: var(--muted-foreground); }
 .work-gantt-parent-envelope:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .work-gantt-parent-envelope[data-envelope-completed="true"] { border-color: var(--muted-foreground); background: color-mix(in srgb, var(--muted-foreground) 68%, var(--muted)); color: var(--foreground); }

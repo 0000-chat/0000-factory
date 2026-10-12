@@ -426,8 +426,6 @@ function WorkGanttSidebarRow({
     data-highlight={highlight}
     data-contextual={row.contextual ? 'true' : undefined}
     data-summary-partial={entry.timeline.partial ? 'true' : undefined}
-    data-full-title={title}
-    data-title-overflow={title.length > 24 ? 'true' : undefined}
     onPointerEnter={event => onHover(row.id, event)}
     onFocusCapture={event => onFocus(row.id, event)}
     onBlurCapture={onBlur}
@@ -452,30 +450,31 @@ function WorkGanttSidebarRow({
       >{row.collapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}</button>
       : <span className="work-gantt-expander-spacer" aria-hidden="true" />}
     <div className="work-gantt-row-main">
-      <button
-        className="work-gantt-title-button"
-        type="button"
-        aria-label={'Open details for ' + title}
-        aria-current={selectedId === row.id ? 'true' : undefined}
-        title={title}
-        onClick={() => onSelect(row.id)}
-      >
-        {item?.referenceCode ? <code className="work-reference-code work-gantt-reference-code">{item.referenceCode}</code> : null}
-        <span className="work-gantt-title">{title}</span>
-        <span className="work-gantt-title-meta">
-          {status ? <span className="work-gantt-row-meta work-gantt-status" title={'Lifecycle status · ' + status}>{status}</span> : null}
-          {contextual ? <span className="work-gantt-row-meta">Context</span> : summaryLabel ? <span className="work-gantt-row-meta" title={summaryLabel}>{summaryLabel}</span> : null}
-          {row.ownerContextLabel ? <span className="work-gantt-row-meta work-gantt-owner-context" title={`Hierarchy context · ${row.ownerContextLabel}`}>In {row.ownerContextLabel}</span> : null}
-          {entry.timeline.partial ? <span className="work-gantt-row-meta work-gantt-partial-badge" title={PARTIAL_APPROVED_HELP} aria-label={PARTIAL_APPROVED_HELP}>Partial dates</span> : null}
-          {inferred ? <span className="work-gantt-row-meta work-gantt-inferred-badge" title="Approved display start is inferred from recorded evidence">Inferred start</span> : null}
-          {reasons.map((reason, index) => <span
-            className={'work-gantt-reason work-gantt-reason-' + reason.tone}
-            key={reason.label + '-' + index}
-            title={reason.label}
-            aria-label={reason.label}
-          >{reason.label}</span>)}
-        </span>
-      </button>
+      <WorkGanttTooltip label={title}>
+        <button
+          className="work-gantt-title-button"
+          type="button"
+          aria-label={'Open details for ' + title}
+          aria-current={selectedId === row.id ? 'true' : undefined}
+          onClick={() => onSelect(row.id)}
+        >
+          {item?.referenceCode ? <code className="work-reference-code work-gantt-reference-code">{item.referenceCode}</code> : null}
+          <span className="work-gantt-title">{title}</span>
+          <span className="work-gantt-title-meta">
+            {status ? <span className="work-gantt-row-meta work-gantt-status" title={'Lifecycle status · ' + status}>{status}</span> : null}
+            {contextual ? <span className="work-gantt-row-meta">Context</span> : summaryLabel ? <span className="work-gantt-row-meta" title={summaryLabel}>{summaryLabel}</span> : null}
+            {row.ownerContextLabel ? <span className="work-gantt-row-meta work-gantt-owner-context" title={`Hierarchy context · ${row.ownerContextLabel}`}>In {row.ownerContextLabel}</span> : null}
+            {entry.timeline.partial ? <span className="work-gantt-row-meta work-gantt-partial-badge" title={PARTIAL_APPROVED_HELP} aria-label={PARTIAL_APPROVED_HELP}>Partial dates</span> : null}
+            {inferred ? <span className="work-gantt-row-meta work-gantt-inferred-badge" title="Approved display start is inferred from recorded evidence">Inferred start</span> : null}
+            {reasons.map((reason, index) => <span
+              className={'work-gantt-reason work-gantt-reason-' + reason.tone}
+              key={reason.label + '-' + index}
+              title={reason.label}
+              aria-label={reason.label}
+            >{reason.label}</span>)}
+          </span>
+        </button>
+      </WorkGanttTooltip>
       <div className="work-gantt-row-details">
         {contextual ? null : <div className="work-gantt-row-ownership">
           <WorkOwnership item={item ?? entry} data={data} entry={entry} collapsed={row.collapsed} showName size="sm" assignment />
@@ -967,6 +966,8 @@ function WorkGanttTimelineContent({
             const parentLabelText = parentLabelRange
               ? `${title} · ${workGanttRangeLabel(parentLabelRange)}`
               : title;
+            const collapsedParentDescription = `${title} · parent timeline · ${collapsedEnvelope?.sourceKinds?.join(', ') ?? row.parentEnvelope?.sourceKinds?.join(', ') ?? 'approved'} · ${collapsedEnvelope?.startDay ?? row.parentEnvelope?.startDay ?? 'unknown'} to ${collapsedEnvelope?.endDay ?? row.parentEnvelope?.endDay ?? 'unknown'}${missingDatesSuffix}`;
+            const expandedParentDescription = `${title} · parent timeline · ${row.parentEnvelope?.sourceKinds?.join(', ') ?? 'approved'} · ${row.parentEnvelope?.startDay ?? 'unknown'} to ${row.parentEnvelope?.endDay ?? 'unknown'}${missingDatesSuffix}`;
             const parentLabelNeedsCallout = parentEnvelopeWidth > 0 && parentEnvelopeWidth < 180;
             const expandedParentLabelWidth = row.isExpanded && parentLabelNeedsCallout
               ? Math.min(220, chartWidth)
@@ -1008,7 +1009,7 @@ function WorkGanttTimelineContent({
               onFocusCapture={event => onFocus(row.id, event)}
               onBlurCapture={onBlur}
             >
-              {envelopeLeft !== null && envelopeWidth > 0 ? <button
+              {envelopeLeft !== null && envelopeWidth > 0 ? <WorkGanttTooltip label={collapsedParentDescription}><button
                 className="work-gantt-parent-envelope"
                 type="button"
                 data-work-parent-id={row.id}
@@ -1016,14 +1017,11 @@ function WorkGanttTimelineContent({
                 data-envelope-source-kind={collapsedEnvelope?.primaryKind ?? row.parentEnvelope?.primaryKind ?? 'mixed'}
                 data-envelope-completed={row.entry.completed ? 'true' : undefined}
                 data-envelope-has-own-plan={hasOwnApprovedPlan ? 'true' : undefined}
-                aria-label={`Open details for ${title} · parent timeline · ${collapsedEnvelope?.sourceKinds?.join(', ') ?? row.parentEnvelope?.sourceKinds?.join(', ') ?? 'approved'} · ${collapsedEnvelope?.startDay ?? row.parentEnvelope?.startDay ?? 'unknown'} to ${collapsedEnvelope?.endDay ?? row.parentEnvelope?.endDay ?? 'unknown'}${missingDatesSuffix}`}
-                title={`${title} · parent timeline · ${collapsedEnvelope?.sourceKinds?.join(', ') ?? row.parentEnvelope?.sourceKinds?.join(', ') ?? 'approved'} · ${collapsedEnvelope?.startDay ?? row.parentEnvelope?.startDay ?? 'unknown'} to ${collapsedEnvelope?.endDay ?? row.parentEnvelope?.endDay ?? 'unknown'}${missingDatesSuffix}`}
-                data-full-label={parentLabelText}
-                data-label-overflow={!hasOwnApprovedPlan && parentLabelNeedsCallout ? 'true' : undefined}
+                aria-label={`Open details for ${collapsedParentDescription}`}
                 style={{ left: `${envelopeLeft}px`, width: `${envelopeWidth}px` }}
                 onClick={() => onSelect(row.id)}
                 onPointerDown={event => event.stopPropagation()}
-              ><span className="work-gantt-parent-envelope-label">{item.referenceCode ? <code className="work-reference-code">{item.referenceCode}</code> : null}{parentLabelText}</span></button> : null}
+              ><span className="work-gantt-parent-envelope-label">{item.referenceCode ? <code className="work-reference-code">{item.referenceCode}</code> : null}{parentLabelText}</span></button></WorkGanttTooltip> : null}
               {row.collapsed && hasOwnApprovedPlan && childApprovedEnvelope ? <>
                 <span className="work-gantt-parent-track-label work-gantt-parent-track-label-plan" style={{ left: trackLabelLeft(row.ownApprovedMark) }}>{planLabel}</span>
                 <span className="work-gantt-parent-track-label work-gantt-parent-track-label-child" style={{ left: trackLabelLeft(childApprovedEnvelope) }}>{childLabel}</span>
@@ -1060,7 +1058,7 @@ function WorkGanttTimelineContent({
                   style={{ left: `${Math.max(4, dayWidth(collapsedActivityEnvelope, pixelsPerDay) + 6)}px` }}
                 >Recorded activity · {workGanttRangeLabel(collapsedActivityEnvelope)}</span></span>
               </WorkGanttTooltip> : null}
-              {row.isExpanded && row.parentEnvelope && parentEnvelopeLeft !== null && parentEnvelopeWidth > 0 ? <button
+              {row.isExpanded && row.parentEnvelope && parentEnvelopeLeft !== null && parentEnvelopeWidth > 0 ? <WorkGanttTooltip label={expandedParentDescription}><button
                 className="work-gantt-expanded-parent-label"
                 type="button"
                 data-work-parent-id={row.id}
@@ -1068,14 +1066,11 @@ function WorkGanttTimelineContent({
                 data-parent-source-kind={row.parentEnvelope.primaryKind ?? 'mixed'}
                 data-parent-completed={row.entry.completed ? 'true' : undefined}
                 data-parent-has-own-plan={hasOwnApprovedPlan ? 'true' : undefined}
-                aria-label={`Open details for ${title} · parent timeline · ${row.parentEnvelope.sourceKinds.join(', ')} · ${row.parentEnvelope.startDay} to ${row.parentEnvelope.endDay}${missingDatesSuffix}`}
-                title={`${title} · parent timeline · ${row.parentEnvelope.sourceKinds.join(', ')} · ${row.parentEnvelope.startDay} to ${row.parentEnvelope.endDay}${missingDatesSuffix}`}
-                data-full-label={parentLabelText}
-                data-label-overflow={!hasOwnApprovedPlan && parentLabelNeedsCallout ? 'true' : undefined}
+                aria-label={`Open details for ${expandedParentDescription}`}
                 style={{ left: `${expandedParentLabelLeft}px`, width: `${expandedParentLabelWidth}px` }}
                 onClick={() => onSelect(row.id)}
                 onPointerDown={event => event.stopPropagation()}
-              ><span className="work-gantt-expanded-parent-label-text">{item.referenceCode ? <code className="work-reference-code">{item.referenceCode}</code> : null}{parentLabelText}</span></button> : null}
+              ><span className="work-gantt-expanded-parent-label-text">{item.referenceCode ? <code className="work-reference-code">{item.referenceCode}</code> : null}{parentLabelText}</span></button></WorkGanttTooltip> : null}
               {row.isExpanded && visibleChildSummaryEnvelope ? childApprovedEnvelope ? <WorkGanttTooltip label={`${title} · child schedule · ${visibleChildSummaryEnvelope.startDay} to ${visibleChildSummaryEnvelope.endDay}${missingDatesSuffix}`}><button
                 className="work-gantt-child-summary-bracket"
                 type="button"

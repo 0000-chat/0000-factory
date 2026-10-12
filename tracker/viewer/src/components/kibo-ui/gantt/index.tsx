@@ -791,6 +791,7 @@ export const GanttCreateMarkerTrigger: FC<GanttCreateMarkerTriggerProps> = ({
   );
 
   const date = getDateByMousePosition(gantt, x);
+  const dateLabel = formatDate(date, "MMM dd, yyyy");
 
   const handleClick = () => onCreateMarker(date);
 
@@ -806,16 +807,19 @@ export const GanttCreateMarkerTrigger: FC<GanttCreateMarkerTriggerProps> = ({
         className="-ml-2 pointer-events-auto sticky top-6 z-20 flex w-4 flex-col items-center justify-center gap-1 overflow-visible opacity-0 group-hover:opacity-100"
         style={{ transform: `translateX(${x}px)` }}
       >
-        <button
-          className="z-50 inline-flex h-4 w-4 items-center justify-center rounded-full bg-card"
-          onClick={handleClick}
-          type="button"
-        >
-          <PlusIcon className="text-muted-foreground" size={12} />
-        </button>
-        <div className="whitespace-nowrap rounded-full border border-border/50 bg-background/90 px-2 py-1 text-foreground text-xs backdrop-blur-lg">
-          {formatDate(date, "MMM dd, yyyy")}
-        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={`Add marker on ${dateLabel}`}
+              className="z-50 inline-flex h-4 w-4 items-center justify-center rounded-full bg-card"
+              onClick={handleClick}
+              type="button"
+            >
+              <PlusIcon className="text-muted-foreground" size={12} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{dateLabel}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );
@@ -838,19 +842,20 @@ export const GanttFeatureDragHelper: FC<GanttFeatureDragHelperProps> = ({
   });
 
   const isPressed = Boolean(attributes["aria-pressed"]);
+  const dateLabel = date ? formatDate(date, "MMM dd, yyyy") : null;
 
   useEffect(() => setDragging(isPressed), [isPressed, setDragging]);
 
-  return (
-    <div
-      className={cn(
-        "group -translate-y-1/2 !cursor-col-resize absolute top-1/2 z-[3] h-full w-6 rounded-md outline-none",
-        direction === "left" ? "-left-2.5" : "-right-2.5"
-      )}
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-    >
+  const trigger = <div
+    aria-label={dateLabel ? `Adjust ${direction} edge to ${dateLabel}` : undefined}
+    className={cn(
+      "group -translate-y-1/2 !cursor-col-resize absolute top-1/2 z-[3] h-full w-6 rounded-md outline-none",
+      direction === "left" ? "-left-2.5" : "-right-2.5"
+    )}
+    ref={setNodeRef}
+    {...attributes}
+    {...listeners}
+  >
       <div
         className={cn(
           "-translate-y-1/2 absolute top-1/2 h-[80%] w-1 rounded-sm bg-muted-foreground opacity-0 transition-all",
@@ -861,18 +866,12 @@ export const GanttFeatureDragHelper: FC<GanttFeatureDragHelperProps> = ({
           isPressed && "opacity-100"
         )}
       />
-      {date && (
-        <div
-          className={cn(
-            "-translate-x-1/2 absolute top-10 hidden whitespace-nowrap rounded-lg border border-border/50 bg-background/90 px-2 py-1 text-foreground text-xs backdrop-blur-lg group-hover:block",
-            isPressed && "block"
-          )}
-        >
-          {format(date, "MMM dd, yyyy")}
-        </div>
-      )}
-    </div>
-  );
+  </div>;
+
+  return dateLabel ? <Tooltip>
+    <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+    <TooltipContent side="bottom" sideOffset={6}>{dateLabel}</TooltipContent>
+  </Tooltip> : trigger;
 };
 
 export type GanttFeatureItemCardProps = Pick<GanttFeature, "id"> & {
@@ -914,7 +913,6 @@ export const GanttFeatureItemCard: FC<GanttFeatureItemCardProps> = ({
       height: `${100 / interactionLane.count}%`,
       padding: 0,
     } : undefined}
-    title={title}
     type="button"
   >
     {interactionLane ? null : children}
@@ -1373,9 +1371,6 @@ export const GanttMarker: FC<
                 tabIndex={0}
               >
                 {label}
-                <span className="max-h-[0] overflow-hidden opacity-80 transition-all group-hover:max-h-[2rem]">
-                  {dateLabel}
-                </span>
               </div>
             </ContextMenuTrigger>
           </TooltipTrigger>
@@ -1752,9 +1747,6 @@ export const GanttToday: FC<GanttTodayProps> = ({ className }) => {
             tabIndex={0}
           >
             {label}
-            <span className="max-h-[0] overflow-hidden opacity-80 transition-all group-hover:max-h-[2rem]">
-              {dateLabel}
-            </span>
           </div>
         </TooltipTrigger>
         <TooltipContent side="bottom" sideOffset={6} className="gantt-marker-tooltip">{`${label} · ${dateLabel}`}</TooltipContent>
