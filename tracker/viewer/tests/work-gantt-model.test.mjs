@@ -128,8 +128,8 @@ test('owner grouping preserves canonical leaf IDs and does not count parents as 
 
 test('owner grouping keeps an undated accepted leaf without inventing a bar', () => {
   const undated = entry('undated-owner-task', {}, {
-    owner: 'ALEXI',
-    ownerName: 'Alexi NextDesk',
+    owner: 'owner-b',
+    ownerName: 'Owner B',
   });
   const model = buildWorkGanttModel({
     projection: new Map([[undated.id, undated]]),
@@ -140,22 +140,22 @@ test('owner grouping keeps an undated accepted leaf without inventing a bar', ()
   const grouped = groupWorkGanttRowsByOwner(model.rows, new Map([
     [undated.id, { id: undated.id, title: undated.title, owner: undated.owner, ownerName: undated.ownerName }],
   ]));
-  assert.deepEqual(grouped.map(row => row.id), ['owner-group:alexi', undated.id]);
+  assert.deepEqual(grouped.map(row => row.id), ['owner-group:owner-b', undated.id]);
   assert.equal(grouped[0].ownerGroupCount, 1);
   assert.equal(grouped[1].marks.length, 0);
 });
 
 test('owner grouping keeps accepted project and workstream records with direct work', () => {
-  const project = entry('aws-k8s-costs', {
+  const project = entry('beacon-project', {
     ownPlannedStart: '2026-09-30',
     ownPlannedDue: '2026-10-23',
     plannedStart: '2026-09-30',
     plannedDue: '2026-10-23',
-  }, { childIds: ['aws-child'], owner: 'aedcparnie', ownerName: 'Adrian' });
-  const stream = entry('nextdesk-support-platform-ai-replacement', {}, {
-    childIds: ['nextdesk-child'],
-    owner: 'alexi',
-    ownerName: 'Alexi',
+  }, { childIds: ['beacon-child'], owner: 'owner-a', ownerName: 'Owner A' });
+  const stream = entry('demo-workstream', {}, {
+    childIds: ['demo-child'],
+    owner: 'owner-b',
+    ownerName: 'Owner B',
     own: {
       state: 'recent',
       firstDate: '2026-10-12',
@@ -165,15 +165,15 @@ test('owner grouping keeps accepted project and workstream records with direct w
   });
   const structural = entry('structural-container', {}, {
     childIds: ['structural-child'],
-    owner: 'alexi',
-    ownerName: 'Alexi',
+    owner: 'owner-b',
+    ownerName: 'Owner B',
   });
   const projection = new Map([
     [project.id, project],
     [stream.id, stream],
     [structural.id, structural],
-    ['aws-child', entry('aws-child', {}, { parentId: project.id })],
-    ['nextdesk-child', entry('nextdesk-child', {}, { parentId: stream.id })],
+    ['beacon-child', entry('beacon-child', {}, { parentId: project.id })],
+    ['demo-child', entry('demo-child', {}, { parentId: stream.id })],
     ['structural-child', entry('structural-child', {}, { parentId: structural.id })],
   ]);
   const items = new Map([
