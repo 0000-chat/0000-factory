@@ -19,6 +19,11 @@ import { loadInstanceConfig, publicInstanceConfig } from '../../../tooling/insta
 import { renderInstanceArtifacts } from '../../../tooling/instance/render.mjs';
 import { repositoryPath, selectedDataPaths } from '../../../tooling/instance/paths.mjs';
 import { DataSourceError, SOURCE_READ_LIMITS, validateDataSource } from '../../../tooling/tracker/source-validation.mjs';
+import { emptyPlanningArchive, loadPlanningArchive } from '../../../tooling/planning/archive.mjs';
+import { readTeamProjection } from '../../../tooling/team-projection/reader.mjs';
+import { readTeamCompanion } from '../../../tooling/team-projection/companion.mjs';
+import { buildTeamProjectionSnapshot } from '../../../tooling/team-projection/snapshot.mjs';
+import { buildTeamProjectionPlanningArchive } from '../../../tooling/team-projection/presentation.mjs';
 import { buildTrackerData, parseOwnerNames } from './data.mjs';
 
 const TOOLING_DIR = dirname(fileURLToPath(import.meta.url));
@@ -28,6 +33,7 @@ const RUNNING_ENGINE_REAL = realpathSync(RUNNING_ENGINE_ROOT);
 const ENGINE_DIGEST_PATHS = Object.freeze([
   'package.json', 'bun.lock', 'patches', 'tsconfig.json',
   'tooling/instance', 'tooling/tracker', 'worker',
+  'tooling/team-projection',
   'tracker/viewer/src', 'tracker/viewer/tooling', 'tracker/viewer/tsconfig.json',
   'tracker/viewer/tsr.config.json',
 ]);
@@ -394,6 +400,70 @@ function captureDataFiles(dataRepo, instance) {
   return { files, snapshots };
 }
 
+function loadTeamProjectionInputs({ engine, data, settingsPath, outputPath, loaded, assetPath, assetDigest }) {
+  const instance = loaded.instance;
+  const selectedRootPath = join(data, repositoryPath(instance, ''));
+  const selectedRootStat = lstatSync(selectedRootPath, { throwIfNoEntry: false });
+  if (!selectedRootStat || !selectedRootStat.isDirectory() || selectedRootStat.isSymbolicLink()) {
+    throw new Error('team projection data folder must be a real directory');
+  }
+  const selectedRoot = realPath(selectedRootPath);
+  if (!contained(realPath(data), selectedRoot)) throw new Error('team projection data folder escapes dataRepo');
+  const selectedProjection = readTeamProjection({
+    dataRoot: selectedRoot,
+    projectionPath: instance.data.projectionPath,
+    linkPolicy: instance.data.projectionLinkPolicy,
+  });
+  const companion = readTeamCompanion({
+    dataRoot: selectedRoot,
+    companionPath: instance.data.companionPath,
+    projection: selectedProjection.rawProjection,
+    expectedRosterDigest: instance.data.directoryRosterDigest,
+  });
+  const dataMeta = dataGitMetadata(data);
+  const engineMeta = engineGitMetadata(engine);
+  return {
+    engineRoot: engine,
+    dataRepo: data,
+    instancePath: settingsPath,
+    manifestDir: loaded.manifestDir,
+    configDigest: loaded.configDigest,
+    assetPath,
+    instance,
+    files: new Map([
+      [instance.data.projectionPath, ''],
+      ...(instance.data.companionPath ? [[instance.data.companionPath, '']] : []),
+    ]),
+    records: null,
+    validated: { records: null, registry: null, guide: '', teamProfiles: [] },
+    projection: selectedProjection.projection,
+    projectionDigest: selectedProjection.digest,
+    projectionBytes: selectedProjection.bytes,
+    companion,
+    planningArchive: instance.features.weeklyPlanning
+      ? buildTeamProjectionPlanningArchive(selectedProjection.projection)
+      : emptyPlanningArchive(),
+    planningSnapshots: [],
+    planningPresent: false,
+    dataSnapshots: [{
+      role: 'team-projection',
+      canonicalPath: instance.data.projectionPath,
+      repositoryPath: repositoryPath(instance, instance.data.projectionPath),
+      digest: selectedProjection.digest,
+    }, ...(companion ? [{
+      role: 'team-companion',
+      canonicalPath: instance.data.companionPath,
+      repositoryPath: repositoryPath(instance, instance.data.companionPath),
+      digest: companion.fileDigest,
+    }] : [])],
+    settingsDigest: loaded.configDigest,
+    assetDigest,
+    dataMeta,
+    engineMeta,
+    outputPath,
+  };
+}
+
 function loadBuildInputs({ engineRoot, instancePath, dataRepo, output } = {}, { requireOutput = true } = {}) {
   const engine = assertRunningEngine(engineRoot);
   const data = directory(requireText(dataRepo, 'dataRepo'), 'dataRepo');
@@ -421,6 +491,10 @@ function loadBuildInputs({ engineRoot, instancePath, dataRepo, output } = {}, { 
     ['branding asset', assetPath],
   ]);
 
+  if (loaded.instance.data.layout === 'team-projection-v1') {
+    return loadTeamProjectionInputs({ engine, data, settingsPath, outputPath, loaded, assetPath, assetDigest });
+  }
+
   let captured;
   try {
     captured = captureDataFiles(data, loaded.instance);
@@ -438,6 +512,9 @@ function loadBuildInputs({ engineRoot, instancePath, dataRepo, output } = {}, { 
   }
   const dataMeta = dataGitMetadata(data);
   const engineMeta = engineGitMetadata(engine);
+  const planning = loaded.instance.features.weeklyPlanning
+    ? loadPlanningArchive({ dataRoot: data, instance: loaded.instance })
+    : { archive: emptyPlanningArchive(), snapshots: [], present: false };
   if (loaded.instance.data.folderPath && !contained(data, realPath(loaded.manifestDir))) {
     throw new Error('selected settings folder escapes dataRepo');
   }
@@ -452,6 +529,9 @@ function loadBuildInputs({ engineRoot, instancePath, dataRepo, output } = {}, { 
     files,
     records: validated.records,
     validated,
+    planningArchive: planning.archive,
+    planningSnapshots: planning.snapshots,
+    planningPresent: planning.present,
     dataSnapshots: captured.snapshots,
     settingsDigest: loaded.configDigest,
     assetDigest,
@@ -481,11 +561,45 @@ function inputFingerprint(inputs) {
       digest: inputs.assetDigest,
     },
     data: selected,
+    planning: inputs.planningSnapshots.map(selection => ({
+      path: selection.path,
+      digest: selection.digest,
+    })),
   };
   return digestText(JSON.stringify(fingerprintInput));
 }
 
 function assertBuildInputsUnchanged(inputs) {
+  if (inputs.instance.data.layout === 'team-projection-v1') {
+    const selectedRoot = realPath(join(inputs.dataRepo, repositoryPath(inputs.instance, '')));
+    const currentProjection = readTeamProjection({
+      dataRoot: selectedRoot,
+      projectionPath: inputs.instance.data.projectionPath,
+      linkPolicy: inputs.instance.data.projectionLinkPolicy,
+    });
+    if (currentProjection.digest !== inputs.projectionDigest) throw new Error('team projection input changed during build');
+    if (inputs.instance.data.companionPath) {
+      const currentCompanion = readTeamCompanion({
+        dataRoot: selectedRoot,
+        companionPath: inputs.instance.data.companionPath,
+        projection: currentProjection.rawProjection,
+        expectedRosterDigest: inputs.instance.data.directoryRosterDigest,
+      });
+      if (!currentCompanion || currentCompanion.fileDigest !== inputs.companion?.fileDigest) {
+        throw new Error('team companion input changed during build');
+      }
+    }
+    if (digestBytes(readFileSync(inputs.instancePath)) !== inputs.settingsDigest) {
+      throw new Error('settings changed during build');
+    }
+    if (digestBytes(readFileSync(inputs.assetPath)) !== inputs.assetDigest) {
+      throw new Error('branding asset changed during build');
+    }
+    if (digestEngineSource(inputs.engineRoot) !== inputs.engineMeta.sourceDigest) {
+      throw new Error('engine source changed during build');
+    }
+    return;
+  }
   const currentSelections = selectedDataPaths({ dataRepo: inputs.dataRepo, instance: inputs.instance });
   if (currentSelections.length !== inputs.dataSnapshots.length) {
     throw new Error('data inputs changed during build');
@@ -523,6 +637,14 @@ function assertBuildInputsUnchanged(inputs) {
   }
   if (digestEngineSource(inputs.engineRoot) !== inputs.engineMeta.sourceDigest) {
     throw new Error('engine source changed during build');
+  }
+  if (inputs.instance.features.weeklyPlanning) {
+    const currentPlanning = loadPlanningArchive({ dataRoot: inputs.dataRepo, instance: inputs.instance });
+    const capturedPlanning = inputs.planningSnapshots.map(({ path, digest }) => ({ path, digest }));
+    const currentPlanningSnapshots = currentPlanning.snapshots.map(({ path, digest }) => ({ path, digest }));
+    if (JSON.stringify(currentPlanningSnapshots) !== JSON.stringify(capturedPlanning)) {
+      throw new Error('planning archive inputs changed during build');
+    }
   }
 }
 
@@ -626,12 +748,20 @@ function updateManifest(outputPath) {
 }
 
 function renderStagedOutput(inputs, outputPath, data, provenance) {
+  const avatarNames = inputs.instance.data.layout === 'team-projection-v1'
+    ? inputs.companion?.directory?.map(entry => entry.avatar).filter(Boolean) ?? []
+    : inputs.records?.people?.map(person => person.avatar).filter(Boolean) ?? [];
   renderInstanceArtifacts({
     instance: inputs.instance,
     manifestDir: inputs.manifestDir,
     engineRoot: inputs.engineRoot,
     output: outputPath,
-    provenance: { ...provenance, data },
+    provenance: {
+      ...provenance,
+      data,
+      avatarNames,
+      ...(inputs.instance.features.weeklyPlanning ? { planningArchive: inputs.planningArchive } : {}),
+    },
   });
   runFrontendBuild(join(outputPath, 'assets'), inputs.instance);
   return updateManifest(outputPath);
@@ -688,10 +818,14 @@ export function buildSnapshot({ engineRoot, instancePath, dataRepo, output, buil
   const sourceMeta = {
     ...inputs.dataMeta,
     builtAt,
+    projectionDigest: inputs.projectionDigest ?? null,
+    approverIds: inputs.instance.model.approverIds,
     ownerNames: parseOwnerNames(inputs.validated.guide),
   };
-  let data = buildTrackerData(inputs.records, sourceMeta);
-  data.team = inputs.validated.teamProfiles;
+  let data = inputs.instance.data.layout === 'team-projection-v1'
+    ? buildTeamProjectionSnapshot(inputs.projection, sourceMeta, inputs.companion)
+    : buildTrackerData(inputs.records, sourceMeta);
+  if (inputs.instance.data.layout !== 'team-projection-v1') data.team = inputs.validated.teamProfiles;
   data = addContentRevision(data);
   const fingerprint = inputFingerprint(inputs);
   const provenance = {
@@ -712,6 +846,7 @@ export function buildSnapshot({ engineRoot, instancePath, dataRepo, output, buil
     manifest,
     engineRoot: inputs.engineRoot,
     dataRepo: inputs.dataRepo,
+    planningArchive: inputs.planningArchive,
     settings: inputs.instancePath,
   };
 }
@@ -722,10 +857,12 @@ export function validateOnly({ engineRoot, instancePath, dataRepo, engineCommit 
   return {
     instance: inputs.instance,
     records: inputs.records,
+    projection: inputs.projection ?? null,
     registry: inputs.validated.registry,
     guide: inputs.validated.guide,
     teamProfiles: inputs.validated.teamProfiles,
     files: inputs.files,
+    planningArchive: inputs.planningArchive,
     engineRoot: inputs.engineRoot,
     dataRepo: inputs.dataRepo,
     instancePath: inputs.instancePath,

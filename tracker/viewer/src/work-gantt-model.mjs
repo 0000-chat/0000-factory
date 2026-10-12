@@ -1,5 +1,5 @@
 import { manilaDay } from './work-activity.mjs';
-import { dependenciesOf } from './view-model.mjs';
+import { dependenciesOf, isAccepted } from './view-model.mjs';
 
 const MARK_PRIORITY = ['approved', 'observed', 'proposed', 'forecast'];
 const DAY_MS = 86400000;
@@ -10,9 +10,12 @@ export const GANTT_DEFAULT_ZOOM = 100;
 // represent a range that would otherwise be clamped to a visibly too-large
 // zoom.
 export const GANTT_MIN_ZOOM = 0.001;
-export const GANTT_MAX_ZOOM = 200;
+export const GANTT_MAX_ZOOM = 1000;
 export const GANTT_ZOOM_STEP = 0.001;
+export const GANTT_DAILY_COLUMN_WIDTH = 30;
+const GANTT_DATE_TICK_MIN_WIDTH = 28;
 export const GANTT_FIT_PADDING_DAYS = 2;
+export const GANTT_SELECTED_WEEK_PADDING_DAYS = 1;
 const GANTT_ZOOM_DECIMALS = 3;
 const GANTT_ZOOM_SCALE = 10 ** GANTT_ZOOM_DECIMALS;
 const MARK_STATUS = {
@@ -20,7 +23,22 @@ const MARK_STATUS = {
   observed: { id: 'observed', name: 'Observed activity', color: 'var(--activity-quiet)' },
   proposed: { id: 'proposed', name: 'Proposed plan', color: 'var(--proposed)' },
   forecast: { id: 'forecast', name: 'Forecast', color: 'var(--forecast)' },
+  timeline: { id: 'timeline', name: 'Work timeline', color: 'var(--work-gantt-plan-color)' },
 };
+
+export function proposedScheduleLabel(kind) {
+  if (kind === 'checkpoint') return 'Proposed checkpoint';
+  if (kind === 'slice') return 'Proposed slice';
+  return 'Proposed schedule';
+}
+
+export function proposedEnvelopeLabel(envelope) {
+  const kinds = new Set((envelope?.marks ?? [])
+    .filter(mark => mark.sourceKind === 'proposed')
+    .map(mark => mark.proposedScheduleKind ?? 'span'));
+  if (kinds.size > 1) return 'Proposed schedules';
+  return proposedScheduleLabel(kinds.values().next().value ?? null);
+}
 
 function validDay(day) {
   if (typeof day !== 'string') return false;
@@ -88,6 +106,44 @@ export function fitZoomForGanttDateRange(startDay, endDay, viewportWidth, column
   return clampGanttZoom(Math.floor((width / (padded.days * column)) * 100 * GANTT_ZOOM_SCALE) / GANTT_ZOOM_SCALE);
 }
 
+/**
+ * Normalize a date-only week boundary without allowing Date parsing to shift
+ * the displayed Manila calendar day through the runtime timezone.
+ */
+export function selectedWeekGanttDateRange(selectedWeek) {
+  const startDay = selectedWeek?.start;
+  const endDay = selectedWeek?.end;
+  if (!inOrder(startDay, endDay)) return null;
+  return { startDay, endDay, days: dayOrdinal(endDay) - dayOrdinal(startDay) + 1 };
+}
+
+/**
+ * Return the range that a fit action should use. Release targets deliberately
+ * stay out of this calculation: they remain in the bounded timeline and in
+ * the deadline summary, but a distant target must not widen a work-week view.
+ */
+export function workGanttFitDateRange({ selectedWeek = null, startDay = null, endDay = null } = {}) {
+  return selectedWeekGanttDateRange(selectedWeek) ?? (
+    inOrder(startDay, endDay)
+      ? { startDay, endDay, days: dayOrdinal(endDay) - dayOrdinal(startDay) + 1 }
+      : null
+  );
+}
+
+// Keep the descriptive alias available to consumers that use the chart's
+// domain vocabulary directly.
+export const ganttFitDateRange = workGanttFitDateRange;
+
+/** Choose a readable interval for daily date labels at the current chart zoom. */
+export function ganttDateTickInterval(zoom, columnWidth = GANTT_DAILY_COLUMN_WIDTH, minTickWidth = GANTT_DATE_TICK_MIN_WIDTH) {
+  const numericZoom = Number(zoom);
+  const width = Number(columnWidth);
+  const minimum = Number(minTickWidth);
+  if (!Number.isFinite(numericZoom) || numericZoom <= 0 || !Number.isFinite(width) || width <= 0
+    || !Number.isFinite(minimum) || minimum <= 0) return 1;
+  return Math.max(1, Math.ceil(minimum / (width * numericZoom / 100)));
+}
+
 function formatUtcDay(date) {
   return [
     String(date.getUTCFullYear()).padStart(4, '0'),
@@ -130,34 +186,92 @@ function inOrder(startDay, endDay) {
   return validDay(startDay) && validDay(endDay) && startDay <= endDay;
 }
 
-function makeMark(entry, kind, startDay, endDay, { point = false, inferred = false } = {}) {
+function makeMark(entry, kind, startDay, endDay, {
+  point = false,
+  inferred = false,
+  dueDay = null,
+  partial = entry.timeline.partial === true,
+  proposedScheduleKind = null,
+  acceptedProposal = false,
+  idSuffix = null,
+} = {}) {
   if (!inOrder(startDay, endDay)) return null;
   const chartEndDay = addCalendarDay(endDay);
   const startAt = chartDateForDay(startDay);
   const endAt = chartDateForDay(chartEndDay);
   if (!startAt || !endAt) return null;
 
+  const status = kind === 'proposed'
+    ? { ...MARK_STATUS.proposed, id: `proposed-${proposedScheduleKind ?? 'span'}`, name: proposedScheduleLabel(proposedScheduleKind) }
+    : MARK_STATUS[kind];
   return {
-    id: entry.id + ':' + kind,
+    id: entry.id + ':' + kind + (idSuffix ? ':' + idSuffix : ''),
     itemId: entry.id,
-    name: MARK_STATUS[kind].name,
-    status: MARK_STATUS[kind],
-    kind: kind === 'observed' ? 'baseline' : kind,
+    name: status.name,
+    status,
+    kind: kind === 'observed' || kind === 'timeline' ? 'baseline' : kind,
     sourceKind: kind,
     laneKey: kind,
-    dueDay: kind === 'approved' || kind === 'observed' ? entry.timeline.plannedDue ?? null : null,
+    dueDay: dueDay ?? (kind === 'approved' || kind === 'observed' ? entry.timeline.plannedDue ?? null : null),
     startAt,
     endAt,
     startDay,
     endDay,
     point,
     inferred,
-    partial: entry.timeline.partial === true,
+    proposedScheduleKind: kind === 'proposed' ? proposedScheduleKind : null,
+    acceptedProposal: kind === 'proposed' && acceptedProposal,
+    partial,
     overdueCalendarDays: entry.timeline.overdueCalendarDays ?? 0,
     observedOverrun: kind === 'observed'
-      && Boolean(entry.timeline.plannedDue)
-      && endDay > entry.timeline.plannedDue,
+      && Boolean(dueDay ?? entry.timeline.plannedDue)
+      && endDay > (dueDay ?? entry.timeline.plannedDue),
   };
+}
+
+/** Build the approved schedule recorded directly on an entry, excluding descendant rollups. */
+export function approvedPlanMarkForWorkEntry(entry) {
+  if (!entry?.id || !entry.timeline) return null;
+  const timeline = entry.timeline;
+  const startDay = timeline.ownPlannedStart ?? null;
+  const dueDay = timeline.ownPlannedDue ?? null;
+  const partial = Boolean(startDay) !== Boolean(dueDay);
+  if (!dueDay) return null;
+  if (startDay && startDay <= dueDay) {
+    return makeMark(entry, 'approved', startDay, dueDay, { dueDay, partial });
+  }
+  return makeMark(entry, 'approved', dueDay, dueDay, { point: true, dueDay, partial });
+}
+
+/** Build source marks recorded directly on a grouping item, excluding descendant rollups. */
+export function directMarksForWorkEntry(entry) {
+  if (!entry?.id || !entry.timeline) return [];
+  const timeline = entry.timeline;
+  const marks = [];
+  const approved = approvedPlanMarkForWorkEntry(entry);
+  if (approved) marks.push(approved);
+
+  const observedIntervals = Array.isArray(entry.own?.observedIntervals) && entry.own.observedIntervals.length
+    ? entry.own.observedIntervals
+    : entry.own?.firstDate && entry.own?.lastDate
+      ? [{ startDay: entry.own.firstDate, endDay: entry.own.lastDate }]
+      : [];
+  observedIntervals.forEach((interval, index) => {
+    marks.push(makeMark(entry, 'observed', interval.startDay, interval.endDay, {
+      dueDay: timeline.ownPlannedDue ?? null,
+      idSuffix: observedIntervals.length > 1 ? index + 1 : null,
+    }));
+  });
+  if (timeline.ownProposedStart && timeline.ownProposedDue) {
+    marks.push(makeMark(entry, 'proposed', timeline.ownProposedStart, timeline.ownProposedDue, {
+      proposedScheduleKind: timeline.ownProposedScheduleKind ?? null,
+      acceptedProposal: timeline.ownProposedExplicit === true,
+    }));
+  }
+  if (timeline.ownForecastStart && timeline.ownForecastDue) {
+    marks.push(makeMark(entry, 'forecast', timeline.ownForecastStart, timeline.ownForecastDue));
+  }
+  return marks;
 }
 
 /** Build source-backed interval marks for one full-projection entry. */
@@ -185,7 +299,10 @@ export function marksForWorkEntry(entry) {
   }
 
   if (timeline.proposedStart && timeline.proposedEnd) {
-    const mark = makeMark(entry, 'proposed', timeline.proposedStart, timeline.proposedEnd);
+    const mark = makeMark(entry, 'proposed', timeline.proposedStart, timeline.proposedEnd, {
+      proposedScheduleKind: timeline.ownProposedScheduleKind ?? null,
+      acceptedProposal: timeline.ownProposedExplicit === true,
+    });
     if (mark) marks.push(mark);
   }
 
@@ -204,6 +321,15 @@ export function primaryWorkMark(marks) {
     if (mark) return mark;
   }
   return null;
+}
+
+export function hasForecastMarks(projection, ids) {
+  const entries = asProjectionMap(projection);
+  const candidates = ids && typeof ids[Symbol.iterator] === 'function' ? ids : entries.keys();
+  for (const id of candidates) {
+    if (marksForWorkEntry(entries.get(id)).some(mark => mark.sourceKind === 'forecast')) return true;
+  }
+  return false;
 }
 
 function asProjectionMap(projection) {
@@ -310,13 +436,94 @@ function sourceEnvelope(marks) {
   const startDay = dated.reduce((earliest, mark) => mark.startDay < earliest ? mark.startDay : earliest, dated[0].startDay);
   const endDay = dated.reduce((latest, mark) => mark.endDay > latest ? mark.endDay : latest, dated[0].endDay);
   const primary = primaryWorkMark(dated);
+  const sourceKinds = MARK_PRIORITY.filter(kind => dated.some(mark => mark.sourceKind === kind));
   return {
     startDay,
     endDay,
-    primaryKind: primary?.sourceKind ?? null,
-    sourceKinds: MARK_PRIORITY.filter(kind => dated.some(mark => mark.sourceKind === kind)),
+    primaryKind: sourceKinds.length > 1 ? 'mixed' : (primary?.sourceKind ?? null),
+    sourceKinds,
     marks: dated,
   };
+}
+
+function nextCalendarDay(day) {
+  const ordinal = dayOrdinal(day);
+  return ordinal === null ? null : shiftedDay(day, 1);
+}
+
+function mergeDayIntervals(intervals) {
+  const sorted = intervals
+    .filter(interval => inOrder(interval?.startDay, interval?.endDay))
+    .sort((left, right) => left.startDay.localeCompare(right.startDay) || left.endDay.localeCompare(right.endDay));
+  const merged = [];
+  for (const interval of sorted) {
+    const previous = merged.at(-1);
+    if (!previous || (nextCalendarDay(previous.endDay) ?? '') < interval.startDay) {
+      merged.push({ startDay: interval.startDay, endDay: interval.endDay });
+    } else if (interval.endDay > previous.endDay) {
+      previous.endDay = interval.endDay;
+    }
+  }
+  return merged;
+}
+
+/**
+ * Collapse source marks into one continuous task span. Scheduled marks provide
+ * the light base range; observed marks remain separate intervals for dark
+ * overlays so gaps in recorded activity stay visible as planned-only time.
+ */
+export function continuousTimelineForMarks(marks = []) {
+  const dated = (Array.isArray(marks) ? marks : [])
+    .filter(mark => inOrder(mark?.startDay, mark?.endDay));
+  if (!dated.length) return null;
+
+  const startDay = dated.reduce((earliest, mark) => mark.startDay < earliest ? mark.startDay : earliest, dated[0].startDay);
+  const endDay = dated.reduce((latest, mark) => mark.endDay > latest ? mark.endDay : latest, dated[0].endDay);
+  const scheduled = dated.filter(mark => mark.sourceKind !== 'observed');
+  const observed = mergeDayIntervals(dated
+    .filter(mark => mark.sourceKind === 'observed')
+    .map(mark => ({ startDay: mark.startDay, endDay: mark.endDay })));
+  const sourceKinds = MARK_PRIORITY.filter(kind => dated.some(mark => mark.sourceKind === kind));
+
+  return {
+    startDay,
+    endDay,
+    scheduledStartDay: scheduled.length
+      ? scheduled.reduce((earliest, mark) => mark.startDay < earliest ? mark.startDay : earliest, scheduled[0].startDay)
+      : null,
+    scheduledEndDay: scheduled.length
+      ? scheduled.reduce((latest, mark) => mark.endDay > latest ? mark.endDay : latest, scheduled[0].endDay)
+      : null,
+    observedIntervals: observed,
+    sourceKinds,
+    marks: dated,
+  };
+}
+
+function directTimelineMarks(entry, showForecast = true) {
+  const direct = directMarksForWorkEntry(entry);
+  const hasChildren = childIdsOf(entry).length > 0;
+  if (hasChildren || direct.some(mark => mark.sourceKind !== 'observed')) {
+    return direct.filter(mark => showForecast || mark.sourceKind !== 'forecast');
+  }
+
+  // Fixtures and older projections may expose only aggregate timeline fields
+  // for a leaf. Preserve those leaf dates without using aggregate parent dates.
+  return marksForWorkEntry(entry).filter(mark => showForecast || mark.sourceKind !== 'forecast');
+}
+
+/** Build one connected timeline mark for an entry and its complete subtree. */
+export function continuousTimelineForWorkEntry(entry, projection, { showForecast = true } = {}) {
+  if (!entry?.id || !(projection instanceof Map)) return null;
+  const subtreeIds = projectionSubtreeIds(buildProjectionChildren(projection), entry.id);
+  const marks = subtreeIds.flatMap(id => directTimelineMarks(projection.get(id), showForecast));
+  const timeline = continuousTimelineForMarks(marks);
+  if (!timeline) return null;
+  const mark = makeMark(entry, 'timeline', timeline.startDay, timeline.endDay);
+  mark.name = 'Work timeline';
+  mark.status = MARK_STATUS.timeline;
+  mark.timeline = timeline;
+  return { ...timeline, mark };
 }
 
 function buildEligibleTree(projection, eligibleIds) {
@@ -462,6 +669,18 @@ function rowPreorder(projection, tree, expandedIds, contextualIds, {
     const subtreeIds = projectionSubtreeIds(projectionChildren, row.id);
     const subtreeMarks = visibleSourceMarks(projection, subtreeIds, showForecast);
     const envelope = sourceEnvelope(subtreeMarks);
+    const descendantIds = subtreeIds.filter(id => id !== row.id);
+    const descendantMarks = visibleSourceMarks(projection, descendantIds, showForecast);
+    const childApprovedEnvelope = sourceEnvelope(descendantMarks.filter(mark => mark.sourceKind === 'approved'));
+    const childObservedEnvelope = sourceEnvelope(descendantMarks.filter(mark => mark.sourceKind === 'observed'));
+    const childProposedEnvelope = sourceEnvelope(descendantMarks.filter(mark => mark.sourceKind === 'proposed' && mark.acceptedProposal === true));
+    const ownApprovedMark = approvedPlanMarkForWorkEntry(row.entry);
+    const childSummaryIncomplete = row.hasChildren && descendantIds.some(descendantId => {
+      const descendant = projection.get(descendantId);
+      if (!descendant) return false;
+      const hasApprovedDates = marksForWorkEntry(descendant).some(mark => mark.sourceKind === 'approved');
+      return !hasApprovedDates || descendant.timeline.partial === true;
+    });
     const immediateChildren = projectionChildren.get(row.id) ?? [];
     const childSummaryIntervals = immediateChildren.flatMap(childId => (
       visibleSourceMarks(projection, [childId], showForecast).map(mark => ({ ...mark, childId }))
@@ -475,8 +694,17 @@ function rowPreorder(projection, tree, expandedIds, contextualIds, {
     row.visibleDescendantRowIndex = row.lastVisibleDescendantRowIndex;
     row.isExpanded = row.hasChildren && !row.collapsed;
     row.subtreeIds = subtreeIds;
+    row.descendantIds = descendantIds;
     row.childSummaryIntervals = childSummaryIntervals;
+    row.childSummaryEnvelope = sourceEnvelope(descendantMarks);
+    row.childApprovedEnvelope = childApprovedEnvelope;
+    row.childObservedEnvelope = childObservedEnvelope;
+    row.childProposedEnvelope = childProposedEnvelope;
+    row.childSummaryIncomplete = childSummaryIncomplete;
+    row.ownApprovedMark = ownApprovedMark;
+    row.ownApprovedIncomplete = row.hasChildren && Boolean(row.entry.timeline.ownPlannedStart) !== Boolean(row.entry.timeline.ownPlannedDue);
     row.parentEnvelope = envelope;
+    row.timelineBar = continuousTimelineForWorkEntry(row.entry, projection, { showForecast });
     row.envelopeStartDay = envelope?.startDay ?? null;
     row.envelopeEndDay = envelope?.endDay ?? null;
     row.envelopePrimaryKind = envelope?.primaryKind ?? null;
@@ -545,6 +773,124 @@ export function workGanttDepthExpansion(projection, eligibleIds, depth = 'all') 
   return { controlledIds, expandedIds };
 }
 
+function ownerKeyOf(row, itemsById) {
+  const item = itemsById.get(row?.id);
+  const value = item?.owner ?? row?.entry?.owner;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized && normalized !== 'unassigned' ? normalized : 'unassigned';
+}
+
+function ownerLabelOf(row, itemsById, ownerKey) {
+  if (ownerKey === 'unassigned') return 'Unassigned';
+  const item = itemsById.get(row?.id);
+  return String(item?.ownerName ?? row?.entry?.ownerName ?? ownerKey).trim() || ownerKey;
+}
+
+function ownerWorkKind(item) {
+  const value = item?.type ?? item?.data?.type;
+  const kind = String(value ?? '').trim().toLowerCase();
+  return kind === 'project' || kind === 'workstream' ? kind : null;
+}
+
+function hasDirectOwnerWork(row, item) {
+  const timeline = row?.entry?.timeline ?? {};
+  const own = row?.entry?.own ?? {};
+  const hasOwnSchedule = Boolean(
+    timeline.ownPlannedStart
+    || timeline.ownPlannedDue
+    || timeline.ownProposedStart
+    || timeline.ownProposedDue,
+  );
+  const hasOwnActivity = Boolean(own.firstDate || own.lastDate || own.evidenceIds?.length);
+  return isAccepted(item) && (hasOwnSchedule || hasOwnActivity);
+}
+
+function isOwnerWorkloadRow(row, item) {
+  if (!row) return false;
+  const directContainerWork = row.hasChildren
+    && ownerWorkKind(item) !== null
+    && hasDirectOwnerWork(row, item);
+  if (directContainerWork) return true;
+  if (row.contextual || item?.contextOnly === true) return false;
+  if (!row.hasChildren) return true;
+  return false;
+}
+
+/**
+ * Build deterministic owner buckets for compact schedule views. Leaf rows and
+ * accepted project/workstream records with their own schedules or evidence
+ * become workload rows; inherited-only hierarchy containers remain context.
+ * Canonical leaf IDs are preserved exactly once and dependency edges continue
+ * to use those IDs.
+ */
+export function buildWorkOwnerGroups(rows = [], itemsById = new Map()) {
+  const itemMap = asItemMap(itemsById);
+  const groups = new Map();
+  for (const row of rows) {
+    const item = itemMap.get(row?.id);
+    if (!isOwnerWorkloadRow(row, item)) continue;
+    const directContainerWork = row.hasChildren
+      && ownerWorkKind(item) !== null
+      && hasDirectOwnerWork(row, item);
+    const ownerKey = ownerKeyOf(row, itemMap);
+    let group = groups.get(ownerKey);
+    if (!group) {
+      group = { id: `owner-group:${ownerKey}`, ownerKey, label: ownerLabelOf(row, itemMap, ownerKey), rows: [] };
+      groups.set(ownerKey, group);
+    }
+    const contextTitles = (row.ancestorIds ?? [])
+      .map(id => itemMap.get(id)?.title ?? rows.find(candidate => candidate.id === id)?.entry?.title)
+      .filter(Boolean);
+    group.rows.push({
+      ...row,
+      contextual: directContainerWork ? false : row.contextual,
+      ownerGroupKey: ownerKey,
+      ownerContextLabel: contextTitles.join(' / ') || null,
+    });
+  }
+  return [...groups.values()].sort((left, right) => left.ownerKey.localeCompare(right.ownerKey));
+}
+
+/** Return rows grouped by owner, including stable non-workload group rows. */
+export function groupWorkGanttRowsByOwner(rows = [], itemsById = new Map()) {
+  const grouped = [];
+  for (const group of buildWorkOwnerGroups(rows, itemsById)) {
+    grouped.push({
+      id: group.id,
+      ownerGroup: true,
+      ownerGroupKey: group.ownerKey,
+      ownerGroupLabel: group.label,
+      ownerGroupCount: group.rows.length,
+      title: group.label,
+      entry: {
+        id: group.id,
+        title: group.label,
+        owner: null,
+        ownerName: null,
+        childIds: [],
+        timeline: {},
+        completed: false,
+      },
+      marks: [],
+      fitMarks: [],
+      primaryMark: null,
+      hasChildren: false,
+      canExpand: false,
+      collapsed: false,
+      contextual: true,
+      depth: 0,
+      ancestorIds: [],
+      visibleDescendantIds: [],
+      childSummaryIntervals: [],
+      eligibleChildCount: 0,
+      undatedChildCount: 0,
+    });
+    grouped.push(...group.rows);
+  }
+  for (const [rowIndex, row] of grouped.entries()) row.rowIndex = rowIndex;
+  return grouped;
+}
+
 /**
  * Thin adapter from the shared projection to fixed-height Gantt rows.
  * Date bounds and marks always read the complete projection; row visibility
@@ -594,12 +940,21 @@ export function workMarkLabel(mark) {
 }
 
 export function workMarkDescription(mark) {
+  if (mark.sourceKind === 'timeline') {
+    const observed = (mark.timeline?.observedIntervals ?? [])
+      .map(interval => interval.startDay === interval.endDay
+        ? interval.startDay
+        : interval.startDay + ' to ' + interval.endDay)
+      .join(', ');
+    return 'Work timeline · ' + mark.startDay + ' to ' + mark.endDay
+      + (observed ? ' · recorded activity ' + observed : ' · no recorded activity');
+  }
   const label = mark.sourceKind === 'approved'
     ? mark.point ? 'Approved due date' : mark.inferred ? 'Approved plan with inferred display start' : 'Approved plan'
     : mark.sourceKind === 'observed'
       ? 'Observed activity' + (mark.observedOverrun ? ' after approved due date' : '')
       : mark.sourceKind === 'proposed'
-        ? 'Proposed schedule'
+        ? proposedScheduleLabel(mark.proposedScheduleKind)
         : 'Forecast';
   const overdue = mark.sourceKind === 'approved' && mark.overdueCalendarDays > 0
     ? ' · ' + mark.overdueCalendarDays + ' calendar days overdue'

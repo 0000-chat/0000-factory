@@ -1,0 +1,899 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { parseInstanceConfig } from '../tooling/instance/config.mjs';
+import { readTeamProjection, TeamProjectionInputError } from '../tooling/team-projection/reader.mjs';
+import { buildTeamProjectionSnapshot } from '../tooling/team-projection/snapshot.mjs';
+import { buildTeamProjectionPlanningArchive } from '../tooling/team-projection/presentation.mjs';
+import { parsePlanningArchive } from '../tooling/planning/archive.mjs';
+import { taskCodeForId } from '../tooling/tracker/task-codes.mjs';
+import { buildSnapshot } from '../tracker/viewer/tooling/build.mjs';
+
+const ENGINE_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+
+const DIGEST = `sha256:${'a'.repeat(64)}`;
+const EMPTY_DIGEST = `sha256:${'0'.repeat(64)}`;
+const LINK_POLICY = {
+  allowedEvidenceHosts: ['example.com', 'example.test', 'team.example.test', 'github.com'],
+  forbiddenGitHubRepositories: ['synthetic-org/private-strategy'],
+};
+
+function teamSettings(overrides = {}) {
+  return parseInstanceConfig({
+    schemaVersion: 1,
+    id: 'team-fixture',
+    branding: {
+      name: 'Team fixture', title: 'Team fixture', description: 'Team projection fixture',
+      markText: 'TEAM', homeLabel: 'Team fixture', loadingLabel: 'Loading team fixture', faviconPath: 'assets/favicon.svg',
+    },
+    github: { owner: 'fixture', repo: 'team-data', branch: 'main' },
+    data: {
+      folderPath: '', layout: 'team-projection-v1', projectionPath: 'team/projection.json',
+      evidence: { kind: 'none' }, projectionLinkPolicy: { allowedEvidenceHosts: ['example.com'], forbiddenGitHubRepositories: [] },
+      directoryRosterDigest: digest(['person-1']),
+    },
+    model: { approvalProtocol: 'don-v1' },
+    browser: {
+      namespace: 'team-fixture', storeId: 'team-fixture-store', themeKey: 'team-fixture-theme',
+      editLockPrefix: 'team-fixture-edit', publishLockName: 'team-fixture-publish',
+      unscheduledCollapsedKey: 'team-fixture.unscheduled', activityPausedKey: 'team-fixture.activity',
+    },
+    access: { kind: 'unconfigured' },
+    publish: { kind: 'disabled' },
+    deployment: {
+      accountBinding: 'fixture-account', workerName: 'team-fixture', customDomain: 'team.fixture.test',
+      compatibilityDate: '2026-09-30', compatibilityFlags: ['nodejs_compat'],
+    },
+    ...overrides,
+  });
+}
+
+function projection(tasks = []) {
+  return {
+    schemaVersion: 1,
+    kind: 'team-projection',
+    projectionId: '2026-W41-r1-team',
+    week: '2026-W41',
+    revision: 'r1',
+    policyRevision: 'sharing-v1',
+    sourcePlanDigest: DIGEST,
+    generatedAt: '2026-10-11T00:00:00Z',
+    tasks,
+    omissions: [],
+  };
+}
+
+function task(taskId, overrides = {}) {
+  return {
+    taskId,
+    title: `Task ${taskId}`,
+    scope: 'A public scope',
+    completionCondition: 'The public condition is met.',
+    assignee: 'person-1',
+    reviewer: 'reviewer-1',
+    status: 'started',
+    nextStep: 'Continue the public next step.',
+    approvedDate: null,
+    forecastDate: '2026-10-18',
+    checkpoint: null,
+    dependencies: [{ summary: 'A public dependency summary.' }],
+    evidenceLinks: ['https://example.com/evidence'],
+    ...overrides,
+  };
+}
+
+function standingProjection(tasks = [standingTask()]) {
+  return {
+    schemaVersion: 1,
+    kind: 'standing-team-projection',
+    projectionId: 'standing-team-projection',
+    revision: 'r-standing-1',
+    policyRevision: 'team-v1',
+    generatedAt: '2026-10-11T00:00:00Z',
+    tasks,
+    gaps: tasks.length ? [{ taskId: tasks[0].taskId, field: 'description', reason: 'public-boundary', message: 'No private detail is exported.' }] : [],
+    audit: {
+      rule: 'assignee-approved-roster-unless-private',
+      policyDigest: DIGEST,
+      rosterDigest: DIGEST,
+      fieldsDigest: DIGEST,
+      approvalDigest: null,
+      decisionId: null,
+      approvalState: 'preview',
+    },
+    publish: {
+      initialProjectionDigest: DIGEST,
+      reviewed: false,
+      activationEnabled: false,
+    },
+  };
+}
+
+function standingTask(overrides = {}) {
+  return {
+    taskId: 'standing-task',
+    title: 'Standing public task',
+    description: 'A public standing task description.',
+    assignee: 'person-1',
+    reviewer: 'reviewer-1',
+    status: 'active',
+    nextStep: 'Continue the public standing work.',
+    completionCriteria: 'The public standing condition is met.',
+    deadline: { label: 'approved', date: '2026-10-18' },
+    ...overrides,
+  };
+}
+
+function canonicalValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalValue(value[key])]));
+  return value;
+}
+
+function digest(value) {
+  return `sha256:${createHash('sha256').update(JSON.stringify(canonicalValue(value))).digest('hex')}`;
+}
+
+function fullTaskProjection(tasks = [
+  {
+    taskId: 'owned-task', title: 'Owned task', description: 'A safe team description.', assignee: 'person-1', reviewer: null,
+    status: 'active', nextStep: 'Review the public design.', completionCriteria: 'The review is recorded.', deadline: null, parentId: 'project-alpha',
+  },
+  {
+    taskId: 'unassigned-task', title: 'Unassigned task', description: 'A safe team description.', assignee: null, reviewer: null,
+    status: 'queued', nextStep: 'Choose an owner.', completionCriteria: 'An owner is recorded.', deadline: null, parentId: 'project-alpha',
+  },
+]) {
+  const contextNodes = [{ id: 'project-alpha', kind: 'project', title: 'Project Alpha', parentId: null }];
+  const fields = ['taskId', 'title', 'description', 'assignee', 'reviewer', 'status', 'nextStep', 'completionCriteria', 'deadline'];
+  const scope = {
+    mode: 'one-time-current-task-copy', scope: 'all-current-canonical-task-records', sourceTaskKind: 'task',
+    includesDonOwned: true, includesUnassigned: true, privateRule: 'private-true-excluded',
+  };
+  const policy = {
+    ...scope,
+    policyRevision: 'manual-full-current-task-copy-v1',
+    hierarchyVersion: 1,
+    hierarchyContextFields: ['id', 'kind', 'title', 'parentId'],
+    fields: [...fields].sort(),
+  };
+  const value = {
+    schemaVersion: 1,
+    kind: 'full-task-projection',
+    projectionId: 'full-task-projection',
+    revision: 'r-full-task-projection',
+    policyRevision: 'manual-full-current-task-copy-v1',
+    generatedAt: '2026-10-11T00:00:00Z',
+    hierarchyVersion: 1,
+    contextNodes,
+    tasks,
+    gaps: [],
+    audit: {
+      ...scope,
+      fieldsDigest: digest([...fields].sort()),
+      scopeDigest: digest(scope),
+      policyDigest: digest(policy),
+      selectionDigest: digest({ ...scope, taskIds: tasks.map(task => task.taskId).sort() }),
+      taskIdsDigest: digest(tasks.map(task => task.taskId).sort()),
+      taskCount: tasks.length,
+      contextNodeCount: contextNodes.length,
+      approvalState: 'preview',
+      decisionId: null,
+    },
+    publish: { initialProjectionDigest: null, reviewed: false, activationEnabled: false },
+  };
+  value.publish.initialProjectionDigest = digest({ ...value, publish: { ...value.publish, initialProjectionDigest: null } });
+  return value;
+}
+
+function directoryOnlyCompanion(projectionValue, overrides = {}) {
+  const value = {
+    schemaVersion: 1,
+    kind: 'team-safe-companion',
+    mode: 'directory-only-v3',
+    projectionDigest: digest({ ...projectionValue, publish: { ...projectionValue.publish, initialProjectionDigest: null } }),
+    projectionRevision: projectionValue.revision,
+    policyRevision: projectionValue.policyRevision,
+    generatedAt: '2026-10-12T00:00:00Z',
+    directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }],
+    schedules: [],
+    taskMetadata: [],
+    audit: {
+      directoryRule: 'approved-roster-safe-display-metadata-only',
+      scheduleRule: 'directory-only-no-task-schedules',
+      sourceTaskCount: projectionValue.tasks.length,
+      rosterDigest: digest(['person-1']),
+    },
+    publish: { reviewed: false, activationEnabled: false },
+    ...overrides,
+  };
+  return { ...value, companionDigest: digest(value) };
+}
+
+function standingCompanion(projectionValue, overrides = {}) {
+  const value = {
+    schemaVersion: 1,
+    kind: 'team-safe-companion',
+    projectionDigest: digest({ ...projectionValue, publish: { ...projectionValue.publish, initialProjectionDigest: null } }),
+    projectionRevision: projectionValue.revision,
+    policyRevision: projectionValue.policyRevision,
+    generatedAt: '2026-10-12T00:00:00Z',
+    directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }],
+    schedules: [],
+    taskMetadata: [],
+    audit: {
+      directoryRule: 'approved-roster-safe-display-metadata-only',
+      scheduleRule: 'approved-endpoint-only-with-existing-task-proof',
+      sourceTaskCount: projectionValue.tasks.length,
+      rosterDigest: digest(['person-1']),
+    },
+    publish: { reviewed: false, activationEnabled: false },
+    ...overrides,
+  };
+  return { ...value, companionDigest: digest(value) };
+}
+
+function writeFixture(value) {
+  const root = mkdtempSync(join(tmpdir(), 'team-projection-'));
+  mkdirSync(join(root, 'assets'), { recursive: true });
+  mkdirSync(join(root, 'team'), { recursive: true });
+  writeFileSync(join(root, 'assets/favicon.svg'), '<svg/>\n');
+  writeFileSync(join(root, 'team/projection.json'), `${JSON.stringify(value)}\n`);
+  return root;
+}
+
+function writeBuildFixture(projectionValue, companionValue) {
+  const root = writeFixture(projectionValue);
+  const instance = teamSettings();
+  mkdirSync(join(root, 'assets', 'avatars'), { recursive: true });
+  writeFileSync(join(root, 'assets', 'avatars', 'person-1.webp'), 'synthetic avatar bytes\n');
+  writeFileSync(join(root, 'team', 'companion.json'), `${JSON.stringify(companionValue)}\n`);
+  writeFileSync(join(root, 'settings.json'), `${JSON.stringify(teamSettings({
+    data: { ...instance.data, companionPath: 'team/companion.json' },
+  }), null, 2)}\n`);
+  return root;
+}
+
+test('team settings use a strict projection path and disable controls', () => {
+  const instance = teamSettings();
+  assert.equal(instance.data.layout, 'team-projection-v1');
+  assert.equal(instance.data.projectionPath, 'team/projection.json');
+  assert.equal(instance.data.companionPath, null);
+  assert.deepEqual(instance.data.projectionLinkPolicy, { allowedEvidenceHosts: ['example.com'], forbiddenGitHubRepositories: [] });
+  const companion = teamSettings({ data: { ...instance.data, companionPath: 'team/companion.json' } });
+  assert.equal(companion.data.companionPath, 'team/companion.json');
+  assert.equal(instance.publish.kind, 'disabled');
+  assert.throws(() => teamSettings({ publish: { kind: 'github-app' } }), /disabled publishing/);
+  assert.throws(() => teamSettings({ access: { kind: 'ready', teamDomain: 'https://team.fixture.test', audience: 'team', readerEmails: ['reader@fixture.test'], service: { kind: 'enabled', clientId: 'svc' } } }), /disabled Access service/);
+  assert.throws(() => teamSettings({ data: { folderPath: '', layout: 'team-projection-v1', projectionPath: '../private.json', evidence: { kind: 'none' } } }), /projectionPath/);
+  assert.throws(() => teamSettings({ data: { folderPath: '', layout: 'team-projection-v1', projectionPath: 'team/%2e%2e/private.json', evidence: { kind: 'none' } } }), /projectionPath/);
+  for (const companionPath of ['../private.json', 'team/%2e%2e/private.json', '/absolute.json', 'team//companion.json']) {
+    assert.throws(() => teamSettings({ data: { ...instance.data, companionPath } }), /companionPath/);
+  }
+  assert.throws(() => teamSettings({ data: { folderPath: '', layout: 'team-projection-v1', projectionPath: 'team/projection.json', evidence: { kind: 'grok-bot-v1' } } }), /must not load evidence/);
+  assert.throws(() => teamSettings({ data: { folderPath: '', layout: 'team-projection-v1', projectionPath: 'team/projection.json', evidence: { kind: 'none' }, projectionLinkPolicy: { allowedEvidenceHosts: ['127.0.0.1'], forbiddenGitHubRepositories: [] } } }), /public DNS evidence host/);
+  assert.throws(() => teamSettings({ data: { folderPath: '', layout: 'team-projection-v1', projectionPath: 'team/projection.json', evidence: { kind: 'none' }, projectionLinkPolicy: { allowedEvidenceHosts: ['example.com'], forbiddenGitHubRepositories: ['bad repository'] } } }), /invalid format/);
+  assert.throws(() => teamSettings({ data: { folderPath: '', layout: 'team-projection-v1', projectionPath: 'team/projection.json', evidence: { kind: 'none' }, projectionLinkPolicy: { allowedEvidenceHosts: ['example.com'], forbiddenGitHubRepositories: [], extra: true } } }), /unknown field/);
+});
+
+test('reader accepts only the public projection and adapter returns an empty-canonical snapshot', () => {
+  const root = writeFixture(projection([task('public-task')]));
+  const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json', linkPolicy: LINK_POLICY });
+  assert.equal(loaded.projection.tasks[0].taskId, 'public-task');
+  const snapshot = buildTeamProjectionSnapshot(loaded.projection, { commit: 'unknown', builtAt: '2026-10-11T00:00:00Z' });
+  assert.equal(snapshot.schemaVersion, 4);
+  assert.equal(snapshot.source.layout, 'team-projection-v1');
+  assert.equal(snapshot.items.length, 1);
+  assert.equal(snapshot.items[0].referenceCode, taskCodeForId('public-task'));
+  assert.equal(snapshot.items[0].referenceCode, 'T-QQQWCA');
+  assert.equal(snapshot.items[0].sections.outcome, 'A public scope');
+  assert.equal(snapshot.items[0].updatedAt, null);
+  assert.equal(snapshot.items[0].completedAt, null);
+  assert.equal(snapshot.items[0].sections.reviewer, 'reviewer-1');
+  assert.deepEqual(snapshot.items[0].teamProjection.dependencies, ['A public dependency summary.']);
+  assert.equal(snapshot.items[0].approval.approvalRef, undefined);
+  assert.equal(snapshot.decisions.length, 0);
+  assert.equal(snapshot.history.length, 0);
+  assert.equal(snapshot.deliveryRecords.length, 0);
+  assert.equal(snapshot.items[0].sourcePath, null);
+  const archive = buildTeamProjectionPlanningArchive(loaded.projection);
+  assert.equal(archive.entries.length, 1);
+  assert.equal(archive.currentDraftId, null);
+  assert.equal(archive.latestApprovedId, null);
+  assert.equal(archive.entries[0].status, 'blocked');
+  assert.equal(archive.entries[0].presentationKind, 'team-projection');
+  assert.equal(archive.entries[0].plan.presentationKind, 'team-projection');
+  assert.equal(archive.entries[0].coverage.complete, false);
+  assert.equal(Object.hasOwn(archive.entries[0], 'approvalReceipts'), false);
+  assert.equal(Object.hasOwn(archive.entries[0].plan, 'canonicalTaskRefs'), false);
+  assert.equal(archive.entries[0].plan.outcomes[0].projectionTaskId, 'public-task');
+  assert.deepEqual(archive.entries[0].plan.approvalRefs, []);
+  assert.doesNotThrow(() => parsePlanningArchive(archive));
+});
+
+test('team projection gives every task and context row a stable code and rejects collisions', () => {
+  const snapshot = buildTeamProjectionSnapshot({
+    ...projection([task('fixture-project', { parentId: 'fixture-context' })]),
+    contextNodes: [{ id: 'fixture-context', kind: 'project', title: 'Fixture context', parentId: null }],
+  });
+  assert.equal(snapshot.items.find(item => item.id === 'fixture-project')?.referenceCode, taskCodeForId('fixture-project'));
+  assert.equal(snapshot.items.find(item => item.id === 'fixture-context')?.referenceCode, taskCodeForId('fixture-context'));
+  assert.ok(snapshot.items.every(item => item.referenceCode));
+
+  assert.throws(() => buildTeamProjectionSnapshot(projection([
+    task('collision-canonical-13753'),
+    task('collision-canonical-34460'),
+  ])), /task reference code collision: T-47XGK6/u);
+});
+
+test('reader normalizes the standing projection contract without exporting audit or publish metadata', () => {
+  const root = writeFixture(standingProjection());
+  const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json' });
+  assert.equal(loaded.projection.kind, 'team-projection');
+  assert.equal(loaded.projection.week, '2026-W41');
+  assert.match(loaded.projection.sourcePlanDigest, /^sha256:[a-f0-9]{64}$/u);
+  assert.equal(loaded.projection.tasks[0].scope, 'A public standing task description.');
+  assert.equal(loaded.projection.tasks[0].completionCondition, 'The public standing condition is met.');
+  assert.equal(loaded.projection.tasks[0].status, 'active');
+  assert.equal(loaded.projection.tasks[0].approvedDate, '2026-10-18');
+  assert.equal(loaded.projection.tasks[0].forecastDate, null);
+  assert.deepEqual(loaded.projection.tasks[0].dependencies, []);
+  assert.deepEqual(loaded.projection.tasks[0].evidenceLinks, []);
+
+  const snapshot = buildTeamProjectionSnapshot(loaded.projection);
+  assert.equal(snapshot.items[0].status, 'active');
+  assert.equal(snapshot.items[0].sections.outcome, 'A public standing task description.');
+  assert.equal(snapshot.items[0].schedule.plannedEnd, '2026-10-18');
+  assert.equal(JSON.stringify(snapshot).includes('approvalDigest'), false);
+  assert.equal(JSON.stringify(snapshot).includes('activationEnabled'), false);
+  assert.equal(snapshot.history.length, 0);
+  assert.equal(snapshot.decisions.length, 0);
+
+  const archive = buildTeamProjectionPlanningArchive(loaded.projection);
+  assert.equal(archive.entries[0].week, '2026-W41');
+  assert.equal(archive.entries[0].plan.outcomes[0].status, 'active');
+  assert.equal(archive.entries[0].plan.outcomes[0].approvedDate, '2026-10-18');
+  assert.equal(JSON.stringify(archive).includes('approvalDigest'), false);
+  assert.doesNotThrow(() => parsePlanningArchive(archive));
+});
+
+test('reader normalizes the explicit full current-task copy without applying the standing roster rule', () => {
+  const root = writeFixture(fullTaskProjection());
+  const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json' });
+  assert.equal(loaded.projection.kind, 'team-projection');
+  assert.equal(loaded.projection.policyRevision, 'manual-full-current-task-copy-v1');
+  assert.deepEqual(loaded.projection.tasks.map(task => task.taskId), ['owned-task', 'unassigned-task']);
+  assert.equal(loaded.projection.tasks[0].assignee, 'person-1');
+  assert.equal(loaded.projection.tasks[1].assignee, null);
+  assert.equal(loaded.projection.tasks[0].parentId, 'project-alpha');
+  assert.deepEqual(loaded.projection.contextNodes, [{ id: 'project-alpha', kind: 'project', title: 'Project Alpha', parentId: null }]);
+
+  const snapshot = buildTeamProjectionSnapshot(loaded.projection);
+  const project = snapshot.items.find(item => item.id === 'project-alpha');
+  const ownedTask = snapshot.items.find(item => item.id === 'owned-task');
+  const unassignedTask = snapshot.items.find(item => item.id === 'unassigned-task');
+  assert.equal(project.contextOnly, true);
+  assert.equal(ownedTask.owner, 'person-1');
+  assert.equal(unassignedTask.owner, null);
+  assert.deepEqual(project.childIds, ['owned-task', 'unassigned-task']);
+  assert.equal(JSON.stringify(snapshot).includes('approvalState'), false);
+  assert.equal(JSON.stringify(snapshot).includes('private-true-excluded'), false);
+  const archive = buildTeamProjectionPlanningArchive(loaded.projection);
+  assert.equal(archive.entries[0].plan.outcomes.length, 2);
+  assert.deepEqual(archive.entries[0].plan.outcomes.map(outcome => outcome.owner), [{ personId: 'person-1' }, null]);
+  assert.equal(archive.latestApprovedId, null);
+});
+
+test('full current-task copy keeps strict fields and team-text safety', () => {
+  const unsafe = fullTaskProjection();
+  unsafe.tasks[0].description = 'api_key=sk-live-example';
+  unsafe.publish.initialProjectionDigest = digest({ ...unsafe, publish: { ...unsafe.publish, initialProjectionDigest: null } });
+  const unsafeRoot = writeFixture(unsafe);
+  assert.throws(() => readTeamProjection({ dataRoot: unsafeRoot, projectionPath: 'team/projection.json' }), /team-safe string/u);
+
+  const unknownField = fullTaskProjection();
+  unknownField.tasks[0].privateNotes = 'must not cross the boundary';
+  unknownField.publish.initialProjectionDigest = digest({ ...unknownField, publish: { ...unknownField.publish, initialProjectionDigest: null } });
+  const unknownFieldRoot = writeFixture(unknownField);
+  assert.throws(() => readTeamProjection({ dataRoot: unknownFieldRoot, projectionPath: 'team/projection.json' }), /unknown field|private\/control/u);
+
+  const invalidOwner = fullTaskProjection();
+  invalidOwner.tasks[0].assignee = '';
+  invalidOwner.publish.initialProjectionDigest = digest({ ...invalidOwner, publish: { ...invalidOwner.publish, initialProjectionDigest: null } });
+  const invalidOwnerRoot = writeFixture(invalidOwner);
+  assert.throws(() => readTeamProjection({ dataRoot: invalidOwnerRoot, projectionPath: 'team/projection.json' }), /exact canonical ID or null/u);
+});
+
+test('standing hierarchy preserves safe ancestor context while keeping task fields explicit', () => {
+  const project = { id: 'project-alpha', title: 'Project Alpha', kind: 'project', parentId: null };
+  const workstream = { id: 'workstream-alpha', title: 'Workstream Alpha', kind: 'workstream', parentId: project.id };
+  const hierarchical = {
+    ...standingProjection([standingTask({ taskId: 'task-alpha', parentId: workstream.id })]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [project, workstream],
+  };
+  const root = writeFixture(hierarchical);
+  const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json' });
+  assert.equal(loaded.projection.tasks[0].parentId, workstream.id);
+  assert.deepEqual(loaded.projection.contextNodes, [project, workstream]);
+
+  const snapshot = buildTeamProjectionSnapshot(loaded.projection);
+  assert.deepEqual(snapshot.rootsByBucket.other, [project.id]);
+  assert.deepEqual(snapshot.defaultExpanded, [project.id, workstream.id]);
+  const projectItem = snapshot.items.find(item => item.id === project.id);
+  const workstreamItem = snapshot.items.find(item => item.id === workstream.id);
+  const taskItem = snapshot.items.find(item => item.id === 'task-alpha');
+  assert.equal(projectItem.contextOnly, true);
+  assert.equal(projectItem.status, '');
+  assert.equal(projectItem.type, 'project');
+  assert.equal(projectItem.parent, null);
+  assert.deepEqual(projectItem.childIds, [workstream.id]);
+  assert.equal(workstreamItem.contextOnly, true);
+  assert.equal(workstreamItem.parent, project.id);
+  assert.deepEqual(workstreamItem.childIds, ['task-alpha']);
+  assert.equal(taskItem.contextOnly, undefined);
+  assert.equal(taskItem.type, 'task');
+  assert.equal(taskItem.parent, workstream.id);
+  assert.equal(taskItem.teamProjection.parentId, workstream.id);
+});
+
+test('standing hierarchy accepts a mixed task and context ancestor chain', () => {
+  const hierarchical = {
+    ...standingProjection([
+      standingTask({ taskId: 'eligible-grandparent', parentId: null }),
+      standingTask({ taskId: 'eligible-child', parentId: 'context-parent' }),
+    ]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [{ id: 'context-parent', title: 'Parent Context', kind: 'task', parentId: 'eligible-grandparent' }],
+  };
+  const root = writeFixture(hierarchical);
+  const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json' });
+  const snapshot = buildTeamProjectionSnapshot(loaded.projection);
+  assert.deepEqual(snapshot.rootsByBucket.other, ['eligible-grandparent']);
+  assert.deepEqual(snapshot.items.find(item => item.id === 'eligible-grandparent')?.childIds, ['context-parent']);
+  assert.deepEqual(snapshot.items.find(item => item.id === 'context-parent')?.childIds, ['eligible-child']);
+  assert.equal(snapshot.items.find(item => item.id === 'context-parent')?.parent, 'eligible-grandparent');
+  assert.equal(snapshot.items.find(item => item.id === 'eligible-child')?.parent, 'context-parent');
+});
+
+test('standing projection validates its explicit public contract and disabled publish barrier', () => {
+  const invalidTaskField = standingProjection();
+  invalidTaskField.tasks[0].scope = 'legacy field is not standing input';
+  const invalidFieldRoot = writeFixture(invalidTaskField);
+  assert.throws(() => readTeamProjection({ dataRoot: invalidFieldRoot, projectionPath: 'team/projection.json' }), /unknown field/u);
+
+  const v1HierarchyField = standingProjection();
+  v1HierarchyField.tasks[0].parentId = null;
+  const v1HierarchyFieldRoot = writeFixture(v1HierarchyField);
+  assert.throws(() => readTeamProjection({ dataRoot: v1HierarchyFieldRoot, projectionPath: 'team/projection.json' }), /unknown field/u);
+
+  const invalidPublish = standingProjection();
+  invalidPublish.publish.activationEnabled = true;
+  const invalidPublishRoot = writeFixture(invalidPublish);
+  assert.throws(() => readTeamProjection({ dataRoot: invalidPublishRoot, projectionPath: 'team/projection.json' }), /disabled initial publish barrier/u);
+
+  const invalidDeadline = standingProjection();
+  invalidDeadline.tasks[0].deadline.privateNotes = 'must not be accepted';
+  const invalidDeadlineRoot = writeFixture(invalidDeadline);
+  assert.throws(() => readTeamProjection({ dataRoot: invalidDeadlineRoot, projectionPath: 'team/projection.json' }), /unknown field|private\/control/u);
+
+  const invalidGap = standingProjection();
+  invalidGap.gaps[0].taskId = 'missing-standing-task';
+  const invalidGapRoot = writeFixture(invalidGap);
+  assert.throws(() => readTeamProjection({ dataRoot: invalidGapRoot, projectionPath: 'team/projection.json' }), /known task ID/u);
+
+  const privateStanding = standingProjection();
+  privateStanding.tasks[0].description = 'password: private-value';
+  const privateStandingRoot = writeFixture(privateStanding);
+  assert.throws(() => readTeamProjection({ dataRoot: privateStandingRoot, projectionPath: 'team/projection.json' }), /team-safe string/u);
+
+  const unknownParent = {
+    ...standingProjection([standingTask({ parentId: 'missing-parent' })]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [],
+  };
+  const unknownParentRoot = writeFixture(unknownParent);
+  assert.throws(() => readTeamProjection({ dataRoot: unknownParentRoot, projectionPath: 'team/projection.json' }), /must reference a task or context ancestor node/u);
+
+  const cyclicContext = {
+    ...standingProjection([standingTask({ parentId: 'context-a' })]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [
+      { id: 'context-a', title: 'Context A', kind: 'workstream', parentId: 'context-b' },
+      { id: 'context-b', title: 'Context B', kind: 'project', parentId: 'context-a' },
+    ],
+  };
+  const cyclicContextRoot = writeFixture(cyclicContext);
+  assert.throws(() => readTeamProjection({ dataRoot: cyclicContextRoot, projectionPath: 'team/projection.json' }), /parent cycle/u);
+
+  const unreferencedContext = {
+    ...standingProjection([standingTask({ taskId: 'task-without-context', parentId: null })]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [{ id: 'unreferenced-context', title: 'Unreferenced Context', kind: 'project', parentId: null }],
+  };
+  const unreferencedContextRoot = writeFixture(unreferencedContext);
+  assert.throws(() => readTeamProjection({ dataRoot: unreferencedContextRoot, projectionPath: 'team/projection.json' }), /must be an ancestor of a shared task/u);
+
+  const taskContextCollision = {
+    ...standingProjection([standingTask({ taskId: 'same-node', parentId: null })]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [{ id: 'same-node', title: 'Same Node', kind: 'project', parentId: null }],
+  };
+  const taskContextCollisionRoot = writeFixture(taskContextCollision);
+  assert.throws(() => readTeamProjection({ dataRoot: taskContextCollisionRoot, projectionPath: 'team/projection.json' }), /collides with task or context ID/u);
+
+  const privateContext = {
+    ...standingProjection([standingTask({})]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [{ id: 'context-private', title: 'Private', kind: 'project', parentId: null, privateNotes: 'must not cross boundary' }],
+  };
+  const privateContextRoot = writeFixture(privateContext);
+  assert.throws(() => readTeamProjection({ dataRoot: privateContextRoot, projectionPath: 'team/projection.json' }), /unknown field|private\/control/u);
+});
+
+test('standing projection builds the production viewer payload and browser archive contract', () => {
+  const root = writeFixture(standingProjection());
+  const output = mkdtempSync(join(tmpdir(), 'standing-projection-output-'));
+  try {
+    writeFileSync(join(root, 'settings.json'), `${JSON.stringify(teamSettings(), null, 2)}\n`);
+    const result = buildSnapshot({
+      engineRoot: ENGINE_ROOT,
+      instancePath: join(root, 'settings.json'),
+      dataRepo: root,
+      output,
+      builtAt: '2026-10-11T00:00:00Z',
+    });
+    const dataText = readFileSync(join(output, 'assets/data.json'), 'utf8');
+    const data = JSON.parse(dataText);
+    const archive = parsePlanningArchive(JSON.parse(readFileSync(join(output, 'assets/planning/archive.json'), 'utf8')));
+    assert.equal(result.data.source.week, '2026-W41');
+    assert.equal(data.items.length, 1);
+    assert.equal(data.items[0].status, 'active');
+    assert.equal(data.items[0].sections.outcome, 'A public standing task description.');
+    assert.equal(dataText.includes('approvalDigest'), false);
+    assert.equal(dataText.includes('activationEnabled'), false);
+    assert.equal(archive.entries.length, 1);
+    assert.equal(archive.entries[0].plan.outcomes[0].approvedDate, '2026-10-18');
+    assert.equal(archive.entries[0].plan.outcomes[0].status, 'active');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(output, { recursive: true, force: true });
+  }
+});
+
+test('hierarchical standing projection builds context rows and breadcrumbs without private task data', () => {
+  const hierarchical = {
+    ...standingProjection([standingTask({ taskId: 'task-alpha', parentId: 'workstream-alpha' })]),
+    schemaVersion: 2,
+    policyRevision: 'standing-sharing-v2',
+    hierarchyVersion: 1,
+    contextNodes: [
+      { id: 'project-alpha', title: 'Project Alpha', kind: 'project', parentId: null },
+      { id: 'workstream-alpha', title: 'Workstream Alpha', kind: 'workstream', parentId: 'project-alpha' },
+    ],
+  };
+  const root = writeFixture(hierarchical);
+  const output = mkdtempSync(join(tmpdir(), 'standing-hierarchy-output-'));
+  try {
+    writeFileSync(join(root, 'settings.json'), `${JSON.stringify(teamSettings(), null, 2)}\n`);
+    buildSnapshot({
+      engineRoot: ENGINE_ROOT,
+      instancePath: join(root, 'settings.json'),
+      dataRepo: root,
+      output,
+      builtAt: '2026-10-11T00:00:00Z',
+    });
+    const dataText = readFileSync(join(output, 'assets/data.json'), 'utf8');
+    const data = JSON.parse(dataText);
+    const byId = new Map(data.items.map(item => [item.id, item]));
+    assert.deepEqual(data.rootsByBucket.other, ['project-alpha']);
+    assert.deepEqual(data.defaultExpanded, ['project-alpha', 'workstream-alpha']);
+    assert.equal(byId.get('project-alpha').contextOnly, true);
+    assert.equal(byId.get('project-alpha').parent, null);
+    assert.equal(byId.get('workstream-alpha').parent, 'project-alpha');
+    assert.equal(byId.get('task-alpha').parent, 'workstream-alpha');
+    assert.equal(byId.get('task-alpha').contextOnly, undefined);
+    assert.equal(dataText.includes('approvalDigest'), false);
+    assert.equal(dataText.includes('activationEnabled'), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(output, { recursive: true, force: true });
+  }
+});
+
+test('directory-only v3 survives the production build without mutating full-copy tasks', () => {
+  const projectionValue = fullTaskProjection([
+    {
+      taskId: 'approved-task', title: 'Approved task', description: 'Approved description', assignee: 'person-1', reviewer: null,
+      status: 'active', nextStep: 'Review the approved work.', completionCriteria: 'The approved review is recorded.',
+      deadline: { label: 'approved', date: '2026-10-20' }, parentId: 'project-alpha',
+    },
+    {
+      taskId: 'forecast-task', title: 'Forecast task', description: 'Forecast description', assignee: null, reviewer: 'person-1',
+      status: 'queued', nextStep: 'Choose a forecast owner.', completionCriteria: 'The forecast owner is recorded.',
+      deadline: { label: 'forecast', date: '2026-10-27' }, parentId: 'project-alpha',
+    },
+  ]);
+  const companionValue = directoryOnlyCompanion(projectionValue);
+  const root = writeBuildFixture(projectionValue, companionValue);
+  const output = mkdtempSync(join(tmpdir(), 'directory-only-v3-output-'));
+  const rejectedOutput = mkdtempSync(join(tmpdir(), 'directory-only-v3-rejected-'));
+  try {
+    const result = buildSnapshot({
+      engineRoot: ENGINE_ROOT,
+      instancePath: join(root, 'settings.json'),
+      dataRepo: root,
+      output,
+      builtAt: '2026-10-12T00:00:00Z',
+    });
+    const data = JSON.parse(readFileSync(join(output, 'assets/data.json'), 'utf8'));
+    assert.equal(data.people.length, 1);
+    assert.equal(data.people[0].id, 'person-1');
+    assert.equal(data.people[0].avatarUrl, '/avatars/person-1.webp');
+    assert.equal(data.team.length, 1);
+    assert.deepEqual(data.plans, []);
+    assert.ok(data.items.every(item => item.proposal === null));
+    assert.equal(result.planningArchive.entries[0].plan.proposals.length, 0);
+
+    const itemById = new Map(data.items.map(item => [item.id, item]));
+    for (const sourceTask of projectionValue.tasks) {
+      const item = itemById.get(sourceTask.taskId);
+      assert.ok(item, `missing built task ${sourceTask.taskId}`);
+      const approvedDate = sourceTask.deadline?.label === 'approved' ? sourceTask.deadline.date : null;
+      const forecastDate = sourceTask.deadline?.label === 'forecast' ? sourceTask.deadline.date : null;
+      assert.deepEqual({
+        taskId: item.teamProjection.taskId,
+        title: item.title,
+        description: item.sections.outcome,
+        assignee: item.teamProjection.assignee,
+        reviewer: item.teamProjection.reviewer,
+        status: item.status,
+        nextStep: item.sections.nextStep,
+        completionCriteria: item.sections.completionCondition,
+        deadline: sourceTask.deadline,
+        parentId: item.teamProjection.parentId,
+        approvedDate: item.teamProjection.approvedDate,
+        forecastDate: item.teamProjection.forecastDate,
+        plannedEnd: item.schedule.plannedEnd,
+        forecastEndMin: item.schedule.forecastEndMin,
+        forecastEndMax: item.schedule.forecastEndMax,
+      }, {
+        taskId: sourceTask.taskId,
+        title: sourceTask.title,
+        description: sourceTask.description,
+        assignee: sourceTask.assignee,
+        reviewer: sourceTask.reviewer,
+        status: sourceTask.status,
+        nextStep: sourceTask.nextStep,
+        completionCriteria: sourceTask.completionCriteria,
+        deadline: sourceTask.deadline,
+        parentId: sourceTask.parentId,
+        approvedDate,
+        forecastDate,
+        plannedEnd: approvedDate,
+        forecastEndMin: forecastDate,
+        forecastEndMax: forecastDate,
+      });
+    }
+    const context = itemById.get('project-alpha');
+    assert.deepEqual({ id: context.id, title: context.title, type: context.type, parent: context.parent, contextOnly: context.contextOnly }, {
+      id: 'project-alpha', title: 'Project Alpha', type: 'project', parent: null, contextOnly: true,
+    });
+
+    const trustedSettings = JSON.parse(readFileSync(join(root, 'settings.json'), 'utf8'));
+    const untrustedSettings = { ...trustedSettings, data: { ...trustedSettings.data } };
+    delete untrustedSettings.data.directoryRosterDigest;
+    writeFileSync(join(root, 'settings.json'), `${JSON.stringify(untrustedSettings)}\n`);
+    const untrustedOutput = mkdtempSync(join(tmpdir(), 'directory-only-v3-untrusted-'));
+    try {
+      const untrustedResult = buildSnapshot({
+        engineRoot: ENGINE_ROOT,
+        instancePath: join(root, 'settings.json'),
+        dataRepo: root,
+        output: untrustedOutput,
+        builtAt: '2026-10-12T00:00:00Z',
+      });
+      assert.deepEqual(untrustedResult.data.people, [], 'missing trusted roster constraint must drop the directory');
+    } finally {
+      rmSync(untrustedOutput, { recursive: true, force: true });
+    }
+
+    const wrongSettings = { ...trustedSettings, data: { ...trustedSettings.data, directoryRosterDigest: digest(['different-person']) } };
+    writeFileSync(join(root, 'settings.json'), `${JSON.stringify(wrongSettings)}\n`);
+    const wrongSettingsOutput = mkdtempSync(join(tmpdir(), 'directory-only-v3-wrong-settings-'));
+    try {
+      const wrongSettingsResult = buildSnapshot({
+        engineRoot: ENGINE_ROOT,
+        instancePath: join(root, 'settings.json'),
+        dataRepo: root,
+        output: wrongSettingsOutput,
+        builtAt: '2026-10-12T00:00:00Z',
+      });
+      assert.deepEqual(wrongSettingsResult.data.people, [], 'mismatched trusted roster constraint must drop the directory');
+    } finally {
+      rmSync(wrongSettingsOutput, { recursive: true, force: true });
+    }
+
+    writeFileSync(join(root, 'settings.json'), `${JSON.stringify(trustedSettings)}\n`);
+    const forgedCompanion = directoryOnlyCompanion(projectionValue, {
+      directory: [{ id: 'different-person', displayName: 'Synthetic Different Person', avatar: 'person-1.webp' }],
+      audit: { ...companionValue.audit, rosterDigest: digest(['different-person']) },
+    });
+    writeFileSync(join(root, 'team', 'companion.json'), `${JSON.stringify(forgedCompanion)}\n`);
+    const forgedOutput = mkdtempSync(join(tmpdir(), 'directory-only-v3-forged-'));
+    try {
+      const forgedResult = buildSnapshot({
+        engineRoot: ENGINE_ROOT,
+        instancePath: join(root, 'settings.json'),
+        dataRepo: root,
+        output: forgedOutput,
+        builtAt: '2026-10-12T00:00:00Z',
+      });
+      assert.deepEqual(forgedResult.data.people, [], 'self-hashed forged roster must drop the directory');
+    } finally {
+      rmSync(forgedOutput, { recursive: true, force: true });
+    }
+
+    const rejectedCompanion = directoryOnlyCompanion(projectionValue, {
+      schedules: [{ taskId: 'approved-task', approvedStart: null, approvedEnd: '2026-10-20' }],
+      taskMetadata: [{ taskId: 'approved-task', status: 'active', commitment: null, phase: null, healthState: 'unknown' }],
+    });
+    writeFileSync(join(root, 'team', 'companion.json'), `${JSON.stringify(rejectedCompanion)}\n`);
+    assert.throws(() => buildSnapshot({
+      engineRoot: ENGINE_ROOT,
+      instancePath: join(root, 'settings.json'),
+      dataRepo: root,
+      output: rejectedOutput,
+      builtAt: '2026-10-12T00:00:00Z',
+    }), /directory-only companion/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(output, { recursive: true, force: true });
+    rmSync(rejectedOutput, { recursive: true, force: true });
+  }
+});
+
+test('production build drops a companion directory when its standing roster or policy binding drifts', () => {
+  const base = standingProjection();
+  base.audit.rosterDigest = digest(['person-1']);
+  base.publish.initialProjectionDigest = digest({ ...base, publish: { ...base.publish, initialProjectionDigest: null } });
+  const cases = [
+    ['roster', {
+      projection: {
+        ...base,
+        audit: { ...base.audit, rosterDigest: digest(['different-person']) },
+      },
+    }],
+    ['policy', {
+      projection: { ...base, policyRevision: 'standing-sharing-v3' },
+    }],
+  ];
+  for (const [label, change] of cases) {
+    change.projection = {
+      ...change.projection,
+      publish: {
+        ...change.projection.publish,
+        initialProjectionDigest: digest({ ...change.projection, publish: { ...change.projection.publish, initialProjectionDigest: null } }),
+      },
+    };
+    // The fixture's projection digest is updated so the selected mismatch is
+    // the binding drift under test rather than an unrelated stale projection.
+    const companionValue = standingCompanion(change.projection, {
+      projectionDigest: digest({ ...change.projection, publish: { ...change.projection.publish, initialProjectionDigest: null } }),
+      ...(label === 'policy' ? { policyRevision: base.policyRevision } : {}),
+    });
+    const root = writeBuildFixture(change.projection, companionValue);
+    const output = mkdtempSync(join(tmpdir(), `standing-binding-${label}-`));
+    try {
+      const result = buildSnapshot({
+        engineRoot: ENGINE_ROOT,
+        instancePath: join(root, 'settings.json'),
+        dataRepo: root,
+        output,
+        builtAt: '2026-10-12T00:00:00Z',
+      });
+      assert.deepEqual(result.data.people, [], `${label} mismatch must drop the directory`);
+      assert.deepEqual(result.data.team, [], `${label} mismatch must drop team identity rows`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(output, { recursive: true, force: true });
+    }
+  }
+});
+
+test('reader rejects private fields, duplicate IDs, bad references, unsafe links, and symlinks', () => {
+  const cases = [
+    [projection([task('private-task', { privateNotes: 'sentinel' })]), /unknown field|private\/control/],
+    [projection([task('same'), task('same')]), /duplicate task ID/],
+    [{ ...projection([task('refs')]), omissions: [{ taskId: 'missing', field: 'title', reason: 'private' }] }, /unknown task/],
+    [{ ...projection([task('omitted-private')]), omissions: [{ field: 'privateNotes', reason: 'private-by-default' }] }, /private\/control/],
+    [projection([task('link', { evidenceLinks: ['https://example.com/?private=1'] })]), /query-free/],
+    [projection([task('private-link', { evidenceLinks: ['https://private.example.test/work/task-1'] })]), /allowed evidence host/],
+    [projection([task('private-link-trailing-dot', { evidenceLinks: ['https://private.example.test./work/task-1'] })]), /allowed evidence host/],
+    [projection([task('private-source', { evidenceLinks: ['https://github.com/synthetic-org/private-strategy/blob/main/README.md'] })]), /allowed evidence host/],
+    [projection([task('private-source-encoded', { evidenceLinks: ['https://github.com/synthetic-org/%70rivate-strategy/blob/main/README.md'] })]), /allowed evidence host/],
+    [projection([task('private-ipv6', { evidenceLinks: ['https://[::1]/task-1'] })]), /allowed evidence host/],
+    [projection([task('private-linklocal', { evidenceLinks: ['https://[fe80::1]/task-1'] })]), /allowed evidence host/],
+    [projection([task('private-localhost-dot', { evidenceLinks: ['https://localhost./task-1'] })]), /allowed evidence host/],
+    [projection([task('private-local-domain', { evidenceLinks: ['https://build.local/task-1'] })]), /allowed evidence host/],
+  ];
+  for (const [value, expected] of cases) {
+    const root = writeFixture(value);
+    assert.throws(() => readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json', linkPolicy: LINK_POLICY }), error => error instanceof TeamProjectionInputError && expected.test(error.message));
+  }
+
+  const root = writeFixture(projection([task('symlink')]));
+  const outside = mkdtempSync(join(tmpdir(), 'team-projection-outside-'));
+  writeFileSync(join(outside, 'projection.json'), JSON.stringify(projection([task('outside')])));
+  symlinkSync(join(outside, 'projection.json'), join(root, 'team/projection.json.tmp'));
+  assert.throws(() => readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json.tmp', linkPolicy: LINK_POLICY }), /symlinks/);
+});
+
+test('reader preserves ordinary product language and Markdown whitespace', () => {
+  const root = writeFixture(projection([task('oauth', {
+    title: 'Ship Slack OAuth token refresh',
+    scope: 'Support the integration.\nDocument the customer handoff.',
+    nextStep: 'Review the meeting notes shared in the public project channel.',
+  })]));
+  assert.doesNotThrow(() => readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json', linkPolicy: LINK_POLICY }));
+  const teamHostRoot = writeFixture(projection([task('team-host', { evidenceLinks: ['https://team.example.test/evidence'] })]));
+  assert.doesNotThrow(() => readTeamProjection({ dataRoot: teamHostRoot, projectionPath: 'team/projection.json', linkPolicy: LINK_POLICY }));
+  const secretRoot = writeFixture(projection([task('secret', { nextStep: 'password: super-secret-value' })]));
+  assert.throws(() => readTeamProjection({ dataRoot: secretRoot, projectionPath: 'team/projection.json', linkPolicy: LINK_POLICY }), /team-safe string/);
+  const defaultPolicyRoot = writeFixture(projection([task('default-link')]));
+  assert.throws(() => readTeamProjection({ dataRoot: defaultPolicyRoot, projectionPath: 'team/projection.json' }), /allowed evidence host/);
+});
+
+test('empty projection builds a real empty snapshot', () => {
+  const root = writeFixture(projection());
+  const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json' });
+  const snapshot = buildTeamProjectionSnapshot(loaded.projection);
+  assert.deepEqual(snapshot.items, []);
+  assert.deepEqual(snapshot.rootsByBucket, { other: [] });
+  assert.equal(snapshot.source.layout, 'team-projection-v1');
+  const archive = buildTeamProjectionPlanningArchive(loaded.projection);
+  assert.equal(archive.entries[0].plan.outcomes.length, 0);
+  assert.doesNotThrow(() => parsePlanningArchive(archive));
+});
+
+test('bootstrap projection is explicitly uninitialized and has no stale weekly episode', () => {
+  const root = writeFixture(projection());
+  const bootstrap = JSON.parse(String(readFileSync(join(root, 'team/projection.json'))));
+  bootstrap.sourcePlanDigest = EMPTY_DIGEST;
+  writeFileSync(join(root, 'team/projection.json'), `${JSON.stringify(bootstrap)}\n`);
+  const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json' });
+  const snapshot = buildTeamProjectionSnapshot(loaded.projection, { builtAt: '2026-10-11T00:00:00Z' });
+  assert.equal(snapshot.source.projectionState, 'uninitialized');
+  assert.equal(snapshot.source.exportedAt, null);
+  assert.equal(snapshot.source.builtAt, null);
+  assert.deepEqual(buildTeamProjectionPlanningArchive(loaded.projection).entries, []);
+  const nonEmpty = projection([task('real')]);
+  nonEmpty.sourcePlanDigest = EMPTY_DIGEST;
+  const nonEmptyRoot = writeFixture(nonEmpty);
+  assert.throws(() => readTeamProjection({ dataRoot: nonEmptyRoot, projectionPath: 'team/projection.json' }), /zero digest/);
+});

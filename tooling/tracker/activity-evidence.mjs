@@ -1,3 +1,5 @@
+import { DEFAULT_DON_APPROVER_IDS } from './planning.mjs';
+
 const ACTIVITY_KINDS = new Set(['work', 'result', 'decision', 'discussion', 'unknown']);
 const QUALIFYING_KINDS = new Set(['work', 'result', 'decision']);
 const ATTRIBUTION_BASES = new Set(['task-id', 'linked-pr', 'context', 'review']);
@@ -133,7 +135,7 @@ function metadataFromEvent(event) {
   };
 }
 
-function checkApproval(amendment, original, current, nextItemId, decisionsById, issues) {
+function checkApproval(amendment, original, current, nextItemId, decisionsById, issues, { approverIds } = {}) {
   const data = dataOf(amendment);
   const path = pathOf(amendment, data);
   const decisionId = text(data.approval_decision);
@@ -152,7 +154,9 @@ function checkApproval(amendment, original, current, nextItemId, decisionsById, 
     issue(issues, path, `approval_decision ${decisionId} must be approved`);
     valid = false;
   }
-  if (!['don', 'owner'].includes(String(decisionData.approved_by ?? '').toLowerCase())) {
+  const approvedBy = String(decisionData.approved_by ?? '').trim().toLowerCase();
+  const configuredApprovers = approverIds instanceof Set ? approverIds : new Set(approverIds ?? DEFAULT_DON_APPROVER_IDS);
+  if (!configuredApprovers.has(approvedBy)) {
     issue(issues, path, `approval_decision ${decisionId} must be approved by Don`);
     valid = false;
   }
@@ -175,7 +179,7 @@ function checkApproval(amendment, original, current, nextItemId, decisionsById, 
   return valid ? decisionId : null;
 }
 
-function applyAmendment(event, amendment, original, decisionsById, resolvableItemIds, issues) {
+function applyAmendment(event, amendment, original, decisionsById, resolvableItemIds, issues, options = {}) {
   const data = dataOf(amendment);
   const path = pathOf(amendment, data);
   const action = data.activity_action;
@@ -228,7 +232,7 @@ function applyAmendment(event, amendment, original, decisionsById, resolvableIte
     if (!nextItemId) fail('replace amendment requires activity_item');
     else if (!resolvableItemIds.has(nextItemId)) fail(`unknown activity_item ${nextItemId}`);
     if (!valid) return event;
-    const decisionId = checkApproval(amendment, original, event, nextItemId, decisionsById, issues);
+    const decisionId = checkApproval(amendment, original, event, nextItemId, decisionsById, issues, options);
     if (!decisionId) return event;
     addOnce(event.approvalDecisionIds, decisionId);
     return {
@@ -246,7 +250,7 @@ function applyAmendment(event, amendment, original, decisionsById, resolvableIte
   if (action === 'exclude') {
     if (metadataKeys.length || Object.hasOwn(data, 'activity_item')) fail('exclude amendments cannot replace activity metadata');
     if (!valid) return event;
-    const decisionId = checkApproval(amendment, original, event, event.itemId, decisionsById, issues);
+    const decisionId = checkApproval(amendment, original, event, event.itemId, decisionsById, issues, options);
     if (!decisionId) return event;
     addOnce(event.approvalDecisionIds, decisionId);
     return { ...event, included: false };
@@ -255,7 +259,7 @@ function applyAmendment(event, amendment, original, decisionsById, resolvableIte
   return event;
 }
 
-function resolveChains(amendments, originalByKey, eventsByKey, decisionsById, resolvableItemIds, issues) {
+function resolveChains(amendments, originalByKey, eventsByKey, decisionsById, resolvableItemIds, issues, options = {}) {
   const groups = new Map();
   const amendmentByKey = new Map();
   for (const amendment of amendments) {
@@ -357,7 +361,7 @@ function resolveChains(amendments, originalByKey, eventsByKey, decisionsById, re
     let event = targetEvent;
     for (const amendment of ordered) {
       const before = issues.length;
-      const nextEvent = applyAmendment(event, amendment, original, decisionsById, resolvableItemIds, issues);
+      const nextEvent = applyAmendment(event, amendment, original, decisionsById, resolvableItemIds, issues, options);
       const data = dataOf(amendment);
       const failed = issues.length > before;
       if (failed) continue;
@@ -368,7 +372,7 @@ function resolveChains(amendments, originalByKey, eventsByKey, decisionsById, re
   }
 }
 
-function resolveActivityEvidence(records, issues) {
+function resolveActivityEvidence(records, issues, options = {}) {
   issues ??= [];
   const updates = records?.updates ?? [];
   const originals = updates.filter(update => !isAmendment(dataOf(update)));
@@ -408,7 +412,7 @@ function resolveActivityEvidence(records, issues) {
     if (data.item) resolvableItemIds.add(data.item);
   }
 
-  resolveChains(amendments, originalByKey, eventsByKey, decisionsById, resolvableItemIds, issues);
+  resolveChains(amendments, originalByKey, eventsByKey, decisionsById, resolvableItemIds, issues, options);
 
   const effective = normalized.map(event => eventsByKey.get(event.id) ?? event);
   const seen = new Set();
@@ -422,13 +426,13 @@ function resolveActivityEvidence(records, issues) {
   return effective;
 }
 
-export function normalizeActivityEvidence(records) {
-  return resolveActivityEvidence(records, []);
+export function normalizeActivityEvidence(records, options = {}) {
+  return resolveActivityEvidence(records, [], options);
 }
 
-export function validateActivityEvidence(records, issues) {
+export function validateActivityEvidence(records, issues, options = {}) {
   const target = Array.isArray(issues) ? issues : [];
   const start = target.length;
-  resolveActivityEvidence(records, target);
+  resolveActivityEvidence(records, target, options);
   return target.slice(start);
 }

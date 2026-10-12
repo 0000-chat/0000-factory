@@ -4,6 +4,7 @@ import type { WorkActivityControls } from '../work-activity-controller';
 import type { ParsedTaskContentDraft } from '../task-drafts';
 import type { TaskEditController } from '../router-context';
 import type { ManagerProjection } from '../work-manager-types';
+import type { WorkWeek, WorkWeekWindow } from '../work-week';
 
 export type WorkMode = 'tree' | 'table' | 'calendar' | 'kanban' | 'gantt';
 
@@ -24,6 +25,16 @@ export interface WorkViewProps {
   toolbarControls?: ReactNode;
   navigationControls?: ReactNode;
   navigationDate?: string | null;
+  selectedWeek?: WorkWeek;
+  focusWindow?: WorkWeekWindow | null;
+  workflow?: 'standard' | 'this-week' | 'daily-review' | 'next-week';
+  onWorkflowChange?: (workflow: 'standard' | 'this-week' | 'daily-review' | 'next-week') => void;
+  onWeekChange?: (direction: -1 | 1) => void;
+  undatedActiveItems?: TrackerItem[];
+  groupByOwner?: boolean;
+  onGroupByOwnerChange?: (value: boolean) => void;
+  presentationMode?: boolean;
+  onPresentationModeChange?: (value: boolean) => void;
 }
 
 export interface TodayViewProps {
@@ -47,6 +58,7 @@ export interface PlansViewProps {
 export interface TeamViewProps {
   profiles: TrackerSnapshot['team'];
   items: TrackerItem[];
+  teamProjection?: boolean;
   memberSlug: string | null;
   search: string;
   onSearchChange: (search: string) => void;
@@ -78,6 +90,7 @@ export interface ItemPageProps {
   taskEdit: TaskEditController;
   renderItemLink?: (itemId: string, label: string) => ReactNode;
   returnLink?: ReactNode;
+  readOnly?: boolean;
 }
 
 export interface DecisionPageProps {

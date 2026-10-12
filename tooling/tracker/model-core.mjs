@@ -19,6 +19,7 @@ import {
 import { extractMarkdownSections, scanMarkdownHeadings } from './markdown.mjs';
 import { validateActivityEvidence } from './activity-evidence.mjs';
 import { validateDeliveryRecords } from './delivery-records.mjs';
+import { taskCodeIndex } from './task-codes.mjs';
 
 export const ITEM_STATUSES = new Set(['queued', 'active', 'blocked', 'done']);
 export const PHASES = new Set(['discovery', 'build', 'verify']);
@@ -121,7 +122,7 @@ function parseCommitmentField(data, path, issues) {
   return commitment;
 }
 
-function approvalIssues(data, path, issues, { required: requiredApproval = false, strict = false, requireCurrentRevision = false } = {}) {
+function approvalIssues(data, path, issues, { required: requiredApproval = false, strict = false, requireCurrentRevision = false, approverIds } = {}) {
   const approval = approvalData(data);
   const anyApproval = [
     approval.approvedBy,
@@ -132,11 +133,11 @@ function approvalIssues(data, path, issues, { required: requiredApproval = false
     approval.digest,
     approval.source
   ].some(Boolean);
-  if (approval.approvedBy && !isDonIdentity(approval.approvedBy)) issues.push(`${path}: approved_by must identify Don (owner or don)`);
+  if (approval.approvedBy && !isDonIdentity(approval.approvedBy, approverIds)) issues.push(`${path}: approved_by must identify Don (configured approver)`);
   if (approval.source && !APPROVAL_SOURCES.has(approval.source)) issues.push(`${path}: invalid approval_source`);
   if (approval.approvedAt && !isUtcTimestamp(approval.approvedAt)) issues.push(`${path}: approved_at must be a valid UTC timestamp`);
   if (strict && (requiredApproval || anyApproval)) {
-    if (!isDonIdentity(approval.approvedBy)) issues.push(`${path}: approved records need Don as approved_by`);
+    if (!isDonIdentity(approval.approvedBy, approverIds)) issues.push(`${path}: approved records need Don as approved_by (configured approver)`);
     if (!approval.approvedAt || !isUtcTimestamp(approval.approvedAt)) issues.push(`${path}: approved records need approved_at`);
     if (!approval.reference) issues.push(`${path}: approved records need approval_ref`);
     if (!approval.revision) issues.push(`${path}: approved records need approved_revision`);
@@ -149,16 +150,16 @@ function approvalIssues(data, path, issues, { required: requiredApproval = false
   return { ...approval, anyApproval };
 }
 
-function confirmationIssues(data, path, issues) {
+function confirmationIssues(data, path, issues, { approverIds } = {}) {
   const confirmation = confirmationData(data);
   const state = confirmation.state ?? 'pending';
   if (!CONFIRMATION_STATES.has(state)) issues.push(`${path}: invalid confirmation_state`);
   const anyConfirmation = [confirmation.confirmedBy, confirmation.confirmedAt, confirmation.reference, confirmation.evidence].some(Boolean);
-  if (confirmation.confirmedBy && !isDonIdentity(confirmation.confirmedBy)) issues.push(`${path}: confirmed_by must identify Don (owner or don)`);
+  if (confirmation.confirmedBy && !isDonIdentity(confirmation.confirmedBy, approverIds)) issues.push(`${path}: confirmed_by must identify Don (configured approver)`);
   if (confirmation.confirmedAt && !isUtcTimestamp(confirmation.confirmedAt)) issues.push(`${path}: confirmed_at must be a valid UTC timestamp`);
   if (confirmation.source && !CONFIRMATION_SOURCES.has(confirmation.source)) issues.push(`${path}: confirmation_source must be grok-ui or authenticated-edit`);
   if (state === 'confirmed' || anyConfirmation) {
-    if (!isDonIdentity(confirmation.confirmedBy)) issues.push(`${path}: confirmed milestones need Don as confirmed_by`);
+    if (!isDonIdentity(confirmation.confirmedBy, approverIds)) issues.push(`${path}: confirmed milestones need Don as confirmed_by (configured approver)`);
     if (!confirmation.confirmedAt || !isUtcTimestamp(confirmation.confirmedAt)) issues.push(`${path}: confirmed milestones need confirmed_at`);
     if (!confirmation.reference) issues.push(`${path}: confirmed milestones need confirmation_ref`);
     if (!confirmation.evidence) issues.push(`${path}: confirmed milestones need evidence_ref`);
@@ -362,12 +363,23 @@ function validateItemPlanningFields(item, issues, { requireHealth = false } = {}
     }
   }
   parseTimestampField(d, 'health_reviewed_at', path, issues);
-  for (const key of ['planned_start', 'planned_end', 'forecast_start', 'forecast_end_min', 'forecast_end_max']) parseDateField(d, key, path, issues);
+  for (const key of ['planned_start', 'planned_end', 'proposed_start', 'proposed_end', 'forecast_start', 'forecast_end_min', 'forecast_end_max']) parseDateField(d, key, path, issues);
+  optionalScalar(d, 'proposed_schedule_kind', path, issues);
+  if (meaningful(d.proposed_schedule_kind) && !['span', 'slice', 'checkpoint'].includes(d.proposed_schedule_kind)) {
+    issues.push(`${path}: proposed_schedule_kind must be span, slice, or checkpoint`);
+  }
   parseBooleanField(d, 'schedule_provisional', path, issues);
   for (const key of ['effort_min', 'effort_max', 'remaining_effort_min', 'remaining_effort_max']) parseNumberField(d, key, path, issues);
   if (!isUnknown(d.effort_min) && !isUnknown(d.effort_max) && Number(d.effort_max) < Number(d.effort_min)) issues.push(`${path}: effort_max must be >= effort_min`);
   if (!isUnknown(d.remaining_effort_min) && !isUnknown(d.remaining_effort_max) && Number(d.remaining_effort_max) < Number(d.remaining_effort_min)) issues.push(`${path}: remaining_effort_max must be >= remaining_effort_min`);
   if (!isUnknown(d.planned_start) && !isUnknown(d.planned_end) && d.planned_end < d.planned_start) issues.push(`${path}: planned_end must be >= planned_start`);
+  const hasProposedStart = !isUnknown(d.proposed_start);
+  const hasProposedEnd = !isUnknown(d.proposed_end);
+  if (hasProposedStart !== hasProposedEnd) issues.push(`${path}: proposed_start and proposed_end must be provided together`);
+  if (hasProposedStart && hasProposedEnd && d.proposed_end < d.proposed_start) issues.push(`${path}: proposed_end must be >= proposed_start`);
+  if (d.proposed_schedule_kind === 'checkpoint' && hasProposedStart && hasProposedEnd && d.proposed_start !== d.proposed_end) {
+    issues.push(`${path}: checkpoint proposed dates must have equal proposed_start and proposed_end`);
+  }
   if (!isUnknown(d.forecast_start) && !isUnknown(d.forecast_end_min) && d.forecast_end_min < d.forecast_start) issues.push(`${path}: forecast_end_min must be >= forecast_start`);
   if (!isUnknown(d.forecast_start) && !isUnknown(d.forecast_end_max) && d.forecast_end_max < d.forecast_start) issues.push(`${path}: forecast_end_max must be >= forecast_start`);
   if (!isUnknown(d.forecast_end_min) && !isUnknown(d.forecast_end_max) && d.forecast_end_max < d.forecast_end_min) issues.push(`${path}: forecast_end_max must be >= forecast_end_min`);
@@ -375,7 +387,7 @@ function validateItemPlanningFields(item, issues, { requireHealth = false } = {}
   if (meaningful(d.owner_proposed) && !meaningful(d.owner_proposal_rationale)) issues.push(`${path}: owner_proposal_rationale is required when owner_proposed is set`);
 }
 
-function exactAssignmentApproval(item) {
+function exactAssignmentApproval(item, { approverIds } = {}) {
   const data = item.data;
   const approval = approvalData(data);
   const parts = approvedParts(data);
@@ -387,20 +399,20 @@ function exactAssignmentApproval(item) {
     && meaningful(data.owner_proposed)
     && data.owner === data.owner_proposed
     && meaningful(data.revision)
-    && hasDonApproval(data)
+    && hasDonApproval(data, '', approverIds)
     && approval.revision === data.revision
     && approval.digest === taskApprovalDigest(item);
 }
 
-function scopeFreeAssignmentApproval(item) {
+function scopeFreeAssignmentApproval(item, options = {}) {
   const parts = approvedParts(item.data);
   return !parts.includes('task')
     && parts.includes('assignment')
     && parts.every(part => part === 'assignment' || part === 'schedule')
-    && exactAssignmentApproval(item);
+    && exactAssignmentApproval(item, options);
 }
 
-function validateItems(records, issues) {
+function validateItems(records, issues, options = {}) {
   const byId = new Map();
   for (const item of records.items) {
     const d = item.data;
@@ -417,7 +429,7 @@ function validateItems(records, issues) {
     optionalScalar(d, 'accepted_from', item.path, issues);
     if (commitment !== 'accepted' && meaningful(d.accepted_from)) issues.push(`${item.path}: accepted_from is only valid for accepted items`);
     if (['draft', 'planned'].includes(commitment) && d.status !== 'queued') issues.push(`${item.path}: ${commitment} items must remain queued`);
-    if (['draft', 'planned'].includes(commitment) && d.owner !== 'unassigned' && !exactAssignmentApproval(item)) {
+    if (['draft', 'planned'].includes(commitment) && d.owner !== 'unassigned' && !exactAssignmentApproval(item, options)) {
       issues.push(`${item.path}: ${commitment} items must keep owner unassigned unless an exact assignment approval is valid`);
     }
     parseDateField(d, 'target', item.path, issues);
@@ -435,14 +447,20 @@ function validateItems(records, issues) {
     }
     validateItemSections(item, item.path, issues);
     validateItemPlanningFields(item, issues, { requireHealth: true });
-    const approval = approvalIssues(d, item.path, issues);
+    const approval = approvalIssues(d, item.path, issues, options);
     if (d.approval_state !== undefined && !APPROVAL_STATES.has(d.approval_state)) issues.push(`${item.path}: invalid approval_state`);
     const approvalParts = approvedParts(d);
     const hasDeclaredParts = d.approved_parts !== undefined && !isUnknown(d.approved_parts);
     if (approvalParts.some(part => !APPROVED_PARTS.has(part))
-      || (!approvalParts.includes('task') && !scopeFreeAssignmentApproval(item) && (approval.anyApproval || hasDeclaredParts))) {
+      || (!approvalParts.includes('task') && !scopeFreeAssignmentApproval(item, options) && (approval.anyApproval || hasDeclaredParts))) {
       issues.push(`${item.path}: approved_parts must contain task and may include assignment or schedule, unless an exact assignment approval records owner attribution`);
     }
+  }
+  const validItems = records.items.filter(item => idPattern.test(item.data?.id ?? '') && item.name === item.data.id);
+  try {
+    taskCodeIndex(validItems);
+  } catch (error) {
+    issues.push(`task reference code validation failed: ${error instanceof Error ? error.message : String(error)}`);
   }
   return byId;
 }
@@ -467,7 +485,7 @@ function validateHistory(records, itemIds, issues) {
   return byId;
 }
 
-function validatePlans(records, itemIds, issues) {
+function validatePlans(records, itemIds, issues, options = {}) {
   const byId = new Map();
   for (const plan of records.plans) {
     const d = plan.data;
@@ -479,13 +497,13 @@ function validatePlans(records, itemIds, issues) {
     if (d.status && !PLAN_STATES.has(d.status)) issues.push(`${plan.path}: invalid plan status`);
     if (d.updated_at && !isDate(d.updated_at)) issues.push(`${plan.path}: updated_at must be a valid YYYY-MM-DD date`);
     if (d.project && !itemIds.has(d.project)) issues.push(`${plan.path}: unknown project ${d.project}`);
-    approvalIssues(d, plan.path, issues, { required: d.status === 'approved', strict: d.status === 'approved', requireCurrentRevision: d.status === 'approved' });
+    approvalIssues(d, plan.path, issues, { ...options, required: d.status === 'approved', strict: d.status === 'approved', requireCurrentRevision: d.status === 'approved' });
     validateRecordBody(plan, plan.path, issues, ['## Objective', '## Evidence']);
   }
   return byId;
 }
 
-function validateMilestones(records, itemIds, planIds, issues) {
+function validateMilestones(records, itemIds, planIds, issues, options = {}) {
   const byId = new Map();
   for (const milestone of records.milestones) {
     const d = milestone.data;
@@ -502,9 +520,9 @@ function validateMilestones(records, itemIds, planIds, issues) {
     if (d.approval_state && !APPROVAL_STATES.has(d.approval_state)) issues.push(`${milestone.path}: invalid approval_state`);
     if (['approved', 'complete', 'needs-reverification'].includes(d.status)) {
       if (d.approval_state !== 'approved') issues.push(`${milestone.path}: active milestones need approval_state approved`);
-      approvalIssues(d, milestone.path, issues, { required: true, strict: true });
-    } else approvalIssues(d, milestone.path, issues);
-    confirmationIssues(d, milestone.path, issues);
+      approvalIssues(d, milestone.path, issues, { ...options, required: true, strict: true });
+    } else approvalIssues(d, milestone.path, issues, options);
+    confirmationIssues(d, milestone.path, issues, options);
     if (d.status === 'complete' && !confirmationData(d).confirmedBy) issues.push(`${milestone.path}: complete milestones need a Don confirmation record`);
     if (d.status === 'complete' && confirmationData(d).state !== 'confirmed') issues.push(`${milestone.path}: complete milestones need confirmation_state confirmed`);
     validateRecordBody(milestone, milestone.path, issues, ['## Outcome', '## Completion condition', '## Evidence']);
@@ -533,7 +551,7 @@ function validateCapacities(records, issues) {
   return byId;
 }
 
-function validateDecisions(records, itemIds, historyIds, issues) {
+function validateDecisions(records, itemIds, historyIds, issues, options = {}) {
   const resolvable = new Set([...itemIds.keys(), ...historyIds.keys()]);
   for (const decision of records.decisions ?? []) {
     const d = decision.data;
@@ -541,7 +559,7 @@ function validateDecisions(records, itemIds, historyIds, issues) {
     if (decision.name !== d.id || !idPattern.test(d.id ?? '')) issues.push(`${decision.path}: id must be kebab-case filename`);
     if (hasValue(d.state) && !DECISION_STATES.has(d.state)) issues.push(`${decision.path}: invalid decision state`);
     if (hasValue(d.updated_at) && !isDate(d.updated_at)) issues.push(`${decision.path}: updated_at must be a valid YYYY-MM-DD date`);
-    if (d.state === 'approved' && (!isDonIdentity(d.approved_by) || !isDate(d.approved_at))) issues.push(`${decision.path}: approved decisions need approver and date`);
+    if (d.state === 'approved' && (!isDonIdentity(d.approved_by, options.approverIds) || !isDate(d.approved_at))) issues.push(`${decision.path}: approved decisions need approver and date`);
     for (const ref of refs(d.affects)) if (!resolvable.has(ref)) issues.push(`${decision.path}: unknown affected item ${ref}`);
   }
 }
@@ -689,12 +707,12 @@ function validateMigrationManifest(records, itemIds, decisions, issues) {
     if (!retainedIds.has(id)) issues.push(`${migration.path}: legacy approval ${id} is not a retained accepted item from the migration mappings`);
     if (item && item.data.commitment !== 'accepted') issues.push(`${migration.path}: legacy approval ${id} must identify an accepted item`);
     if (!entry || !/^[a-f0-9]{64}$/.test(entry.digest ?? '')) issues.push(`${migration.path}: legacy approval ${id} needs a 64-character digest`);
-    if (entry?.decision !== 'project-alpha-delivery-schedule-2026-09-30') issues.push(`${migration.path}: legacy approval ${id} must cite project-alpha-delivery-schedule-2026-09-30`);
-    if (entry?.decision && !decisions.some(decision => (decision.data ?? decision).id === entry.decision)) issues.push(`${migration.path}: legacy approval ${id} cites unknown decision ${entry.decision}`);
+    if (!entry?.decision) issues.push(`${migration.path}: legacy approval ${id} needs a decision reference`);
+    else if (!decisions.some(decision => (decision.data ?? decision).id === entry.decision)) issues.push(`${migration.path}: legacy approval ${id} cites unknown decision ${entry.decision}`);
   }
 }
 
-export function acceptanceState(item, allItems = [], legacyApprovals = {}, decisions = []) {
+export function acceptanceState(item, allItems = [], legacyApprovals = {}, decisions = [], options = {}) {
   const record = item?.data ? item : { data: item ?? {} };
   const data = record.data ?? {};
   const byId = new Map(allItems.map(candidate => [candidate.data?.id ?? candidate.id, candidate]));
@@ -721,13 +739,13 @@ export function acceptanceState(item, allItems = [], legacyApprovals = {}, decis
       && accepted
       && acceptedTaskDigest(record) === legacyEntry.digest
       && decisionData.state === 'approved'
-      && isDonIdentity(decisionData.approved_by)
+      && isDonIdentity(decisionData.approved_by, options.approverIds)
       && refs(decisionData.affects).includes(data.id)
   );
   const validParts = parts.length > 0 && parts.every(part => APPROVED_PARTS.has(part));
   const scopeApproved = Boolean(
     data.approval_state === 'approved'
-      && hasDonApproval(data)
+      && hasDonApproval(data, '', options.approverIds)
       && parts.includes('task')
       && validParts
       && approval.digest === taskApprovalDigest(record)
@@ -735,7 +753,7 @@ export function acceptanceState(item, allItems = [], legacyApprovals = {}, decis
       && approval.revision === currentRevision
   );
   const hasActualOwner = meaningful(data.owner) && data.owner !== 'unassigned';
-  const assignmentReady = !hasActualOwner || exactAssignmentApproval(record);
+  const assignmentReady = !hasActualOwner || exactAssignmentApproval(record, options);
   const scheduleReady = isUnknown(data.planned_start) && isUnknown(data.planned_end) || parts.includes('schedule');
   const perTaskApproved = scopeApproved && accepted && assignmentReady && scheduleReady;
   const legacyParts = legacyApproved
@@ -790,14 +808,14 @@ function validateRelationships(records, itemIds, historyIds, issues) {
   issues.push(...cycleErrors(allNodes, 'depends_on', node => refs(node.data.depends_on)));
 }
 
-function freshAcceptedApprovalIssues(item) {
+function freshAcceptedApprovalIssues(item, options = {}) {
   const d = item.data;
   const approval = approvalData(d);
   const parts = approvedParts(d);
   const issues = [];
   if (d.approval_state !== 'approved') issues.push(`${item.path}: accepted item needs approval_state approved or a matching legacy approval`);
-  approvalIssues(d, item.path, issues, { required: true, strict: true, requireCurrentRevision: true });
-  if (!hasDonApproval(d)) return issues;
+  approvalIssues(d, item.path, issues, { ...options, required: true, strict: true, requireCurrentRevision: true });
+  if (!hasDonApproval(d, '', options.approverIds)) return issues;
   if (!parts.includes('task') || parts.some(part => !APPROVED_PARTS.has(part))) issues.push(`${item.path}: accepted item approval must include task scope`);
   if (meaningful(d.owner) && d.owner !== 'unassigned' && !parts.includes('assignment')) issues.push(`${item.path}: accepted owner needs approved assignment`);
   if (parts.includes('assignment') && meaningful(d.owner_proposed) && meaningful(d.owner) && d.owner !== 'unassigned' && d.owner !== d.owner_proposed) {
@@ -808,7 +826,7 @@ function freshAcceptedApprovalIssues(item) {
   return issues;
 }
 
-function validateApprovalRules(records, itemIds, issues) {
+function validateApprovalRules(records, itemIds, issues, options = {}) {
   const legacy = legacyApprovalMap(records);
   const decisions = new Map((records.decisions ?? []).map(decision => {
     const data = decision.data ?? decision;
@@ -820,7 +838,7 @@ function validateApprovalRules(records, itemIds, issues) {
     const approval = approvalData(d);
     if (!accepted) {
       if (d.approval_state === 'approved') {
-        approvalIssues(d, item.path, issues, { required: true, strict: true, requireCurrentRevision: true });
+        approvalIssues(d, item.path, issues, { ...options, required: true, strict: true, requireCurrentRevision: true });
         if (approval.digest !== taskApprovalDigest(item)) issues.push(`${item.path}: approval_digest does not match the exact approved task scope`);
       }
       continue;
@@ -828,11 +846,11 @@ function validateApprovalRules(records, itemIds, issues) {
     const legacyEntry = legacy[d.id];
     if (legacyEntry) {
       const decision = decisions.get(legacyEntry.decision);
-      if (!decision || decision.state !== 'approved' || !isDonIdentity(decision.approved_by) || !refs(decision.affects).includes(d.id)) {
+      if (!decision || decision.state !== 'approved' || !isDonIdentity(decision.approved_by, options.approverIds) || !refs(decision.affects).includes(d.id)) {
         issues.push(`${item.path}: legacy accepted item needs its approved Don decision to authorize this item`);
       }
       if (acceptedTaskDigest(item) !== legacyEntry.digest) {
-        const freshIssues = freshAcceptedApprovalIssues(item);
+        const freshIssues = freshAcceptedApprovalIssues(item, options);
         if (freshIssues.length) {
           issues.push(`${item.path}: accepted scope changed since its frozen legacy approval digest`);
           issues.push(...freshIssues);
@@ -843,12 +861,12 @@ function validateApprovalRules(records, itemIds, issues) {
       continue;
     }
     if (d.accepted_from !== 'planned') issues.push(`${item.path}: accepted item needs accepted_from: planned after a planned-stage transition`);
-    issues.push(...freshAcceptedApprovalIssues(item));
+    issues.push(...freshAcceptedApprovalIssues(item, options));
   }
   for (const id of Object.keys(legacy)) if (!itemIds.has(id)) issues.push(`tracker/migrations/unified-work.json: legacy approval ${id} does not identify a live item`);
 }
 
-function validateApprovedPlans(records, issues) {
+function validateApprovedPlans(records, issues, options = {}) {
   for (const plan of records.plans) {
     if (plan.data.status !== 'approved') continue;
     const planMilestones = records.milestones.filter(milestone => milestone.data.plan_id === plan.data.id);
@@ -864,7 +882,7 @@ function validateApprovedPlans(records, issues) {
       if (!approvalDigest || approvalData(milestone.data).digest !== approvalDigest) issues.push(`${milestone.path}: milestone needs the approved plan approval_digest`);
       if (!['approved', 'complete', 'needs-reverification'].includes(milestone.data.status)) issues.push(`${milestone.path}: proposed or deferred milestones cannot be included in an approved plan`);
       if (milestone.data.approval_state !== 'approved') issues.push(`${milestone.path}: included milestones need approval_state approved`);
-      if (!hasDonApproval(milestone.data)) issues.push(`${milestone.path}: included milestones need their exact Don approval record`);
+      if (!hasDonApproval(milestone.data, '', options.approverIds)) issues.push(`${milestone.path}: included milestones need their exact Don approval record`);
       const confirmation = confirmationData(milestone.data);
       if (milestone.data.status === 'complete' && (confirmation.state !== 'confirmed' || confirmation.revision !== revision || !confirmation.confirmedBy || !confirmation.confirmedAt || !confirmation.reference || !confirmation.evidence || !CONFIRMATION_SOURCES.has(confirmation.source))) {
         issues.push(`${milestone.path}: complete milestones need a specific Don confirmation for the approved revision`);
@@ -873,7 +891,7 @@ function validateApprovedPlans(records, issues) {
   }
 }
 
-export function validateTracker(input) {
+export function validateTracker(input, options = {}) {
   const records = {
     items: [],
     history: [],
@@ -892,20 +910,20 @@ export function validateTracker(input) {
     ...input
   };
   const issues = [...(records.errors ?? [])];
-  const itemIds = validateItems(records, issues);
+  const itemIds = validateItems(records, issues, options);
   const historyIds = validateHistory(records, itemIds, issues);
-  validateDecisions(records, itemIds, historyIds, issues);
+  validateDecisions(records, itemIds, historyIds, issues, options);
   validateUpdates(records, itemIds, historyIds, issues);
-  validateActivityEvidence(records, issues);
-  validateDeliveryRecords(records, issues);
+  validateActivityEvidence(records, issues, options);
+  validateDeliveryRecords(records, issues, options);
   validateReleases(records, itemIds, issues);
-  const planIds = validatePlans(records, itemIds, issues);
-  validateMilestones(records, itemIds, planIds, issues);
+  const planIds = validatePlans(records, itemIds, issues, options);
+  validateMilestones(records, itemIds, planIds, issues, options);
   validateCapacities(records, issues);
   validateRelationships(records, itemIds, historyIds, issues);
   validateMigrationManifest(records, itemIds, records.decisions, issues);
-  validateApprovalRules(records, itemIds, issues);
-  validateApprovedPlans(records, issues);
+  validateApprovalRules(records, itemIds, issues, options);
+  validateApprovedPlans(records, issues, options);
 
   const approvedMilestonePlansByItem = new Map();
   for (const milestone of records.milestones) {
@@ -917,7 +935,7 @@ export function validateTracker(input) {
   }
   for (const [itemId, planIds] of approvedMilestonePlansByItem) if (planIds.length > 1) issues.push(`item ${itemId}: multiple active approved milestone plans: ${planIds.join(', ')}`);
   for (const item of records.items) {
-    const progress = deriveProgress(item.data.id, records.milestones, records.plans);
+    const progress = deriveProgress(item.data.id, records.milestones, records.plans, options);
     if (item.data.status === 'done' && progress.scoped) {
       if (progress.percent !== 100 || !progress.allVerified) issues.push(`${item.path}: scoped done items need all approved milestones confirmed`);
       if (!meaningful(sectionsFromBody(item.body).evidence)) issues.push(`${item.path}: scoped done items need completion evidence`);

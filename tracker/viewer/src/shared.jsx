@@ -123,12 +123,16 @@ export function ScheduleSummary({ item }) {
   const schedule = { ...DEFAULT_SCHEDULE, ...item.schedule };
   const target = item.target;
   const hasBaseline = schedule.plannedStart || schedule.plannedEnd;
+  const hasProposed = schedule.proposedStart || schedule.proposedEnd;
   const hasForecast = schedule.forecastStart || schedule.forecastEndMin || schedule.forecastEndMax;
-  const heading = <div className="tracker-summary-label"><span className="section-label">Schedule</span><TrackerExplanation title="How schedule dates are labeled" tooltip="The summary distinguishes baselines, forecasts, and proposals."><p><strong>Approved baseline</strong> dates describe the accepted work schedule. <strong>Forecast</strong> dates are estimates and remain labeled as forecasts.</p><p><strong>Proposed</strong> dates belong to planned or draft work and stay distinct from accepted work. Schedule approval is a separate part of the work record, and a known target is shown separately from a work schedule.</p></TrackerExplanation></div>;
-  if (!hasBaseline && !hasForecast) return <div className="schedule-summary">{heading}{target ? <><BadgeChip tone="amber">Known target</BadgeChip><p><strong>Target</strong> · {formatDate(target)}</p><p className="source-note">No approved or forecast start and finish dates are recorded.</p></> : <><BadgeChip>Unscheduled</BadgeChip><p className="source-note">No approved or forecast dates are recorded.</p></>}</div>;
+  const heading = <div className="tracker-summary-label"><span className="section-label">Schedule</span><TrackerExplanation title="How schedule dates are labeled" tooltip="The summary distinguishes baselines, forecasts, and proposals."><p><strong>Approved baseline</strong> dates describe the accepted work schedule. <strong>Forecast</strong> dates are estimates and remain labeled as forecasts.</p><p><strong>Proposed</strong> dates are scheduling suggestions and stay separate from approved work, including when an accepted task carries a later proposed range. Schedule approval is a separate part of the work record, and a known target is shown separately from a work schedule.</p></TrackerExplanation></div>;
+  if (!hasBaseline && !hasProposed && !hasForecast) return <div className="schedule-summary">{heading}{target ? <><BadgeChip tone="amber">Known target</BadgeChip><p><strong>Target</strong> · {formatDate(target)}</p><p className="source-note">No approved, proposed, or forecast start and finish dates are recorded.</p></> : <><BadgeChip>Unscheduled</BadgeChip><p className="source-note">No approved, proposed, or forecast dates are recorded.</p></>}</div>;
   const proposed = !isAccepted(item);
   const label = commitmentLabel(item);
-  return <div className="schedule-summary">{heading}{hasBaseline ? <p><strong>{proposed ? `${label} proposed dates` : 'Approved baseline'}</strong> · {formatDate(schedule.plannedStart)} → {formatDate(schedule.plannedEnd)}</p> : null}{hasForecast ? <p><strong>{proposed ? `${label} proposed forecast` : 'Forecast'}</strong> · {formatDate(schedule.forecastStart)} → {formatDate(schedule.forecastEndMin)}{schedule.forecastEndMax && schedule.forecastEndMax !== schedule.forecastEndMin ? `–${formatDate(schedule.forecastEndMax)}` : ''}{schedule.provisional ? ' · provisional' : ''}</p> : null}</div>;
+  const proposedKind = schedule.proposedScheduleKind === 'checkpoint'
+    ? 'Proposed checkpoint'
+    : schedule.proposedScheduleKind === 'slice' ? 'Proposed slice' : 'Proposed schedule';
+  return <div className="schedule-summary">{heading}{hasBaseline ? <p><strong>{proposed ? `${label} proposed dates` : 'Approved baseline'}</strong> · {formatDate(schedule.plannedStart)} → {formatDate(schedule.plannedEnd)}</p> : null}{hasProposed ? <p><strong>{proposedKind}</strong> · {formatDate(schedule.proposedStart)} → {formatDate(schedule.proposedEnd)} · remains unapproved</p> : null}{hasForecast ? <p><strong>{proposed ? `${label} proposed forecast` : 'Forecast'}</strong> · {formatDate(schedule.forecastStart)} → {formatDate(schedule.forecastEndMin)}{schedule.forecastEndMax && schedule.forecastEndMax !== schedule.forecastEndMin ? `–${formatDate(schedule.forecastEndMax)}` : ''}{schedule.provisional ? ' · provisional' : ''}</p> : null}</div>;
 }
 
 /** @param {{ item: import('./snapshot').TrackerItem }} props */
@@ -145,13 +149,19 @@ export function ApprovalSummary({ item }) {
 /** @param {{ item: import('./snapshot').TrackerItem }} props */
 export function ItemChips({ item }) {
   const stageTone = isAccepted(item) ? 'green' : isDraft(item) ? 'slate' : 'amber';
-  return <div className="item-chips"><Pill variant="outline" className={`tracker-pill tracker-pill-${statusTone(item.status)}`}>{humanize(item.status)}</Pill><Pill variant="outline" className={`tracker-pill tracker-pill-${stageTone}`}>{commitmentLabel(item)}</Pill>{item.phase ? <BadgeChip>{humanize(item.phase)}</BadgeChip> : null}{item.owner && item.owner !== 'unassigned' ? <span className="item-assignee"><PersonLink value={item.owner} name={item.ownerName} avatar pill className="item-assignee-link" /></span> : <BadgeChip>Unassigned</BadgeChip>}<Pill variant="outline" className={`tracker-pill tracker-pill-${healthTone(item.health?.state)}`}>{healthLabel(item.health?.state)}</Pill></div>;
+  return <div className="item-chips"><Pill variant="outline" className={`tracker-pill tracker-pill-${statusTone(item.status)}`}>{humanize(item.status)}</Pill><Pill variant="outline" className={`tracker-pill tracker-pill-${stageTone}`}>{commitmentLabel(item)}</Pill>{item.phase ? <BadgeChip>{humanize(item.phase)}</BadgeChip> : null}{item.owner && item.owner !== 'unassigned' ? <span className="item-assignee"><PersonLink value={item.owner} name={item.ownerName} avatar pill assignment className="item-assignee-link" /></span> : <BadgeChip>Unassigned</BadgeChip>}<Pill variant="outline" className={`tracker-pill tracker-pill-${healthTone(item.health?.state)}`}>{healthLabel(item.health?.state)}</Pill></div>;
 }
 
 /** @param {import('./features/contracts').SnapshotFooterProps} props */
 export function SnapshotFooter({ source }) {
   const meta = source ?? {};
-  return <div className="snapshot-line" data-testid="snapshot-meta"><span>Source snapshot</span><span>{meta.commit && meta.commit !== 'unknown' ? `commit ${meta.shortCommit || meta.commit.slice(0, 10)}` : 'commit unknown'}</span><span>built {formatTimestamp(meta.builtAt)}</span>{meta.committedAt ? <span>source {formatTimestamp(meta.committedAt)}</span> : null}{meta.dirty ? <BadgeChip tone="amber">local changes present</BadgeChip> : null}</div>;
+  const teamProjection = meta.layout === 'team-projection-v1';
+  if (teamProjection) {
+    const zeroDigest = meta.projectionDigest === `sha256:${'0'.repeat(64)}`;
+    const sharedAt = meta.exportedAt || meta.projectionGeneratedAt;
+    return <div className="snapshot-line" data-testid="snapshot-meta"><span>{zeroDigest ? 'No tasks shared yet' : 'Shared tasks'}</span>{sharedAt ? <span>shared {formatTimestamp(sharedAt)}</span> : null}</div>;
+  }
+  return <div className="snapshot-line" data-testid="snapshot-meta"><span>Source snapshot</span><span>{meta.commit && meta.commit !== 'unknown' ? `commit ${meta.shortCommit || meta.commit.slice(0, 10)}` : 'commit unknown'}</span><span>{`built ${formatTimestamp(meta.builtAt)}`}</span>{meta.committedAt ? <span>{`source ${formatTimestamp(meta.committedAt)}`}</span> : null}{meta.dirty ? <BadgeChip tone="amber">local changes present</BadgeChip> : null}</div>;
 }
 
 function scopeOptions(data) {

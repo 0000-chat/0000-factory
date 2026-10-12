@@ -84,6 +84,12 @@ export interface WorkProjectionDescendants {
 export interface WorkProjectionTimeline {
   ownPlannedStart: ManilaDay | null;
   ownPlannedDue: ManilaDay | null;
+  ownProposedStart?: ManilaDay | null;
+  ownProposedDue?: ManilaDay | null;
+  ownProposedScheduleKind?: 'span' | 'slice' | 'checkpoint' | null;
+  ownProposedExplicit?: boolean;
+  ownForecastStart?: ManilaDay | null;
+  ownForecastDue?: ManilaDay | null;
   plannedStart: ManilaDay | null;
   plannedDue: ManilaDay | null;
   observedStart: ManilaDay | null;

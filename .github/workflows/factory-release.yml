@@ -1,0 +1,136 @@
+name: Dispatch Factory release
+
+on:
+  push:
+    branches:
+      - codex/weekly-planning-archive
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: factory-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  FACTORY_REPOSITORY: https://github.com/0000-chat/0000-factory.git
+  FACTORY_BRANCH: codex/weekly-planning-archive
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the release channel
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: codex/weekly-planning-archive
+          fetch-depth: 1
+      - name: Set up Node.js
+        uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e
+        with:
+          node-version: 26.3.1
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.3.14
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Validate the exact release tree
+        run: |
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          ./scripts/privacy-check
+          bun test tests/factory-release-receipt.test.mjs tests/tracker-hosting/access-gate.test.mjs
+          bun tracker/viewer/tooling/routes.mjs generate
+          bun x tsc --project tracker/viewer/tsconfig.json --noEmit --allowJs --checkJs false
+
+  dispatch:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the release channel
+        uses: actions/checkout@v4
+        with:
+          ref: codex/weekly-planning-archive
+          fetch-depth: 1
+
+      - name: Write immutable release manifest
+        id: manifest
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_ID: factory-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          node > "$RUNNER_TEMP/factory-release.json" <<'NODE'
+          const manifest = {
+            schemaVersion: 1,
+            releaseId: process.env.RELEASE_ID,
+            repository: process.env.FACTORY_REPOSITORY,
+            branch: process.env.FACTORY_BRANCH,
+            commit: process.env.RELEASE_SHA,
+            consumers: [
+              { repository: 'kapitolph/nextpay-team-delivery', branch: 'main', liveUrl: 'https://tracker.nextfinancial.xyz' },
+              { repository: 'donmasakayan/nextpay-strategy', branch: 'main', liveUrl: 'https://tracker.nextpay.0000.gold' },
+            ],
+          };
+          if (!/^[0-9a-f]{40}$/.test(manifest.commit)) throw new Error('release commit must be a full SHA');
+          process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);
+          NODE
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Archive the release manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: factory-release-${{ steps.manifest.outputs.release_id }}
+          path: ${{ runner.temp }}/factory-release.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish the current release manifest
+        uses: actions/github-script@v7
+        env:
+          MANIFEST_PATH: ${{ runner.temp }}/factory-release.json
+          RELEASE_SHA: ${{ steps.manifest.outputs.release_sha }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('node:fs');
+            const path = 'releases/current.json';
+            const content = fs.readFileSync(process.env.MANIFEST_PATH, 'utf8');
+            let sha;
+            try {
+              const existing = await github.rest.repos.getContent({ owner: '0000-chat', repo: '0000-factory', path, ref: 'main' });
+              sha = existing.data.sha;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            await github.rest.repos.createOrUpdateFileContents({
+              owner: '0000-chat',
+              repo: '0000-factory',
+              path,
+              branch: 'main',
+              message: `ci: record Factory release ${process.env.RELEASE_SHA}`,
+              content: Buffer.from(content).toString('base64'),
+              ...(sha ? { sha } : {}),
+            });
+
+      - name: Start the default-branch runtime verifier
+        uses: actions/github-script@v7
+        env:
+          RELEASE_SHA: ${{ steps.manifest.outputs.release_sha }}
+          RELEASE_ID: ${{ steps.manifest.outputs.release_id }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: '0000-chat',
+              repo: '0000-factory',
+              workflow_id: 'factory-release-result.yml',
+              ref: 'main',
+              inputs: { release_id: process.env.RELEASE_ID, release_sha: process.env.RELEASE_SHA },
+            });
+            core.info(`runtime verifier queued for ${process.env.RELEASE_SHA}`);

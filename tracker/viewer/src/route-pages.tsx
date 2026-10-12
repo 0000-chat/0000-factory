@@ -7,10 +7,10 @@ import { TrackerEmpty } from './tracker-empty';
 import { NavigationDateControls, WorkFilterControls } from './work-filter-controls';
 import { projectFilteredWork } from './work-filters';
 import { ProjectSelector, VisibilityControls } from './shared.jsx';
-import { parsePlansSearch, parseTeamSearch, parseTodaySearch, parseWorkSearch, type SearchInput, type WorkManagerPreset } from './routing-state';
+import { parsePlansSearch, parseTeamSearch, parseTodaySearch, parseWorkSearch, type SearchInput, type WorkManagerPreset, type WorkWorkflow, type WorkSearch } from './routing-state';
 import { selectedItemId, validatedReturnTo } from './navigation';
 import { projectFilterOptions, teamFilterOptions } from './route-data';
-import { getScopeItems, isAccepted, plansForScope, workVisibility } from './view-model.mjs';
+import { getScopeItems, isAccepted, plansForScope, scheduleFeatures, workVisibility } from './view-model.mjs';
 import type { TrackerItem } from './snapshot';
 import { RouteReturnLink } from './app-shell';
 import { useBrowseItemSelection } from './browse-controller';
@@ -21,6 +21,9 @@ import { buildManagerProjection, selectManagerMatches } from './work-manager-mod
 import type { BuildManagerProjectionInput, ManagerPreset } from './work-manager-types';
 import { WorkManagerControls } from './work-manager-controls';
 import { clearManagerPreset, createWorkManagerRouteState, enterManagerPreset, hasManagerAdvancedRefinements, workManagerExpansionFingerprint } from './work-manager-controller-state';
+import { isTeamProjection } from './team-mode';
+import { projectedTeamProfiles } from './team-model.mjs';
+import { manilaTodayKey, shiftWorkWeek, workWindowForFocusWeek, workWeekForManilaDay, workWeekFromSearch, workflowSearch } from './work-week';
 
 let managerPresetStateForSession = createWorkManagerRouteState();
 
@@ -53,8 +56,63 @@ function workVisibleItems(items: TrackerItem[], data: ReturnType<typeof useSnaps
   return completed ? scoped : scoped.filter(item => !item.completed || hasOpenDescendant(item, data));
 }
 
+function hasDirectScheduleDate(item: TrackerItem): boolean {
+  const schedule = item.schedule;
+  return [
+    schedule.plannedStart,
+    schedule.plannedEnd,
+    schedule.proposedStart,
+    schedule.proposedEnd,
+    schedule.forecastStart,
+    schedule.forecastEndMin,
+    schedule.forecastEndMax,
+  ].some(value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/u.test(value.trim()));
+}
+
+function findActiveUndatedItems(
+  data: ReturnType<typeof useSnapshot>,
+  search: ReturnType<typeof parseWorkSearch>,
+  projection: ReturnType<typeof buildWorkProjection>,
+): TrackerItem[] {
+  const ownerMatches = (item: TrackerItem) => search.owners.length === 0 || search.owners.some(owner => {
+    const itemOwner = item.owner && item.owner.toLowerCase() !== 'unassigned' ? item.owner : '__unassigned__';
+    return itemOwner === owner || itemOwner.toLowerCase() === owner.toLowerCase();
+  });
+  return getScopeItems(data.items, search.scope === 'all' ? '*' : search.scope)
+    .filter(item => {
+      const type = item.type?.toLowerCase();
+      const isContainer = type === 'project' || type === 'workstream';
+      const owner = item.owner?.trim().toLowerCase();
+      const isOwnedContainer = isContainer && Boolean(owner) && owner !== 'unassigned';
+      const own = projection.get(item.id)?.own;
+      const hasOwnActivity = Boolean(own?.evidenceIds?.length || own?.firstDate || own?.lastDate);
+      const hasDirectWork = scheduleFeatures([item]).length > 0 || hasDirectScheduleDate(item);
+      const eligible = type === 'task'
+        ? scheduleFeatures([item]).length === 0
+        : isOwnedContainer && (hasOwnActivity || hasDirectWork);
+      return eligible && item.status.toLowerCase() === 'active' && isAccepted(item) && !item.completed && ownerMatches(item);
+    });
+}
+
+function filteredActiveUndatedItems(
+  data: ReturnType<typeof useSnapshot>,
+  search: ReturnType<typeof parseWorkSearch>,
+  projection: ReturnType<typeof buildWorkProjection>,
+): TrackerItem[] {
+  const candidates = findActiveUndatedItems(data, search, projection);
+  const filtered = projectFilteredWork(data, {
+    ...search,
+    from: undefined,
+    to: undefined,
+    undated: 'include',
+    completed: false,
+  });
+  return candidates.filter(item => filtered.visibleIds.has(item.id) && !filtered.contextualIds.has(item.id));
+}
+
 export function WorkPage() {
   const data = useSnapshot();
+  const teamProjection = isTeamProjection(data);
   const now = useWorkActivityClock();
   const projection = useMemo(() => buildWorkProjection({
     items: data.items,
@@ -65,7 +123,13 @@ export function WorkPage() {
   const navigate = useNavigate();
   const selectItem = useBrowseItemSelection();
   const options = projectFilterOptions(data);
-  const search = parseWorkSearch(location.search, options);
+  const routeSearch = parseWorkSearch(location.search, options);
+  const workflow = routeSearch.workflow ?? 'standard';
+  const selectedWeek = workWeekFromSearch(routeSearch);
+  const focusWindow = workflow === 'this-week' ? workWindowForFocusWeek(selectedWeek) : null;
+  // Workflow defaults are applied once when entering a workflow. After that,
+  // URL state is authoritative so view tabs and refinements remain sticky.
+  const search = routeSearch;
   const managerState = useRef(managerPresetStateForSession);
   useEffect(() => {
     if (search.preset === 'none') {
@@ -73,7 +137,47 @@ export function WorkPage() {
       managerPresetStateForSession = managerState.current;
     }
   }, [search.preset]);
-  const visible = projectFilteredWork(data, search);
+  const visible = useMemo(() => {
+    const candidateSearch: WorkSearch = workflow === 'next-week'
+      ? { ...search, from: undefined, to: undefined, undated: 'include' }
+      : workflow === 'this-week' && focusWindow
+        ? { ...search, from: focusWindow.start, to: focusWindow.end }
+      : search;
+    const base = projectFilteredWork(data, candidateSearch);
+    if (workflow !== 'this-week' || focusWindow === null) return base;
+    const undated = filteredActiveUndatedItems(data, search, projection);
+    // Completed rows qualify by recorded activity in the four-week context;
+    // remove schedule bounds here so an activity-backed completion is not
+    // discarded merely because its original schedule was outside the context
+    // (or undated). The source-backed activity check below remains the gate.
+    const completedSearch = { ...candidateSearch, from: undefined, to: undefined, undated: 'include' as const, completed: true };
+    const completedInWindow = new Set(data.items
+      .filter(item => item.completed)
+      .filter(item => {
+        const lastDate = projection.get(item.id)?.own.lastDate;
+        return typeof lastDate === 'string' && lastDate >= focusWindow.start && lastDate <= focusWindow.end;
+      })
+      .map(item => item.id));
+    const completed = projectFilteredWork(data, completedSearch).items.filter(item => completedInWindow.has(item.id));
+    const baseIds = new Set(base.items.map(item => item.id));
+    const extras = [...new Map([...undated, ...completed].map(item => [item.id, item])).values()]
+      .filter(item => !baseIds.has(item.id));
+    if (!extras.length) return base;
+    const ids = baseIds;
+    const contextualIds = new Set(base.contextualIds);
+    for (const item of extras) {
+      ids.add(item.id);
+      let parentId = item.parent ?? null;
+      while (parentId) {
+        ids.add(parentId);
+        contextualIds.add(parentId);
+        parentId = data.itemById.get(parentId)?.parent ?? null;
+      }
+    }
+    const items = data.items.filter(item => ids.has(item.id));
+    const roots = items.filter(item => !item.parent || !data.itemById.has(item.parent));
+    return { ...base, items, roots, visibleIds: new Set(items.map(item => item.id)), contextualIds, matchCount: base.matchCount + extras.length };
+  }, [data, focusWindow, projection, search, workflow]);
   const managerScopeIds = useMemo(() => new Set(getScopeItems(
     data.items,
     search.scope === 'all' ? '*' : search.scope,
@@ -101,9 +205,9 @@ export function WorkPage() {
     return entry?.type === 'task' && entry.unfinished;
   }).length;
   const eligibleIds = useMemo(() => new Set(visible.items
-    .filter(item => !visible.contextualIds.has(item.id))
+    .filter(item => !item.contextOnly && !visible.contextualIds.has(item.id))
     .map(item => item.id)), [visible.contextualIds, visible.items]);
-  const managerEnabled = search.preset !== 'none' || search.people.length > 0;
+  const managerEnabled = !teamProjection && (workflow === 'next-week' || search.preset !== 'none' || search.people.length > 0);
   const activityMode = search.mode === 'tree' || search.mode === 'gantt';
   const applyManagerFilter = managerEnabled && activityMode;
   const activityEligibleIds = useMemo(() => applyManagerFilter
@@ -117,25 +221,110 @@ export function WorkPage() {
     revealAncestors: applyManagerFilter,
     scopeRootId: search.scope === 'all' ? null : search.scope,
   }), [activityEligibleIds, applyManagerFilter, projection, search.activity, search.scope]);
-  const applyActivityFilter = activityMode && (search.activity !== 'all' || managerEnabled);
+  const dailyAttentionIds = useMemo(() => {
+    if (workflow !== 'daily-review') return null;
+    const attention = new Set<string>();
+    for (const item of data.items) {
+      const entry = projection.get(item.id);
+      if (!entry || entry.completed) continue;
+      const healthState = item.health?.state?.toLowerCase();
+      const hasAttention = entry.attentionReasons.length > 0
+        || entry.own.state === 'unknown'
+        || healthState === 'unknown'
+        || healthState === 'blocked'
+        || healthState === 'at-risk'
+        || item.status.toLowerCase() === 'blocked'
+        || Boolean(item.sections?.blocker)
+        || item.blockers.length > 0;
+      if (hasAttention) attention.add(item.id);
+    }
+    for (const id of [...attention]) {
+      let parentId = projection.get(id)?.parentId ?? null;
+      while (parentId) {
+        attention.add(parentId);
+        parentId = projection.get(parentId)?.parentId ?? null;
+      }
+    }
+    return attention;
+  }, [data.items, projection, workflow]);
+  const applyActivityFilter = activityMode && (search.activity !== 'all' || managerEnabled || dailyAttentionIds !== null);
   const displayedIds: ReadonlySet<string> = applyActivityFilter
-    ? new Set([...activityRows.visibleIds].filter(id => visible.visibleIds.has(id)))
+    ? new Set([...activityRows.visibleIds].filter(id => visible.visibleIds.has(id) && (dailyAttentionIds === null || dailyAttentionIds.has(id))))
     : visible.visibleIds;
-  const displayedItems = !applyActivityFilter
-    ? visible.items
-    : visible.items.filter(item => displayedIds.has(item.id));
+  const explicitVisibleWorkloadIds = useMemo(
+    () => new Set(visible.items.filter(item => !visible.contextualIds.has(item.id)).map(item => item.id)),
+    [visible.contextualIds, visible.items],
+  );
   const displayedContextualIds: ReadonlySet<string> = useMemo(() => {
-    if (!applyActivityFilter) return visible.contextualIds;
+    if (!applyActivityFilter) return new Set([...visible.contextualIds].filter(id => !explicitVisibleWorkloadIds.has(id)));
     return new Set([...visible.contextualIds, ...activityRows.contextIds]
-      .filter(id => displayedIds.has(id)));
-  }, [activityRows.contextIds, applyActivityFilter, displayedIds, visible.contextualIds]);
+      .filter(id => displayedIds.has(id) && !explicitVisibleWorkloadIds.has(id)));
+  }, [activityRows.contextIds, applyActivityFilter, displayedIds, explicitVisibleWorkloadIds, visible.contextualIds]);
+  const candidateIds = useMemo(() => {
+    if (workflow !== 'next-week') return null;
+    return new Set([...managerProjection.byId.values()]
+      .filter(entry => entry.type === 'task' && entry.unfinished && (entry.current || entry.upcoming || entry.unreviewed || entry.decisions.some(decision => decision.state === 'proposed')) && ['ready', 'waiting', 'not-assessed'].includes(entry.readiness))
+      .map(entry => entry.id));
+  }, [managerProjection, workflow]);
+  const candidateVisibleIds = useMemo(() => {
+    if (candidateIds === null) return visible.visibleIds;
+    const result = new Set<string>();
+    for (const item of visible.items) {
+      if (!candidateIds.has(item.id)) continue;
+      result.add(item.id);
+      let parentId = item.parent ?? null;
+      while (parentId) {
+        result.add(parentId);
+        const parent = data.itemById.get(parentId);
+        parentId = parent?.parent ?? null;
+      }
+    }
+    return result;
+  }, [candidateIds, data.itemById, visible.items, visible.visibleIds]);
+  const workflowVisibleIds = candidateIds === null
+    ? visible.visibleIds
+    : candidateVisibleIds;
+  const workflowItems = candidateIds === null
+    ? visible.items
+    : visible.items.filter(item => workflowVisibleIds.has(item.id));
+  const workflowRoots = candidateIds === null
+    ? visible.roots
+    : visible.roots.filter(item => workflowVisibleIds.has(item.id));
+  const workflowMatchCount = candidateIds === null
+    ? visible.matchCount
+    : [...candidateIds].filter(id => visible.visibleIds.has(id)).length;
   const displayedRoots = applyActivityFilter
-    ? visible.roots.filter(item => displayedIds.has(item.id))
-    : visible.roots;
+    ? workflowRoots.filter(item => displayedIds.has(item.id))
+    : workflowRoots;
+  const displayedItemsForWorkflow = !applyActivityFilter
+    ? workflowItems
+    : workflowItems.filter(item => displayedIds.has(item.id));
+  const finalVisibleIds = new Set(displayedItemsForWorkflow.map(item => item.id));
+  const finalContextualIds = new Set([...displayedContextualIds].filter(id => finalVisibleIds.has(id)));
+  const undatedActiveItems = useMemo(() => {
+    if (workflow !== 'this-week') return [];
+    return filteredActiveUndatedItems(data, search, projection)
+      .filter(item => scheduleFeatures([item]).length === 0);
+  }, [data, projection, search, workflow]);
   const update = (changes: SearchInput) => {
     const next = parseWorkSearch({ ...search, ...changes }, options);
     void navigate({ to: '/work', search: next, replace: true });
   };
+  const updateWorkflow = (nextWorkflow: 'standard' | WorkWorkflow) => {
+    const todayWeek = workWeekForManilaDay(manilaTodayKey());
+    const nextWeek = nextWorkflow === 'next-week' ? shiftWorkWeek(todayWeek, 1) : todayWeek;
+    const next = nextWorkflow === 'standard'
+      ? parseWorkSearch({ ...routeSearch, workflow: undefined }, options)
+      : workflowSearch(routeSearch, nextWorkflow, nextWorkflow === 'next-week' ? nextWeek : todayWeek);
+    void navigate({ to: '/work', search: next, replace: true });
+  };
+  const updateWeek = (direction: -1 | 1) => {
+    const nextWeek = shiftWorkWeek(selectedWeek, direction);
+    const next = parseWorkSearch({ ...routeSearch, from: nextWeek.start, to: nextWeek.end }, options);
+    void navigate({ to: '/work', search: next, replace: true });
+  };
+  const updatePresentation = (presentationMode: boolean) => update({ presentationMode: presentationMode || undefined });
+  const updateGrouping = (groupByOwner: boolean) => update({ groupByOwner: groupByOwner || undefined });
   const updateManagerPreset = (preset: ManagerPreset) => {
     const result = preset === 'none'
       ? clearManagerPreset(managerState.current, search, options)
@@ -146,7 +335,7 @@ export function WorkPage() {
   };
   const managerDirectTaskCount = [...managerMatchIds].filter(id => {
     const entry = managerProjection.byId.get(id);
-    return entry?.type === 'task' && visible.visibleIds.has(id) && !visible.contextualIds.has(id);
+    return entry?.type === 'task' && workflowVisibleIds.has(id) && !visible.contextualIds.has(id);
   }).length;
   const activityTaskCount = [...activityRows.matchIds]
     .filter(id => managerProjection.byId.get(id)?.type === 'task').length;
@@ -163,23 +352,26 @@ export function WorkPage() {
     onActivityFilterChange: activity => update({ activity }),
   });
   const controls = <>
-    <WorkManagerControls
+    {teamProjection ? <section className="team-projection-work-note" aria-label="Person-scoped My Work">
+      <strong>My Work</strong>
+      <span>Use Person to view one team member’s tasks.</span>
+    </section> : <WorkManagerControls
       projection={managerProjection}
       people={(Array.isArray(data.people) ? data.people : []) as import('./work-manager-controls').WorkManagerPerson[]}
       search={search}
       mode={search.mode}
       matchCount={managerMatchCount}
-      resultCount={applyActivityFilter ? activityRows.matchIds.size : visible.matchCount}
+      resultCount={applyActivityFilter ? activityRows.matchIds.size : workflowMatchCount}
       scopeTaskCount={managerScopeTaskCount}
       modified={hasManagerAdvancedRefinements(search)}
       onPresetChange={updateManagerPreset}
       onPeopleChange={people => update({ people })}
-    />
-    <WorkFilterControls data={data} search={search} onChange={update} matchCount={visible.matchCount} />
+    />}
+    <WorkFilterControls data={data} search={search} onChange={update} matchCount={workflowMatchCount} />
   </>;
   const onModeChange = (mode: typeof search.mode) => update({ mode });
   return <WorkView
-    items={displayedItems}
+    items={displayedItemsForWorkflow}
     roots={displayedRoots}
     data={data}
     selectedId={search.item ?? null}
@@ -187,14 +379,24 @@ export function WorkPage() {
     mode={search.mode}
     onModeChange={onModeChange}
     externalItems={visible.externalItems}
-    visibleIds={displayedIds}
-    contextualIds={displayedContextualIds}
+    visibleIds={finalVisibleIds}
+    contextualIds={finalContextualIds}
     managerProjection={managerProjection}
     managerEnabled={managerEnabled}
     workActivity={workActivity}
     toolbarControls={controls}
     navigationControls={<NavigationDateControls date={search.date} onChange={update} />}
     navigationDate={search.date}
+    selectedWeek={selectedWeek}
+    focusWindow={focusWindow}
+    workflow={workflow}
+    onWorkflowChange={updateWorkflow}
+    onWeekChange={updateWeek}
+    undatedActiveItems={undatedActiveItems}
+    groupByOwner={search.groupByOwner === true}
+    onGroupByOwnerChange={updateGrouping}
+    presentationMode={search.presentationMode === true}
+    onPresentationModeChange={updatePresentation}
   />;
 }
 
@@ -245,7 +447,8 @@ export function TeamPage({ memberSlug }: { memberSlug?: string }) {
     if (memberSlug === undefined) void navigate({ to: '/team', search: next, replace: true });
     else void navigate({ to: '/team/$memberSlug', params: { memberSlug }, search: next, replace: true });
   };
-  return <TeamView profiles={data.team} items={data.items} memberSlug={memberSlug ?? null} search={search.q} onSearchChange={q => update({ q })} organizationFilter={search.organization} onOrganizationChange={organization => update({ organization })} onResetFilters={() => update({ q: '', organization: 'all' })} onSelectItem={useBrowseItemSelection()} />;
+  const profiles = data.team.length > 0 ? data.team : (isTeamProjection(data) ? projectedTeamProfiles(data.items) : data.team);
+  return <TeamView profiles={profiles} items={data.items} teamProjection={isTeamProjection(data)} memberSlug={memberSlug ?? null} search={search.q} onSearchChange={q => update({ q })} organizationFilter={search.organization} onOrganizationChange={organization => update({ organization })} onResetFilters={() => update({ q: '', organization: 'all' })} onSelectItem={useBrowseItemSelection()} />;
 }
 
 export function WorkItemPage({ itemId }: { itemId: string }) {
@@ -264,6 +467,7 @@ export function WorkItemPage({ itemId }: { itemId: string }) {
     taskDrafts={taskDrafts}
     pendingDraftCount={taskDrafts.length}
     taskEdit={taskEdit}
+    readOnly={isTeamProjection(data)}
     renderItemLink={(id, label) => <ItemRouteLink itemId={id}>{label}</ItemRouteLink>}
     returnLink={<RouteReturnLink value={routerState.returnTo} />}
   />;

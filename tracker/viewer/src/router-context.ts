@@ -1,4 +1,5 @@
 import type { TrackerSnapshot } from './snapshot';
+import type { PlanningArchive } from './planning-archive';
 import type { TrackerDraftOverlay } from './livestore-schema';
 import type { ParsedTaskContentDraft, TaskDraftFieldValue, TaskEditableField } from './task-drafts';
 import type { TaskEditCanonicalBaseline, TaskEditHistoryPayload, TaskEditSessionPayload } from './task-edit-history';
@@ -50,6 +51,7 @@ export interface TaskEditController {
 export interface TrackerRouterContext {
   data: TrackerSnapshot;
   canonicalData: TrackerSnapshot;
+  planningArchive: PlanningArchive;
   draftOverlays: readonly TrackerDraftOverlay[];
   taskDrafts: readonly ParsedTaskContentDraft[];
   taskDraftSaveState: TaskDraftSaveState;

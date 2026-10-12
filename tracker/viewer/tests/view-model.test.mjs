@@ -129,3 +129,23 @@ test('builds proposed bars for planned dates and approved bars only for accepted
   assert.equal(features.some(feature => feature.itemId === 'scope-only' && feature.kind === 'baseline'), false);
   assert.equal(features.find(feature => feature.itemId === 'planned').name.startsWith('Planned proposed'), true);
 });
+
+test('keeps an accepted baseline and explicit proposed alternative as separate bars', () => {
+  const features = scheduleFeatures([
+    item('accepted-alternative', null, {
+      commitment: 'accepted',
+      schedule: {
+        plannedStart: '2026-10-01',
+        plannedEnd: '2026-10-03',
+        proposedStart: '2026-10-08',
+        proposedEnd: '2026-10-10',
+        proposedScheduleKind: 'slice',
+        approved: true,
+      },
+    }),
+  ]);
+  assert.deepEqual(features.map(feature => [feature.itemId, feature.kind, feature.proposed, feature.proposedScheduleKind ?? null]), [
+    ['accepted-alternative', 'proposed', true, 'slice'],
+    ['accepted-alternative', 'baseline', false, null],
+  ]);
+});

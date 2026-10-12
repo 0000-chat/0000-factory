@@ -12,6 +12,10 @@ export const DEFAULT_PROGRESS = { scoped: false, percent: null, milestones: [], 
 export const DEFAULT_SCHEDULE = {
   plannedStart: null,
   plannedEnd: null,
+  proposedStart: null,
+  proposedEnd: null,
+  proposedScheduleKind: null,
+  proposedExplicit: false,
   forecastStart: null,
   forecastEndMin: null,
   forecastEndMax: null,
@@ -252,6 +256,7 @@ export function normalizeData(payload) {
     const item = {
       ...raw,
       id: String(raw?.id ?? ''),
+      referenceCode: safeText(raw?.referenceCode),
       title: String(raw?.title ?? raw?.id ?? 'Untitled work'),
       childIds: Array.isArray(raw?.childIds) ? raw.childIds.map(String) : [],
       dependsOn: Array.isArray(raw?.dependsOn) ? raw.dependsOn.map(String) : [],

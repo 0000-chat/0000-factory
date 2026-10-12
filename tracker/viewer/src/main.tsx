@@ -22,6 +22,8 @@ import {
   trackerEvents,
 } from './livestore-schema';
 import { parseTrackerSnapshot } from './snapshot';
+import { isTeamProjection } from './team-mode';
+import { emptyPlanningArchive, fetchPlanningArchive, type PlanningArchive } from './planning-archive';
 import { refreshCanonicalSnapshot, SnapshotAcknowledgementTimeout, waitForStoreAcknowledgement, type TrackerStore } from './snapshot-sync';
 import { trackerInstanceConfig } from './instance-config';
 import { legacyLocationPath } from './navigation';
@@ -217,7 +219,7 @@ function transactionPayloadJson(transaction: TaskPublishTransactionPayload): str
 
 const publishingDisabledMessage = 'Publishing is unavailable for this tracker. Local drafts remain saved on this device.';
 
-function StoredSnapshot({ store }: { store: TrackerStore }) {
+function StoredSnapshot({ store, planningArchive }: { store: TrackerStore; planningArchive: PlanningArchive }) {
   const saved = store.useQuery(canonicalSnapshotTable.select().first());
   const draftOverlays = store.useQuery(draftOverlayTable.select());
   const taskEditSessionRows = store.useQuery(taskEditSessionTable.select());
@@ -251,12 +253,24 @@ function StoredSnapshot({ store }: { store: TrackerStore }) {
   }, [saved]);
   const routerRef = useRef<ReturnType<typeof createTrackerRouter> | null>(null);
   const snapshot = parsed.snapshot;
+  const teamProjection = isTeamProjection(snapshot);
   const projection = useMemo(
-    () => snapshot === null ? null : composeTaskContentDrafts(snapshot, draftOverlays),
-    [snapshot, draftOverlays],
+    () => {
+      if (snapshot === null) return null;
+      if (teamProjection) return { snapshot, drafts: [] };
+      return composeTaskContentDrafts(snapshot, draftOverlays);
+    },
+    [snapshot, draftOverlays, teamProjection],
   );
   const effectiveSnapshot = projection?.snapshot ?? null;
   const parsedTaskEdits = useMemo(() => {
+    if (teamProjection) {
+      return {
+        sessions: [],
+        history: { schemaVersion: 2 as const, undo: [], redo: [], skipped: [] },
+        error: null,
+      };
+    }
     try {
       return {
         sessions: parseTaskEditSessionRows(taskEditSessionRows),
@@ -266,14 +280,15 @@ function StoredSnapshot({ store }: { store: TrackerStore }) {
     } catch (error) {
       return { sessions: [], history: null, error: error instanceof Error ? error : new Error(String(error)) };
     }
-  }, [taskEditHistoryRows, taskEditSessionRows]);
+  }, [taskEditHistoryRows, taskEditSessionRows, teamProjection]);
   const parsedTaskPublish = useMemo(() => {
+    if (teamProjection) return { transaction: null, error: null };
     try {
       return { transaction: parseTaskPublishTransactionRows(taskPublishTransactionRows), error: null };
     } catch (error) {
       return { transaction: null, error: error instanceof Error ? error : new Error(String(error)) };
     }
-  }, [taskPublishTransactionRows]);
+  }, [taskPublishTransactionRows, teamProjection]);
   const persistTaskEditEvent = useCallback((commit: () => void, operation: string): Promise<void> => {
     const sequence = ++draftWriteSequence.current;
     const previousStatus = store.syncStatus();
@@ -655,6 +670,7 @@ function StoredSnapshot({ store }: { store: TrackerStore }) {
     });
   }, [readTaskPublishTransaction, runPublishOperation, store]);
   const beginTaskEditSession = useCallback(async (input: Parameters<TaskEditController['beginSession']>[0]) => {
+    if (teamProjection) return 'unsupported';
     if (taskEditOwnerState !== 'ready') return taskEditOwnerState === 'checking' ? 'not-ready' : 'unsupported';
     const fieldKey = `${input.itemId}:${input.field}`;
     const localHandoff = closingFieldLockHandoffs.current.get(fieldKey);
@@ -688,7 +704,7 @@ function StoredSnapshot({ store }: { store: TrackerStore }) {
     // watcher updates Saving/Saved in the background.
     void acknowledgement.catch(() => {});
     return 'started';
-  }, [persistTaskEditEvent, store, taskEditOwnerState]);
+  }, [persistTaskEditEvent, store, taskEditOwnerState, teamProjection]);
   const changeTaskEditSessionValue = useCallback((sessionId: string, value: string) => {
     void persistTaskEditEvent(() => store.commit(trackerEvents.taskEditSessionValueChanged({
       sessionId,
@@ -735,6 +751,10 @@ function StoredSnapshot({ store }: { store: TrackerStore }) {
   }, [persistTaskEditEvent, store]);
 
   useEffect(() => {
+    if (teamProjection) {
+      setTaskEditOwnerState('unsupported');
+      return;
+    }
     let active = true;
     let sweepInProgress = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -818,7 +838,7 @@ function StoredSnapshot({ store }: { store: TrackerStore }) {
       window.removeEventListener('focus', retryNow);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [persistTaskEditEvent, store]);
+  }, [persistTaskEditEvent, store, teamProjection]);
 
   const taskEditController = useMemo<TaskEditController>(() => ({
     ownerId: taskEditDocumentOwner.ownerId,
@@ -865,6 +885,7 @@ function StoredSnapshot({ store }: { store: TrackerStore }) {
   if (effectiveSnapshot !== null && routerRef.current === null) {
     routerRef.current = createTrackerRouter(effectiveSnapshot, {
       canonicalData: snapshot ?? effectiveSnapshot,
+      planningArchive,
       draftOverlays,
       taskDrafts: projection?.drafts ?? [],
       taskDraftSaveState,
@@ -905,7 +926,7 @@ function StoredSnapshot({ store }: { store: TrackerStore }) {
   refreshRef.current = refresh;
 
   useEffect(() => {
-    if (trackerInstanceConfig.publishing.kind === 'disabled') return;
+    if (teamProjection || trackerInstanceConfig.publishing.kind === 'disabled') return;
     const transaction = parsedTaskPublish.transaction;
     if (transaction === null || (transaction.phase !== 'prepare-pending' && transaction.phase !== 'final-pending')) return;
     const attemptKey = `${transaction.request.requestId}:${transaction.phase}`;
@@ -918,10 +939,10 @@ function StoredSnapshot({ store }: { store: TrackerStore }) {
       else if (current.phase === 'final-pending') await confirmPublishReceipt(current, true);
     });
     void pending;
-  }, [confirmPublishReceipt, parsedTaskPublish.transaction, prepareFrozenTaskPublish, readTaskPublishTransaction, runPublishOperation]);
+  }, [confirmPublishReceipt, parsedTaskPublish.transaction, prepareFrozenTaskPublish, readTaskPublishTransaction, runPublishOperation, teamProjection]);
 
   useEffect(() => {
-    if (trackerInstanceConfig.publishing.kind === 'disabled') return;
+    if (teamProjection || trackerInstanceConfig.publishing.kind === 'disabled') return;
     const transaction = parsedTaskPublish.transaction;
     if (transaction === null || transaction.phase !== 'receipt-recorded') return;
     let active = true;
@@ -943,7 +964,7 @@ function StoredSnapshot({ store }: { store: TrackerStore }) {
       active = false;
       if (timer !== null) clearTimeout(timer);
     };
-  }, [checkPublishedSource, parsedTaskPublish.transaction, readTaskPublishTransaction, runPublishOperation]);
+  }, [checkPublishedSource, parsedTaskPublish.transaction, readTaskPublishTransaction, runPublishOperation, teamProjection]);
 
   useEffect(() => {
     const onFocus = () => { void refresh(); };
@@ -987,18 +1008,19 @@ function StoredSnapshot({ store }: { store: TrackerStore }) {
   }
 
   return <>
-    <PublishingStatusHost
+    {teamProjection ? null : <PublishingStatusHost
       taskEdit={taskEditController}
       taskDrafts={projection.drafts}
       canonicalData={snapshot ?? effectiveSnapshot}
       saved={saved}
       snapshotSync={status}
       storageMode={store.storageMode}
-    />
+    />}
     <RouterProvider router={router} context={{
       data: effectiveSnapshot,
       canonicalData: snapshot ?? effectiveSnapshot,
-      draftOverlays,
+      planningArchive,
+      draftOverlays: teamProjection ? [] : draftOverlays,
       taskDrafts: projection.drafts,
       taskDraftSaveState,
       taskEdit: taskEditController,
@@ -1023,7 +1045,23 @@ class StoreErrorBoundary extends Component<{ readonly children: ReactNode }, { r
 
 function TrackerApplication() {
   const store = useStore(trackerStoreOptions);
-  return <StoredSnapshot store={store} />;
+  const [planningArchive, setPlanningArchive] = useState<PlanningArchive | null>(() => (
+    trackerInstanceConfig.features.weeklyPlanning ? null : emptyPlanningArchive()
+  ));
+  const [planningArchiveError, setPlanningArchiveError] = useState<Error | null>(null);
+  useEffect(() => {
+    if (!trackerInstanceConfig.features.weeklyPlanning) return undefined;
+    const controller = new AbortController();
+    void fetchPlanningArchive(controller.signal)
+      .then(setPlanningArchive)
+      .catch(error => {
+        if (error?.name !== 'AbortError') setPlanningArchiveError(error instanceof Error ? error : new Error(String(error)));
+    });
+    return () => controller.abort();
+  }, []);
+  if (planningArchiveError !== null) return <SnapshotError error={planningArchiveError} />;
+  if (planningArchive === null) return <SnapshotLoading />;
+  return <StoredSnapshot store={store} planningArchive={planningArchive} />;
 }
 
 function mountTracker() {

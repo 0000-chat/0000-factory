@@ -2,20 +2,33 @@ import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 import {
   addCalendarDay,
+  approvedPlanMarkForWorkEntry,
   buildWorkGanttModel,
   chartDateForDay,
   clampGanttZoom,
+  directMarksForWorkEntry,
+  continuousTimelineForMarks,
+  continuousTimelineForWorkEntry,
   fitZoomForGanttDateRange,
   formatGanttZoom,
+  groupWorkGanttRowsByOwner,
+  ganttDateTickInterval,
+  hasForecastMarks,
   paddedGanttDateRange,
   GANTT_DEFAULT_ZOOM,
   GANTT_MAX_ZOOM,
+  GANTT_DAILY_COLUMN_WIDTH,
+  GANTT_SELECTED_WEEK_PADDING_DAYS,
   GANTT_MIN_ZOOM,
   manilaTodayForChart,
   marksForWorkEntry,
   primaryWorkMark,
+  proposedEnvelopeLabel,
   shortWorkDate,
+  selectedWeekGanttDateRange,
+  workMarkDescription,
   workGanttDepthExpansion,
+  workGanttFitDateRange,
   workMarkLabel,
 } from '../src/work-gantt-model.mjs';
 import {
@@ -46,10 +59,175 @@ test('fit zoom includes date padding and can scale long ranges below 25 percent'
     days: 7,
   });
   assert.equal(fitZoomForGanttDateRange('2026-01-01', '2027-12-31', 800), 2.179);
-  assert.equal(fitZoomForGanttDateRange('2026-10-10', '2026-10-12', 800), GANTT_MAX_ZOOM);
+  assert.equal(fitZoomForGanttDateRange('2026-10-10', '2026-10-12', 800), 228.571);
   assert.equal(fitZoomForGanttDateRange('2026-01-01', '2045-12-31', 220), 0.06);
   assert.equal(fitZoomForGanttDateRange('2026-01-01', '2100-12-31', 220), 0.016);
   assert.equal(fitZoomForGanttDateRange('not-a-date', '2026-10-12', 800), null);
+});
+
+test('selected week fit excludes distant release targets from its date range', () => {
+  assert.deepEqual(workGanttFitDateRange({
+    selectedWeek: { start: '2026-10-12', end: '2026-10-16' },
+    startDay: '2026-10-12',
+    endDay: '2026-11-15',
+  }), {
+    startDay: '2026-10-12',
+    endDay: '2026-10-16',
+    days: 5,
+  });
+  assert.deepEqual(paddedGanttDateRange('2026-10-12', '2026-10-16', GANTT_SELECTED_WEEK_PADDING_DAYS), {
+    startDay: '2026-10-11',
+    endDay: '2026-10-17',
+    days: 7,
+  });
+  assert.equal(fitZoomForGanttDateRange('2026-10-12', '2026-10-16', 800, GANTT_DAILY_COLUMN_WIDTH, GANTT_SELECTED_WEEK_PADDING_DAYS), 380.952);
+});
+
+test('meeting focus windows keep four calendar weeks and their Monday to Friday focus', () => {
+  const focusWindow = {
+    start: '2026-10-05',
+    end: '2026-10-30',
+    focus: { start: '2026-10-12', end: '2026-10-16' },
+  };
+  assert.deepEqual(selectedWeekGanttDateRange(focusWindow), {
+    startDay: '2026-10-05',
+    endDay: '2026-10-30',
+    days: 26,
+  });
+  assert.deepEqual(selectedWeekGanttDateRange(focusWindow.focus), {
+    startDay: '2026-10-12',
+    endDay: '2026-10-16',
+    days: 5,
+  });
+});
+
+test('daily date ticks keep a readable minimum width as fit all changes zoom', () => {
+  assert.equal(ganttDateTickInterval(100), 1);
+  assert.equal(ganttDateTickInterval(50), 2);
+  assert.equal(ganttDateTickInterval(22.537), 5);
+  assert.equal(ganttDateTickInterval(0.001), 93334);
+});
+
+test('owner grouping preserves canonical leaf IDs and does not count parents as workload', () => {
+  const parent = entry('owner-parent', {}, { title: 'Project context', childIds: ['owner-task'] });
+  const task = entry('owner-task', { plannedStart: '2026-10-12', plannedDue: '2026-10-16' }, {
+    title: 'Task', parentId: parent.id, owner: 'JUAN', ownerName: 'Juan Chiu',
+  });
+  const model = buildWorkGanttModel({
+    projection: new Map([[parent.id, parent], [task.id, task]]),
+    visibleIds: new Set([parent.id, task.id]),
+    expandedIds: new Set([parent.id]),
+    itemsById: new Map([[parent.id, { id: parent.id, title: parent.title }], [task.id, { id: task.id, title: task.title, owner: 'JUAN', ownerName: 'Juan Chiu' }]]),
+  });
+  const grouped = groupWorkGanttRowsByOwner(model.rows, new Map([
+    [parent.id, { id: parent.id, title: parent.title }],
+    [task.id, { id: task.id, title: task.title, owner: 'JUAN', ownerName: 'Juan Chiu' }],
+  ]));
+  assert.deepEqual(grouped.map(row => row.id), ['owner-group:juan', 'owner-task']);
+  assert.equal(grouped[0].ownerGroupCount, 1);
+  assert.equal(grouped[1].ownerContextLabel, 'Project context');
+});
+
+test('owner grouping keeps an undated accepted leaf without inventing a bar', () => {
+  const undated = entry('undated-owner-task', {}, {
+    owner: 'owner-b',
+    ownerName: 'Owner B',
+  });
+  const model = buildWorkGanttModel({
+    projection: new Map([[undated.id, undated]]),
+    visibleIds: new Set([undated.id]),
+    expandedIds: new Set(),
+    itemsById: new Map([[undated.id, { id: undated.id, title: undated.title, owner: undated.owner, ownerName: undated.ownerName }]]),
+  });
+  const grouped = groupWorkGanttRowsByOwner(model.rows, new Map([
+    [undated.id, { id: undated.id, title: undated.title, owner: undated.owner, ownerName: undated.ownerName }],
+  ]));
+  assert.deepEqual(grouped.map(row => row.id), ['owner-group:owner-b', undated.id]);
+  assert.equal(grouped[0].ownerGroupCount, 1);
+  assert.equal(grouped[1].marks.length, 0);
+});
+
+test('owner grouping keeps accepted project and workstream records with direct work', () => {
+  const project = entry('beacon-project', {
+    ownPlannedStart: '2026-09-30',
+    ownPlannedDue: '2026-10-23',
+    plannedStart: '2026-09-30',
+    plannedDue: '2026-10-23',
+  }, { childIds: ['beacon-child'], owner: 'owner-a', ownerName: 'Owner A' });
+  const stream = entry('demo-workstream', {}, {
+    childIds: ['demo-child'],
+    owner: 'owner-b',
+    ownerName: 'Owner B',
+    own: {
+      state: 'recent',
+      firstDate: '2026-10-12',
+      lastDate: '2026-10-12',
+      evidenceIds: ['email-1'],
+    },
+  });
+  const structural = entry('structural-container', {}, {
+    childIds: ['structural-child'],
+    owner: 'owner-b',
+    ownerName: 'Owner B',
+  });
+  const projection = new Map([
+    [project.id, project],
+    [stream.id, stream],
+    [structural.id, structural],
+    ['beacon-child', entry('beacon-child', {}, { parentId: project.id })],
+    ['demo-child', entry('demo-child', {}, { parentId: stream.id })],
+    ['structural-child', entry('structural-child', {}, { parentId: structural.id })],
+  ]);
+  const items = new Map([
+    [project.id, { id: project.id, type: 'project', commitment: 'accepted', owner: project.owner, ownerName: project.ownerName }],
+    [stream.id, { id: stream.id, type: 'workstream', commitment: 'accepted', owner: stream.owner, ownerName: stream.ownerName }],
+    [structural.id, { id: structural.id, type: 'project', commitment: 'accepted', owner: structural.owner, ownerName: structural.ownerName }],
+  ]);
+  const model = buildWorkGanttModel({
+    projection,
+    visibleIds: new Set([project.id, stream.id, structural.id]),
+    expandedIds: new Set(),
+    itemsById: items,
+  });
+  const grouped = groupWorkGanttRowsByOwner(model.rows, items);
+  assert.deepEqual(grouped.filter(row => !row.ownerGroup).map(row => row.id), [project.id, stream.id]);
+  assert.equal(directMarksForWorkEntry(grouped.find(row => row.id === project.id)?.entry).some(mark => mark.sourceKind === 'approved'), true);
+  assert.equal(directMarksForWorkEntry(grouped.find(row => row.id === stream.id)?.entry).some(mark => mark.sourceKind === 'observed'), true);
+  assert.equal(grouped.some(row => row.id === structural.id), false);
+});
+
+test('owner grouping retains direct work on a contextual container but excludes child-only context', () => {
+  const direct = entry('contextual-direct-project', {
+    ownPlannedStart: '2026-10-01',
+    ownPlannedDue: '2026-10-10',
+    plannedStart: '2026-10-01',
+    plannedDue: '2026-10-10',
+  }, { childIds: ['contextual-direct-child'], owner: 'owner-a', ownerName: 'Owner A' });
+  const childOnly = entry('contextual-child-only-project', {}, {
+    childIds: ['contextual-child-only-child'],
+    owner: 'owner-b',
+    ownerName: 'Owner B',
+  });
+  const items = new Map([
+    [direct.id, { id: direct.id, type: 'project', commitment: 'accepted', owner: direct.owner, ownerName: direct.ownerName }],
+    [childOnly.id, { id: childOnly.id, type: 'project', commitment: 'accepted', owner: childOnly.owner, ownerName: childOnly.ownerName }],
+  ]);
+  const model = buildWorkGanttModel({
+    projection: new Map([
+      [direct.id, direct],
+      [childOnly.id, childOnly],
+      ['contextual-direct-child', entry('contextual-direct-child', {}, { parentId: direct.id })],
+      ['contextual-child-only-child', entry('contextual-child-only-child', {}, { parentId: childOnly.id })],
+    ]),
+    visibleIds: new Set([direct.id, childOnly.id]),
+    contextualIds: new Set([direct.id, childOnly.id]),
+    expandedIds: new Set(),
+    itemsById: items,
+  });
+  const grouped = groupWorkGanttRowsByOwner(model.rows, items);
+  const directRow = grouped.find(row => row.id === direct.id);
+  assert.equal(directRow?.contextual, false);
+  assert.equal(grouped.some(row => row.id === childOnly.id), false);
 });
 
 function entry(id, timeline, overrides = {}) {
@@ -84,6 +262,97 @@ function entry(id, timeline, overrides = {}) {
     ...overrides,
   };
 }
+
+test('forecast availability is independent of the forecast visibility toggle', () => {
+  const projection = new Map([
+    ['approved-only', entry('approved-only', { plannedStart: '2026-10-01', plannedDue: '2026-10-03' })],
+    ['forecasted', entry('forecasted', { forecastStart: '2026-10-04', forecastEnd: '2026-10-07' })],
+  ]);
+  assert.equal(hasForecastMarks(projection, ['approved-only']), false);
+  assert.equal(hasForecastMarks(projection, ['forecasted']), true);
+  assert.equal(hasForecastMarks(projection, []), false);
+});
+
+test('direct grouping marks exclude descendant rollups while preserving an own plan', () => {
+  const parent = entry('parent', {
+    plannedStart: '2026-10-01',
+    plannedDue: '2026-10-12',
+    proposedStart: '2026-10-01',
+    proposedEnd: '2026-10-12',
+    ownPlannedStart: '2026-10-04',
+    ownPlannedDue: '2026-10-08',
+  }, { childIds: ['child'] });
+  const child = entry('child', {
+    plannedStart: '2026-10-10',
+    plannedDue: '2026-10-12',
+    proposedStart: '2026-10-10',
+    proposedEnd: '2026-10-12',
+  }, { parentId: 'parent' });
+  const direct = directMarksForWorkEntry(parent);
+  assert.deepEqual(direct.map(mark => mark.sourceKind), ['approved']);
+  assert.deepEqual([direct[0].startDay, direct[0].endDay], ['2026-10-04', '2026-10-08']);
+  assert.equal(direct.some(mark => mark.startDay === '2026-10-10'), false);
+  assert.equal(marksForWorkEntry(child).some(mark => mark.sourceKind === 'proposed'), true);
+  assert.deepEqual([approvedPlanMarkForWorkEntry(parent).startDay, approvedPlanMarkForWorkEntry(parent).endDay], ['2026-10-04', '2026-10-08']);
+});
+
+test('projected rows retain approved bars and lifecycle metadata without commitment text', () => {
+  const projected = entry('shared-scheduled', {
+    plannedStart: '2026-10-10',
+    plannedDue: '2026-10-12',
+  }, {
+    status: 'active',
+    owner: 'fixture-owner',
+    ownerName: 'Fixture Owner',
+  });
+  const model = buildWorkGanttModel({
+    projection: new Map([[projected.id, projected]]),
+    visibleIds: new Set([projected.id]),
+    expandedIds: new Set(),
+    itemsById: new Map([[projected.id, { id: projected.id, title: projected.title, commitment: null }]]),
+  });
+  const row = model.rows[0];
+  const mark = row.marks.find(candidate => candidate.sourceKind === 'approved');
+  assert.deepEqual([mark?.startDay, mark?.endDay, mark?.point], ['2026-10-10', '2026-10-12', false]);
+  assert.equal(row.entry.status, 'active');
+  assert.equal(row.entry.owner, 'fixture-owner');
+});
+
+test('context parents aggregate child dates without inventing a status or owner', () => {
+  const parent = entry('context-parent', {
+    plannedStart: null,
+    plannedDue: null,
+  }, {
+    title: 'Context parent',
+    status: '',
+    owner: null,
+    childIds: ['shared-child'],
+  });
+  const child = entry('shared-child', {
+    plannedStart: '2026-10-10',
+    plannedDue: '2026-10-12',
+  }, {
+    title: 'Shared child',
+    parentId: 'context-parent',
+    status: 'active',
+    owner: 'fixture-owner',
+  });
+  const model = buildWorkGanttModel({
+    projection: new Map([[parent.id, parent], [child.id, child]]),
+    visibleIds: new Set([parent.id, child.id]),
+    expandedIds: new Set([parent.id]),
+    contextualIds: new Set([parent.id]),
+    itemsById: new Map([
+      [parent.id, { id: parent.id, title: parent.title, contextOnly: true }],
+      [child.id, { id: child.id, title: child.title, commitment: null }],
+    ]),
+  });
+  const row = model.rows.find(candidate => candidate.id === parent.id);
+  assert.equal(row.contextual, true);
+  assert.deepEqual([row.parentEnvelope.startDay, row.parentEnvelope.endDay], ['2026-10-10', '2026-10-12']);
+  assert.equal(row.entry.status, '');
+  assert.equal(row.entry.owner, null);
+});
 
 test('date-only values map to local chart cells without shifting Manila days', () => {
   const originalTimezone = process.env.TZ;
@@ -127,6 +396,115 @@ test('approved and observed end dates include their final calendar cell', () => 
   assert.equal(shortWorkDate('2026-10-03'), '10/3');
 });
 
+test('completed work keeps a source-backed historical activity mark', () => {
+  const completed = entry('completed-history', {
+    observedStart: '2026-10-05',
+    observedEnd: '2026-10-09',
+  }, { completed: true, status: 'done' });
+  const model = buildWorkGanttModel({
+    projection: new Map([[completed.id, completed]]),
+    visibleIds: new Set([completed.id]),
+    expandedIds: new Set(),
+  });
+  const observed = model.rows[0].marks.find(mark => mark.sourceKind === 'observed');
+  assert.deepEqual([observed?.startDay, observed?.endDay], ['2026-10-05', '2026-10-09']);
+});
+
+test('accepted proposed marks keep their kind and remain visible in parent rollups', () => {
+  const parent = entry('parent', {}, { childIds: ['child'] });
+  const child = entry('child', {
+    plannedStart: '2026-10-01',
+    plannedDue: '2026-10-03',
+    observedStart: '2026-10-04',
+    observedEnd: '2026-10-04',
+    proposedStart: '2026-10-08',
+    proposedEnd: '2026-10-08',
+    ownProposedScheduleKind: 'checkpoint',
+    ownProposedExplicit: true,
+  }, { parentId: 'parent' });
+  const proposal = marksForWorkEntry(child).find(mark => mark.sourceKind === 'proposed');
+  assert.equal(proposal?.acceptedProposal, true);
+  assert.equal(proposal?.proposedScheduleKind, 'checkpoint');
+  assert.match(proposal?.status?.name ?? '', /checkpoint/i);
+  assert.match(workMarkDescription(proposal), /Proposed checkpoint/);
+
+  const model = buildWorkGanttModel({
+    projection: new Map([[parent.id, parent], [child.id, child]]),
+    visibleIds: new Set([parent.id, child.id]),
+    expandedIds: new Set(),
+  });
+  const parentRow = model.rows.find(row => row.id === parent.id);
+  assert.equal(parentRow?.childApprovedEnvelope?.startDay, '2026-10-01');
+  assert.equal(parentRow?.childApprovedEnvelope?.endDay, '2026-10-03');
+  assert.equal(parentRow?.childObservedEnvelope?.startDay, '2026-10-04');
+  assert.equal(parentRow?.childObservedEnvelope?.endDay, '2026-10-04');
+  assert.equal(parentRow?.childProposedEnvelope?.startDay, '2026-10-08');
+  assert.equal(parentRow?.childProposedEnvelope?.endDay, '2026-10-08');
+  assert.equal(parentRow?.childProposedEnvelope?.primaryKind, 'proposed');
+  assert.equal(parentRow?.parentEnvelope?.primaryKind, 'mixed');
+  assert.equal(proposedEnvelopeLabel({ marks: [
+    { sourceKind: 'proposed', proposedScheduleKind: 'checkpoint' },
+    { sourceKind: 'proposed', proposedScheduleKind: 'slice' },
+  ] }), 'Proposed schedules');
+});
+
+test('continuous timeline extends an early activity span through scheduled dates without darkening the gap', () => {
+  const timeline = continuousTimelineForMarks([
+    { sourceKind: 'observed', startDay: '2026-10-08', endDay: '2026-10-09' },
+    { sourceKind: 'approved', startDay: '2026-10-10', endDay: '2026-10-15' },
+    { sourceKind: 'observed', startDay: '2026-10-13', endDay: '2026-10-14' },
+  ]);
+
+  assert.deepEqual([timeline.startDay, timeline.endDay], ['2026-10-08', '2026-10-15']);
+  assert.deepEqual(timeline.observedIntervals, [
+    { startDay: '2026-10-08', endDay: '2026-10-09' },
+    { startDay: '2026-10-13', endDay: '2026-10-14' },
+  ]);
+  assert.deepEqual([timeline.scheduledStartDay, timeline.scheduledEndDay], ['2026-10-10', '2026-10-15']);
+});
+
+test('continuous timeline rolls up direct parent and child dates without inventing undated child activity', () => {
+  const parent = entry('continuous-parent', {}, {
+    own: { state: 'recent', firstDate: '2026-10-10', lastDate: '2026-10-11' },
+    childIds: ['continuous-child', 'continuous-undated'],
+  });
+  const child = entry('continuous-child', {
+    ownPlannedStart: '2026-10-15',
+    ownPlannedDue: '2026-10-16',
+  }, {
+    parentId: parent.id,
+    own: { state: 'recent', firstDate: '2026-10-06', lastDate: '2026-10-07' },
+  });
+  const undated = entry('continuous-undated', {}, { parentId: parent.id });
+  const projection = new Map([
+    [parent.id, parent],
+    [child.id, child],
+    [undated.id, undated],
+  ]);
+
+  const timeline = continuousTimelineForWorkEntry(parent, projection);
+  assert.deepEqual([timeline.startDay, timeline.endDay], ['2026-10-06', '2026-10-16']);
+  assert.deepEqual(timeline.observedIntervals, [
+    { startDay: '2026-10-06', endDay: '2026-10-07' },
+    { startDay: '2026-10-10', endDay: '2026-10-11' },
+  ]);
+  assert.deepEqual([timeline.scheduledStartDay, timeline.scheduledEndDay], ['2026-10-15', '2026-10-16']);
+});
+
+test('continuous timeline supports only observed and only scheduled tasks', () => {
+  const observedOnly = continuousTimelineForMarks([
+    { sourceKind: 'observed', startDay: '2026-10-05', endDay: '2026-10-06' },
+  ]);
+  const scheduledOnly = continuousTimelineForMarks([
+    { sourceKind: 'approved', startDay: '2026-10-12', endDay: '2026-10-16' },
+  ]);
+
+  assert.deepEqual([observedOnly.startDay, observedOnly.endDay], ['2026-10-05', '2026-10-06']);
+  assert.deepEqual(observedOnly.observedIntervals, [{ startDay: '2026-10-05', endDay: '2026-10-06' }]);
+  assert.deepEqual([scheduledOnly.startDay, scheduledOnly.endDay], ['2026-10-12', '2026-10-16']);
+  assert.deepEqual(scheduledOnly.observedIntervals, []);
+});
+
 test('missing approved due does not create a plan and keeps an explicit forecast source-backed', () => {
   const projected = entry('without-due', {
     plannedStart: '2026-10-01',
@@ -165,6 +543,29 @@ test('due-only plans remain point marks and observed work after due is an overru
   assert.equal(due.endDay, '2026-10-02');
   assert.equal(observed.observedOverrun, true);
   assert.equal(primaryWorkMark(marks), due);
+});
+
+test('approved deadline-only data stays a point until an approved start is recorded', () => {
+  const deadlineOnly = entry('deadline-only', {
+    plannedDue: '2026-10-12',
+    ownPlannedDue: '2026-10-12',
+  });
+  const approvedRange = entry('approved-range', {
+    plannedStart: '2026-10-10',
+    plannedDue: '2026-10-12',
+    ownPlannedStart: '2026-10-10',
+    ownPlannedDue: '2026-10-12',
+  });
+
+  const point = marksForWorkEntry(deadlineOnly).find(mark => mark.sourceKind === 'approved');
+  const range = marksForWorkEntry(approvedRange).find(mark => mark.sourceKind === 'approved');
+  const ownPoint = approvedPlanMarkForWorkEntry(deadlineOnly);
+  const ownRange = approvedPlanMarkForWorkEntry(approvedRange);
+
+  assert.deepEqual([point?.startDay, point?.endDay, point?.point, point?.inferred], ['2026-10-12', '2026-10-12', true, false]);
+  assert.deepEqual([range?.startDay, range?.endDay, range?.point], ['2026-10-10', '2026-10-12', false]);
+  assert.deepEqual([ownPoint?.startDay, ownPoint?.endDay, ownPoint?.point], ['2026-10-12', '2026-10-12', true]);
+  assert.deepEqual([ownRange?.startDay, ownRange?.endDay, ownRange?.point], ['2026-10-10', '2026-10-12', false]);
 });
 
 test('collapsed rows retain full-projection rollups when filtered rows are hidden', () => {

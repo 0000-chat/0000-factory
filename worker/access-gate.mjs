@@ -38,6 +38,14 @@ function normalizedEmail(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
+/** @param {Readonly<{readerEmails:string[],readerEmailDomains?:string[]}>} access @param {string} email */
+function readerEmailAllowed(access, email) {
+  if (access.readerEmails.includes(email)) return true;
+  const at = email.lastIndexOf('@');
+  if (at <= 0 || at === email.length - 1 || email.indexOf('@') !== at) return false;
+  return Array.isArray(access.readerEmailDomains) && access.readerEmailDomains.includes(email.slice(at + 1));
+}
+
 async function accessKey(teamDomain, keyId, fetchImpl) {
   const result = await fetchImpl(`${teamDomain}/cdn-cgi/access/certs`, {
     headers: { Accept: 'application/json' },
@@ -54,7 +62,8 @@ async function accessKey(teamDomain, keyId, fetchImpl) {
 /**
  * Verify a Cloudflare Access JWT against the captured site policy. Access keys
  * are fetched only after issuer, audience, and time claims pass. The result is
- * either an exact reader email or the configured read-only service identity.
+ * either an exact reader email, a configured reader email domain, or the
+ * configured read-only service identity.
  */
 export async function verifyAccessJwt(token, access, {
   now = Date.now,
@@ -111,7 +120,7 @@ export async function verifyAccessJwt(token, access, {
     return { kind: 'service', clientId: payload.common_name };
   }
 
-  if (!claimEmail || !access.readerEmails.includes(claimEmail)) throw new Error('wrong Access identity');
+  if (!claimEmail || !readerEmailAllowed(access, claimEmail)) throw new Error('wrong Access identity');
   return claimEmail;
 }
 
@@ -141,8 +150,76 @@ function apiRequest(pathname) {
   return lower === '/api' || lower.startsWith('/api/') || lower.startsWith('/api%');
 }
 
+function isPublicProvenancePath(pathname) {
+  return pathname === '/factory-provenance.json';
+}
+
+async function publicProvenanceResponse(request, env) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return new Response('Method not allowed.\n', {
+      status: 405,
+      headers: { Allow: 'GET, HEAD', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
+    });
+  }
+  if (!env.ASSETS || typeof env.ASSETS.fetch !== 'function') return response('Provenance is unavailable.\n', 503);
+  const asset = await env.ASSETS.fetch(new Request(request.url, { method: 'GET' }));
+  if (!asset.ok) return response('Provenance is unavailable.\n', 503);
+  let value;
+  try {
+    value = await asset.json();
+  } catch {
+    return response('Provenance is unavailable.\n', 503);
+  }
+  const factory = value?.factory;
+  if (
+    value?.schemaVersion !== 1
+    || !factory
+    || factory.repository !== 'https://github.com/0000-chat/0000-factory.git'
+    || factory.branch !== 'codex/weekly-planning-archive'
+    || !/^[0-9a-f]{40}$/u.test(factory.commit ?? '')
+  ) return response('Provenance is unavailable.\n', 503);
+  return new Response(request.method === 'HEAD' ? null : JSON.stringify({
+    schemaVersion: 1,
+    factory: { repository: factory.repository, branch: factory.branch, commit: factory.commit },
+    worker: typeof value.worker === 'string' ? value.worker : undefined,
+  }) + (request.method === 'HEAD' ? '' : '\n'), {
+    status: 200,
+    headers: {
+      'Cache-Control': 'no-store, max-age=0',
+      'Content-Type': 'application/json; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+}
+
 function isPublishPath(pathname) {
   return pathname === '/api/publish' || pathname === '/api/publish/' || pathname.startsWith('/api/publish/');
+}
+
+function normalizedPathname(pathname) {
+  if (typeof pathname !== 'string' || !pathname.startsWith('/')) return null;
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+  if (decoded.includes('\\') || decoded.includes('\u0000')) return null;
+  const segments = decoded.split('/');
+  if (segments.some(segment => segment === '.' || segment === '..')) return null;
+  return `/${segments.filter(Boolean).join('/')}`.toLowerCase();
+}
+
+function isPlanningPath(pathname) {
+  const normalized = normalizedPathname(pathname);
+  // A malformed encoded URL must not fall through to the SPA when a feature
+  // is disabled. This fail-closed branch also prevents partial decoding from
+  // changing which route boundary is being checked.
+  if (normalized === null) return true;
+  return normalized === '/weekly-planning'
+    || normalized.startsWith('/weekly-planning/')
+    || normalized === '/planning'
+    || normalized.startsWith('/planning/');
 }
 
 function createConfiguredWorker(instance, options) {
@@ -154,6 +231,8 @@ function createConfiguredWorker(instance, options) {
   return {
     instance,
     async fetch(request, env = {}) {
+      const pathname = new URL(request.url).pathname;
+      if (isPublicProvenancePath(pathname)) return publicProvenanceResponse(request, env);
       // This check is intentionally before token parsing, Access key fetches,
       // assets, and publisher credential construction.
       if (access.kind !== 'ready') return response('Private viewer is not configured.', 503);
@@ -168,7 +247,6 @@ function createConfiguredWorker(instance, options) {
         return response('Access required.', 403);
       }
 
-      const pathname = new URL(request.url).pathname;
       if (apiRequest(pathname)) {
         if (!isPublishPath(pathname)) return apiJsonError('Not found.', 404, {}, request.method);
         if (typeof verifiedActor !== 'string') {
@@ -184,6 +262,10 @@ function createConfiguredWorker(instance, options) {
           ...options,
           instance,
         });
+      }
+
+      if (!instance.features.weeklyPlanning && isPlanningPath(pathname)) {
+        return response('Not found.', 404);
       }
 
       if (!env.ASSETS || typeof env.ASSETS.fetch !== 'function') {

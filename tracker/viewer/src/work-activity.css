@@ -65,11 +65,19 @@
 .work-tree-icon { display: inline-flex; flex: 0 0 auto; color: var(--muted-foreground); }
 .work-tree .tracker-tree-label { flex: 1 1 auto; gap: 3px; overflow: hidden; }
 .work-tree-title { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.work-tree-title .work-reference-code { flex: 0 0 auto; }
 .work-tree-title strong { min-width: 0; overflow: hidden; color: var(--foreground); font-size: 0.82rem; font-weight: 690; text-overflow: ellipsis; white-space: nowrap; }
 .work-tree .tracker-tree-label small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work-tree .tree-row-meta { min-width: 0; flex: 0 1 auto; gap: 6px; }
 .work-tree .work-owner-dri { max-width: 120px; }
 .work-tree-children { margin-left: 3px; }
+.work-tree-owner-group { position: relative; }
+.work-tree-owner-group-heading { display: flex; min-height: 32px; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 3px 0; padding: 6px 10px; border-bottom: 1px solid var(--border); border-radius: 6px 6px 0 0; background: color-mix(in srgb, var(--accent) 46%, transparent); color: var(--foreground); }
+.work-tree-owner-group-heading strong { overflow: hidden; font-size: 0.72rem; text-overflow: ellipsis; white-space: nowrap; }
+.work-tree-owner-group-heading span { flex: 0 0 auto; color: var(--muted-foreground); font-size: 0.62rem; }
+.work-tree-owner-group-items { margin-left: 3px; }
+.work-tree-owner-group:focus-visible > .work-tree-owner-group-heading { outline: 2px solid color-mix(in srgb, var(--ring) 65%, transparent); outline-offset: -2px; }
+.work-tree-owner-context { color: var(--muted-foreground); }
 .work-attention-reasons { display: inline-flex; align-items: center; gap: 4px; }
 .work-attention-reasons .tracker-badge { max-width: 142px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (min-width: 761px) and (max-width: 1100px) {

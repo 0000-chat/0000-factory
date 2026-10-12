@@ -139,6 +139,7 @@ export function GlobalSearchDialog({
               >
                 <span className="global-search-result-copy">
                   <span className="global-search-result-title">{result.title}</span>
+                  {result.referenceCode ? <span className="global-search-result-code">{result.referenceCode}</span> : null}
                   {result.subtitle ? <span className="global-search-result-subtitle">{result.subtitle}</span> : null}
                 </span>
               </CommandItem>)}

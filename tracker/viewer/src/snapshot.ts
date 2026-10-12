@@ -35,6 +35,10 @@ export interface TrackerHealth extends SnapshotRecord {
 export interface TrackerSchedule extends SnapshotRecord {
   plannedStart: string | null;
   plannedEnd: string | null;
+  proposedStart: string | null;
+  proposedEnd: string | null;
+  proposedScheduleKind: 'span' | 'slice' | 'checkpoint' | null;
+  proposedExplicit: boolean;
   forecastStart: string | null;
   forecastEndMin: string | null;
   forecastEndMax: string | null;
@@ -80,6 +84,7 @@ export interface TrackerRelease extends SnapshotRecord {
 
 export interface TrackerItem extends SnapshotRecord {
   id: string;
+  referenceCode?: string;
   title: string;
   type?: string;
   status: string;
@@ -108,6 +113,8 @@ export interface TrackerItem extends SnapshotRecord {
   ownerName?: string | null;
   phase?: string | null;
   target?: string | null;
+  /** Structural-only context supplied by a team projection. */
+  contextOnly?: boolean;
 }
 
 export interface TrackerPlan extends SnapshotRecord {
@@ -188,6 +195,17 @@ export interface TrackerSource extends SnapshotRecord {
   builtAt?: string;
   committedAt?: string | null;
   dirty?: boolean;
+  layout?: string;
+  projectionId?: string;
+  week?: string;
+  revision?: string;
+  policyRevision?: string;
+  /** Timestamp supplied by the projection export, when available. */
+  exportedAt?: string;
+  /** Alias accepted from projection producers that call this generatedAt. */
+  projectionGeneratedAt?: string;
+  /** Stable digest of the exported projection, when available. */
+  projectionDigest?: string;
 }
 
 export interface TrackerSnapshot extends SnapshotRecord {

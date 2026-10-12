@@ -63,6 +63,14 @@ async function editTitle(page: Page, title: string) {
   await expect(page.getByRole('heading', { name: title, exact: true, level: 1 })).toBeVisible();
 }
 
+test('populated Gantt renders without runtime page errors', async ({ page }) => {
+  const pageErrors = watchPageErrors(page);
+  await page.goto('/work?mode=gantt');
+  await waitForShell(page);
+  await expect(page.getByRole('heading', { name: 'Work', exact: true, level: 1 })).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
+
 test('populated synthetic routes show work, plans, reports, and team data', async ({ page }) => {
   const pageErrors = watchPageErrors(page);
   const id = projectId();
@@ -70,6 +78,8 @@ test('populated synthetic routes show work, plans, reports, and team data', asyn
   const snapshot = await readSnapshot(page);
   expect(snapshot.items).toHaveLength(94);
   expect(snapshot.source?.commit).toMatch(/^[0-9a-f]{40}$/);
+  const foundation = snapshot.items?.find((item) => (item as { id?: string }).id === itemId) as { referenceCode?: string } | undefined;
+  expect(foundation?.referenceCode).toMatch(/^T-[A-Z0-9]{6}$/);
 
   await expect(page.getByRole('heading', { name: 'Work', exact: true, level: 1 })).toBeVisible();
   await expect(page.getByText('Synthetic foundation task', { exact: true })).toBeVisible();
@@ -96,6 +106,58 @@ test('populated synthetic routes show work, plans, reports, and team data', asyn
   const sourceHref = await page.locator('a.team-source-link').first().getAttribute('href');
   expect(sourceHref).toBe(`https://github.com/fixture-${id}/tracker-${id}/blob/${sourceCommit}/${folderPrefix}tracker/updates/fixture-foundation-task/initial-observation.md`);
   expect(pageErrors).toEqual([]);
+});
+
+test('Gantt keeps schedule controls compact and opens row investigation', async ({ page }) => {
+  const pageErrors = watchPageErrors(page);
+  await openRoute(page, '/work');
+
+  await expect(page.getByText('Work activity timeline', { exact: true })).toBeVisible();
+  const activityToggle = page.getByRole('button', { name: 'Hide recorded activity', exact: true });
+  await expect(activityToggle).toBeVisible();
+  await expect(activityToggle).toHaveAttribute('aria-pressed', 'true');
+  await activityToggle.click();
+  const showActivityToggle = page.getByRole('button', { name: 'Show recorded activity', exact: true });
+  await expect(showActivityToggle).toHaveAttribute('aria-pressed', 'false');
+  await showActivityToggle.click();
+  await expect(page.getByRole('button', { name: 'Hide recorded activity', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Show forecast', exact: true })).toBeVisible();
+
+  const row = page.getByRole('button', { name: /Open details for Synthetic foundation task/ }).first();
+  await expect(row).toBeVisible();
+  const snapshot = await readSnapshot(page);
+  const referenceCode = (snapshot.items?.find((item) => (item as { id?: string }).id === itemId) as { referenceCode?: string } | undefined)?.referenceCode;
+  expect(referenceCode).toMatch(/^T-[A-Z0-9]{6}$/);
+  await expect(row).toContainText(referenceCode!);
+  await row.click();
+
+  const investigation = page.getByTestId('work-gantt-investigation');
+  await expect(investigation).toBeVisible();
+  await expect(investigation.getByRole('heading', { name: /Synthetic foundation task/, level: 2 })).toBeVisible();
+  await expect(investigation).toContainText(referenceCode!);
+  await expect(investigation.getByText('Approved schedule', { exact: true })).toBeVisible();
+  await expect(investigation.getByRole('button', { name: 'Open full details', exact: true })).toBeVisible();
+  await investigation.getByRole('button', { name: 'Close work item investigation', exact: true }).click();
+  await expect(investigation).toBeHidden();
+  await openRoute(page, '/work?mode=kanban');
+  const kanbanTask = page.locator('.kanban-task').filter({ hasText: 'Synthetic foundation task' }).first();
+  await expect(kanbanTask).toBeVisible();
+  await expect(kanbanTask).toContainText(referenceCode!);
+  expect(pageErrors).toEqual([]);
+});
+
+test('synthetic signed-in identity marks only its exact assigned owner', async ({ page }) => {
+  await page.route('**/api/me', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ schemaVersion: 1, actor: { kind: 'human', personId: ' fixture-don ' } }),
+  }));
+  await openRoute(page, '/work?mode=table');
+
+  await expect(page.getByTestId('viewer-identity')).toContainText('Fixture Don');
+  const assignedRow = page.locator('.work-table-wrap tr').filter({ hasText: 'Synthetic foundation task' });
+  await expect(assignedRow.getByTestId('assigned-to-you')).toHaveCount(1);
+  await expect(assignedRow.getByRole('link')).toHaveAttribute('aria-label', /Assigned to you/);
 });
 
 test('local title drafts survive a reload and field locks coordinate two tabs', async ({ page }) => {

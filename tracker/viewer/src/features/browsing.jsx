@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Link } from '@tanstack/react-router';
 import {
   ArrowUpRight,
@@ -26,6 +26,7 @@ import { CalendarView, KanbanView } from '../work-modes.jsx';
 import { WorkActivityControls } from '../work-activity-ui.jsx';
 import { WorkGantt } from '../work-gantt.jsx';
 import { WorkTree } from '../work-tree.jsx';
+import { WorkWeekControls } from '../work-week-controls.tsx';
 import {
   AttentionCard,
   BadgeChip,
@@ -64,6 +65,7 @@ function ScheduleInline({ item }) {
   const minimum = schedule.forecastEndMin || schedule.forecastEndMax;
   const maximum = schedule.forecastEndMax || schedule.forecastEndMin;
   if (minimum || maximum) return <span className="tree-forecast" title="Recorded forecast end">Forecast · {formatDate(minimum)}{maximum && maximum !== minimum ? `–${formatDate(maximum)}` : ''}</span>;
+  if (schedule.proposedEnd) return <span className="tree-forecast tree-proposed" title={schedule.proposedScheduleKind === 'checkpoint' ? 'Proposed checkpoint end' : schedule.proposedScheduleKind === 'slice' ? 'Proposed slice end' : 'Proposed schedule end'}>{schedule.proposedScheduleKind === 'checkpoint' ? 'Checkpoint' : schedule.proposedScheduleKind === 'slice' ? 'Slice' : 'Proposed'} · {formatDate(schedule.proposedEnd)}</span>;
   if (schedule.plannedEnd && schedule.approved === true && isAccepted(item)) return <span className="tree-forecast tree-baseline" title="Approved baseline end">Baseline · {formatDate(schedule.plannedEnd)}</span>;
   if (schedule.plannedEnd && !isAccepted(item)) return <span className="tree-forecast tree-proposed" title="Proposed end">{commitmentLabel(item)} · {formatDate(schedule.plannedEnd)}</span>;
   return <span className="tree-forecast" title="No approved or forecast dates">Unscheduled</span>;
@@ -76,10 +78,10 @@ function scheduleSortValue(item) {
 
 function WorkTable({ items, contextualIds = new Set(), onSelect }) {
   const columns = useMemo(() => [
-    { accessorKey: 'title', header: 'Work', cell: ({ row }) => { const item = row.original; return <span className="work-title-cell"><span>{item.title}</span>{!isAccepted(item) ? <BadgeChip tone={isDraft(item) ? 'slate' : 'amber'}>{commitmentLabel(item)}</BadgeChip> : null}</span>; } },
+    { accessorKey: 'title', header: 'Work', cell: ({ row }) => { const item = row.original; return <span className="work-title-cell">{item.referenceCode ? <code className="work-reference-code">{item.referenceCode}</code> : null}<span>{item.title}</span>{!isAccepted(item) ? <BadgeChip tone={isDraft(item) ? 'slate' : 'amber'}>{commitmentLabel(item)}</BadgeChip> : null}</span>; } },
     { accessorKey: 'status', header: 'Status', sortingAccessor: item => item.status, cell: ({ row }) => humanize(row.original.status) },
     { id: 'health', header: 'Health', sortingAccessor: item => item.health?.state ?? null, cell: ({ row }) => healthLabel(row.original.health?.state) },
-    { id: 'owner', header: 'Owner', sortingAccessor: item => item.ownerName || item.owner || null, cell: ({ row }) => row.original.owner && row.original.owner !== 'unassigned' ? <PersonLink value={row.original.owner} name={row.original.ownerName} avatar className="work-table-owner-link" /> : 'Unassigned' },
+    { id: 'owner', header: 'Owner', sortingAccessor: item => item.ownerName || item.owner || null, cell: ({ row }) => row.original.owner && row.original.owner !== 'unassigned' ? <PersonLink value={row.original.owner} name={row.original.ownerName} avatar assignment className="work-table-owner-link" /> : 'Unassigned' },
     { id: 'progress', header: 'Verified progress', sortingAccessor: item => isAccepted(item) ? progressPercent(item.progress) : null, cell: ({ row }) => <ProgressInline item={row.original} /> },
     { id: 'schedule', header: 'Schedule', sortingAccessor: scheduleSortValue, cell: ({ row }) => <><ScheduleInline item={row.original} />{contextualIds.has(row.original.id) ? <BadgeChip tone="slate">Context</BadgeChip> : null}</> },
     { id: 'children', header: 'Children', sortingAccessor: item => item.childSummary?.total, cell: ({ row }) => row.original.childSummary.total ? `${row.original.childSummary.done}/${row.original.childSummary.total} done` : '—' },
@@ -92,6 +94,14 @@ function WorkTable({ items, contextualIds = new Set(), onSelect }) {
     }
   };
   return <div className="work-table-wrap"><TableProvider columns={columns} data={items}><TableHeader>{({ headerGroup }) => <TableHeaderGroup headerGroup={headerGroup}>{({ header }) => <TableHead header={header} />}</TableHeaderGroup>}</TableHeader><TableBody>{({ row }) => <TableRow row={row} className="work-table-row" tabIndex={0} onClick={event => { event.currentTarget.focus(); selectRow(row); }} onKeyDown={event => handleRowKeyDown(row, event)}>{({ cell }) => <TableCell cell={cell} />}</TableRow>}</TableBody></TableProvider></div>;
+}
+
+function UndatedActiveCommitments({ items, onSelect }) {
+  if (!items.length) return null;
+  return <section className="work-undated-active" aria-labelledby="work-undated-active-heading">
+    <div className="group-heading"><div><h3 id="work-undated-active-heading">Active commitments without complete dates</h3><p className="source-note">These accepted items stay visible as unscheduled rows; no dates are inferred.</p></div><BadgeChip tone="amber">{items.length}</BadgeChip></div>
+    <div className="work-undated-active-list">{items.map(item => <button key={item.id} type="button" onClick={() => onSelect(item.id)}><span><strong>{item.title}</strong><small>{item.ownerName || item.owner || 'Owner not recorded'} · {humanize(item.status)}</small></span><ArrowUpRight size={15} aria-hidden="true" /></button>)}</div>
+  </section>;
 }
 
 function scheduleFeatures(items) {
@@ -109,12 +119,22 @@ function ExternalDependencies({ items, onSelect }) {
 }
 
 /** @param {import('./contracts').WorkViewProps} props */
-export function WorkView({ items, roots, data, selectedId, onSelectItem, mode = 'gantt', onModeChange, externalItems, visibleIds, contextualIds = new Set(), managerProjection, managerEnabled = false, workActivity, toolbarControls, navigationControls, navigationDate }) {
+export function WorkView({ items, roots, data, selectedId, onSelectItem, mode = 'gantt', onModeChange, externalItems, visibleIds, contextualIds = new Set(), managerProjection, managerEnabled = false, workActivity, toolbarControls, navigationControls, navigationDate, selectedWeek, focusWindow = null, workflow = 'standard', onWorkflowChange = () => {}, onWeekChange = () => {}, undatedActiveItems = [], groupByOwner = false, onGroupByOwnerChange = () => {}, presentationMode = false, onPresentationModeChange = () => {} }) {
   const onSelect = onSelectItem;
   const workloadItems = useMemo(() => items.filter(item => !contextualIds.has(item.id)), [items, contextualIds]);
   const managerContextOnly = managerEnabled && (mode === 'tree' || mode === 'gantt') && items.length > 0;
   const calendarFeatures = useMemo(() => scheduleFeatures(workloadItems), [workloadItems]);
-  return <Card className="surface-card work-card">
+  useEffect(() => {
+    if (!presentationMode) return undefined;
+    const onKeyDown = event => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      onPresentationModeChange(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onPresentationModeChange, presentationMode]);
+  return <Card className={`surface-card work-card${presentationMode ? ' work-card-presentation' : ''}`}>
     <CardHeader className="surface-card-header">
       <div className="work-heading"><p className="eyebrow">Execution</p><h1 className="work-title">Work</h1><CardDescription>Accepted work, linked plans, delivery health, and recorded schedule.</CardDescription></div>
       <div className="work-view-switcher" role="group" aria-label="Work view">
@@ -126,14 +146,28 @@ export function WorkView({ items, roots, data, selectedId, onSelectItem, mode = 
       </div>
     </CardHeader>
     <CardContent className="work-content">
+      {selectedWeek ? <WorkWeekControls
+        workflow={workflow}
+        selectedWeek={selectedWeek}
+        focusWindow={focusWindow}
+        onWorkflowChange={onWorkflowChange}
+        onWeekChange={onWeekChange}
+        groupByOwner={groupByOwner}
+        onGroupByOwnerChange={onGroupByOwnerChange}
+        presentationMode={presentationMode}
+        onPresentationModeChange={onPresentationModeChange}
+      /> : null}
+      {workflow === 'next-week' ? <div className="work-next-week-note" role="status">Candidate queue is limited to open current or upcoming tasks with recorded readiness. Review the Tree queue first; switch to Gantt for the recorded next-week preview. No future dates are inferred.</div> : null}
       <div className="work-toolbar">{toolbarControls}</div>
       <div className="work-content-topbar">
         {mode === 'tree' || mode === 'gantt' ? <WorkActivityControls workActivity={workActivity} /> : <span />}
         <div className="work-date-controls">{navigationControls}</div>
       </div>
-      <ExternalDependencies items={externalItems} onSelect={onSelect} />{workloadItems.length === 0 && !managerContextOnly
-      ? <TrackerEmpty className="work-no-matches" icon={<Inbox size={22} aria-hidden="true" />} title={<h3>No work matches these filters.</h3>} description="Change or reset the Work filters to show items again." />
-      : mode === 'tree' ? <WorkTree roots={roots} data={data} selectedId={selectedId} onSelect={onSelect} visibleIds={visibleIds} contextualIds={contextualIds} workActivity={workActivity} managerProjection={managerProjection} managerEnabled={managerEnabled} /> : mode === 'table' ? <WorkTable items={items} contextualIds={contextualIds} onSelect={onSelect} /> : mode === 'calendar' ? <CalendarView items={items} features={calendarFeatures} releases={data.releases ?? []} team={data.team} contextualIds={contextualIds} selectedId={selectedId} onSelect={onSelect} navigationDate={navigationDate} /> : mode === 'kanban' ? <KanbanView items={items} contextualIds={contextualIds} selectedId={selectedId} onSelect={onSelect} /> : <WorkGantt items={items} data={data} selectedId={selectedId} onSelect={onSelect} visibleIds={visibleIds} contextualIds={contextualIds} workActivity={workActivity} managerProjection={managerProjection} managerEnabled={managerEnabled} navigationDate={navigationDate} />}</CardContent>
+      <ExternalDependencies items={externalItems} onSelect={onSelect} />
+      {workflow === 'this-week' ? <UndatedActiveCommitments items={undatedActiveItems} onSelect={onSelect} /> : null}
+      {workloadItems.length === 0 && !managerContextOnly
+      ? <TrackerEmpty className="work-no-matches" icon={<Inbox size={22} aria-hidden="true" />} title={<h3>{data.source?.layout === 'team-projection-v1' && data.items.length === 0 ? 'No shared work is available yet.' : 'No work matches these filters.'}</h3>} description={data.source?.layout === 'team-projection-v1' && data.items.length === 0 ? 'No tasks were included in this shared snapshot.' : 'Change or reset the Work filters to show items again.'} />
+      : mode === 'tree' ? <WorkTree roots={roots} data={data} selectedId={selectedId} onSelect={onSelect} visibleIds={visibleIds} contextualIds={contextualIds} workActivity={workActivity} managerProjection={managerProjection} managerEnabled={managerEnabled} groupByOwner={groupByOwner} /> : mode === 'table' ? <WorkTable items={items} contextualIds={contextualIds} onSelect={onSelect} /> : mode === 'calendar' ? <CalendarView items={items} features={calendarFeatures} releases={data.releases ?? []} team={data.team} contextualIds={contextualIds} selectedId={selectedId} onSelect={onSelect} navigationDate={navigationDate} /> : mode === 'kanban' ? <KanbanView items={items} contextualIds={contextualIds} selectedId={selectedId} onSelect={onSelect} /> : <WorkGantt items={items} data={data} selectedId={selectedId} onSelect={onSelect} visibleIds={visibleIds} contextualIds={contextualIds} workActivity={workActivity} managerProjection={managerProjection} managerEnabled={managerEnabled} navigationDate={navigationDate} selectedWeek={workflow === 'standard' ? null : selectedWeek} focusWindow={workflow === 'standard' ? null : focusWindow} groupByOwner={groupByOwner} presentationMode={presentationMode} onExitPresentationMode={() => onPresentationModeChange(false)} />}</CardContent>
   </Card>;
 }
 

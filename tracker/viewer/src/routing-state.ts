@@ -9,6 +9,7 @@ export type ProjectScope = string;
 export type OrganizationFilter = 'all' | '__unrecorded__' | string;
 export type ActivityFilter = WorkActivityFilter;
 export type UndatedFilter = 'include' | 'exclude' | 'only';
+export type WorkWorkflow = 'this-week' | 'daily-review' | 'next-week';
 export const WORK_MANAGER_PRESETS = ['none', 'team', 'moving', 'delivery', 'needs-me'] as const;
 export type WorkManagerPreset = (typeof WORK_MANAGER_PRESETS)[number];
 
@@ -44,6 +45,10 @@ export interface WorkFilters {
   readonly to?: string;
   readonly undated: UndatedFilter;
   readonly date?: string;
+  /** Optional workflow marker. Omitted for the ordinary Work view. */
+  readonly workflow?: WorkWorkflow;
+  readonly groupByOwner?: boolean;
+  readonly presentationMode?: boolean;
 }
 
 export interface WorkSearch extends WorkFilters {
@@ -151,6 +156,10 @@ function parseUndated(value: unknown): UndatedFilter {
   return value === 'exclude' || value === 'only' ? value : 'include';
 }
 
+function parseWorkflow(value: unknown): WorkWorkflow | undefined {
+  return value === 'this-week' || value === 'daily-review' || value === 'next-week' ? value : undefined;
+}
+
 function parseStringArray(value: unknown): string[] {
   let candidate: unknown = value;
   if (typeof candidate === 'string') {
@@ -202,6 +211,9 @@ export function parseWorkSearch(
   if (from !== undefined && to !== undefined && from > to) [from, to] = [to, from];
   const q = typeof raw.q === 'string' ? raw.q : '';
   const date = parseDate(raw.date);
+  const workflow = parseWorkflow(raw.workflow);
+  const groupByOwner = raw.groupByOwner === true || raw.groupByOwner === 'true' ? true : undefined;
+  const presentationMode = raw.presentationMode === true || raw.presentationMode === 'true' ? true : undefined;
   return {
     scope: parseScope(raw.scope, options),
     mode: parseMode(raw.mode),
@@ -218,6 +230,9 @@ export function parseWorkSearch(
     ...(to === undefined ? {} : { to }),
     undated: parseUndated(raw.undated),
     ...(date === undefined ? {} : { date }),
+    ...(workflow === undefined ? {} : { workflow }),
+    ...(groupByOwner === undefined ? {} : { groupByOwner }),
+    ...(presentationMode === undefined ? {} : { presentationMode }),
     ...(item === undefined ? {} : { item }),
   };
 }
@@ -292,6 +307,9 @@ export function compactWorkSearch(
     ...(normalized.to === undefined ? {} : { to: normalized.to }),
     ...(normalized.undated === 'include' ? {} : { undated: normalized.undated }),
     ...(normalized.date === undefined ? {} : { date: normalized.date }),
+    ...(normalized.workflow === undefined ? {} : { workflow: normalized.workflow }),
+    ...(normalized.groupByOwner === undefined ? {} : { groupByOwner: String(normalized.groupByOwner) }),
+    ...(normalized.presentationMode === undefined ? {} : { presentationMode: String(normalized.presentationMode) }),
     ...(normalized.item === undefined ? {} : { item: normalized.item }),
   };
 }

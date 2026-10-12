@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
@@ -9,6 +9,7 @@ import { acceptanceState, archiveCandidates, loadTracker, validateTracker } from
 import { loadTrackerFromFiles, validateTracker as validateTrackerCore } from './model-core.mjs';
 import { extractMarkdownSections, extractMarkdownTitle, scanMarkdownHeadings } from './markdown.mjs';
 import { acceptedTaskDigest, canTransitionCommitment, taskApprovalDigest } from './planning.mjs';
+import { resolveTaskReference, taskCodeForId, taskCodeIndex } from './task-codes.mjs';
 import { renderViews } from './views.mjs';
 import { fixtureInstance, writeFixtureData } from '../../tests/helpers/fixture-data.mjs';
 import './activity-evidence.test.mjs';
@@ -138,6 +139,28 @@ function writeItem(root, item, bucket = 'product') {
   return path;
 }
 
+test('task reference codes are stable, searchable, and collision checked', () => {
+  const first = 'collision-canonical-13753';
+  const second = 'collision-canonical-34460';
+  assert.equal(taskCodeForId('fixture-project'), 'T-RTUDWH');
+  const baseline = taskCodeIndex([{ data: { id: 'fixture-project', title: 'Original title' } }]);
+  const reordered = taskCodeIndex([
+    { data: { id: 'synthetic-alpha', title: 'Another task' } },
+    { data: { id: 'fixture-project', title: 'Renamed title' } },
+  ]);
+  assert.equal(baseline.get('T-RTUDWH'), 'fixture-project');
+  assert.equal(reordered.get('T-RTUDWH'), 'fixture-project');
+  assert.equal(taskCodeForId(first), taskCodeForId(second));
+  assert.throws(() => taskCodeIndex([{ id: first }, { id: second }]), /task reference code collision: T-47XGK6/);
+  assert.equal(resolveTaskReference('T-rtudwh', [{ id: 'fixture-project' }]), 'fixture-project');
+  assert.equal(resolveTaskReference('fixture-project', [{ id: 'fixture-project' }]), 'fixture-project');
+});
+
+test('tracker validation reports task reference-code collisions', () => {
+  const records = [record('collision-canonical-13753'), record('collision-canonical-34460')];
+  assert.match(validateTrackerCore({ items: records }).join('\n'), /task reference code validation failed: task reference code collision: T-47XGK6/);
+});
+
 test('the unified loader validates planned and accepted items and renders planned context', () => {
   const root = fixture();
   const plannedParent = record('planned-parent', { type: 'workstream' });
@@ -184,6 +207,40 @@ test('the filesystem adapter and pure file-map loader share full populated fixtu
     assert.deepEqual(validateTrackerCore(loadedFromFiles), validateTracker(records));
     assert.deepEqual(loadedFromFiles.items.map(item => item.data.id), records.items.map(item => item.data.id));
     assert.deepEqual(loadedFromFiles.people.map(person => person.id), records.people.map(person => person.id));
+  } finally {
+    fixtureData.cleanup();
+    rmSync(dataRepo, { recursive: true, force: true });
+  }
+});
+
+test('configured approver aliases and linked migration decisions remain instance-neutral', () => {
+  const instance = fixtureInstance({ id: 'migration-compatibility', folderPath: '' });
+  mkdirSync(testTempRoot, { recursive: true });
+  const dataRepo = mkdtempSync(join(testTempRoot, 'migration-compatibility-'));
+  const fixtureData = writeFixtureData({ repositoryPath: dataRepo, instance, mode: 'populated' });
+  const fixtureDecision = 'project-alpha-delivery-schedule-2026-09-30';
+  const configuredDecision = 'synthetic-delivery-decision';
+  try {
+    const decisionPath = join(fixtureData.dataPath, 'tracker/decisions', `${fixtureDecision}.md`);
+    const decisionText = readFileSync(decisionPath, 'utf8')
+      .replace(`id: ${fixtureDecision}`, `id: ${configuredDecision}`);
+    const migrationPath = join(fixtureData.dataPath, 'tracker/migrations/unified-work.json');
+    const migration = JSON.parse(readFileSync(migrationPath, 'utf8'));
+    for (const entry of Object.values(migration.legacyApprovals)) entry.decision = configuredDecision;
+    writeFileSync(join(fixtureData.dataPath, 'tracker/decisions', `${configuredDecision}.md`), decisionText);
+    rmSync(decisionPath);
+    writeFileSync(migrationPath, `${JSON.stringify(migration, null, 2)}\n`);
+    const records = loadTracker({ dataRepo: fixtureData.dataPath, instance: fixtureData.instance });
+    for (const decision of records.decisions) {
+      decision.data.owner = 'team-lead';
+      decision.data.approved_by = 'team-lead';
+    }
+    for (const record of [...records.items, ...records.plans, ...records.milestones]) {
+      if (record.data.approved_by) record.data.approved_by = 'team-lead';
+      if (record.data.confirmed_by) record.data.confirmed_by = 'team-lead';
+    }
+    assert.match(validateTracker(records).join('\n'), /approved decisions need approver and date|legacy accepted item needs its approved Don decision/);
+    assert.deepEqual(validateTracker(records, { approverIds: ['team-lead'] }), []);
   } finally {
     fixtureData.cleanup();
     rmSync(dataRepo, { recursive: true, force: true });
@@ -342,6 +399,47 @@ test('task-only approval remains valid while proposed dates and operational fiel
   item.body = item.body.replace('Evidence is recorded here.', 'A new operational observation is recorded here.');
   assert.equal(taskApprovalDigest(item), originalDigest);
   assert.equal(acceptanceState(item, [item, prerequisite], {}, []).approved, true);
+});
+
+test('accepted tasks may carry explicit proposed dates without changing approval digests', () => {
+  const item = approvedRecord('accepted-proposal', {
+    commitment: 'accepted',
+    accepted_from: 'planned',
+    proposed_start: '2026-10-10',
+    proposed_end: '2026-10-10',
+    proposed_schedule_kind: 'checkpoint'
+  });
+  const digest = item.data.approval_digest;
+  assert.equal(acceptanceState(item, [item], {}, []).approved, true);
+  assert.equal(taskApprovalDigest(item), digest);
+
+  item.data.proposed_end = '2026-10-14';
+  item.data.proposed_schedule_kind = 'span';
+  assert.equal(taskApprovalDigest(item), digest);
+  assert.equal(acceptanceState(item, [item], {}, []).approved, true);
+
+  const invalidKind = record('invalid-proposal-kind', {
+    proposed_start: '2026-10-10',
+    proposed_end: '2026-10-12',
+    proposed_schedule_kind: 'window'
+  });
+  assert.match(validateTracker({ items: [invalidKind] }).join('\n'), /proposed_schedule_kind must be span, slice, or checkpoint/);
+
+  const invalidCheckpoint = record('invalid-checkpoint-proposal', {
+    proposed_start: '2026-10-10',
+    proposed_end: '2026-10-12',
+    proposed_schedule_kind: 'checkpoint'
+  });
+  assert.match(validateTracker({ items: [invalidCheckpoint] }).join('\n'), /checkpoint proposed dates must have equal proposed_start and proposed_end/);
+
+  const incompleteProposal = record('incomplete-proposal', { proposed_start: '2026-10-10' });
+  assert.match(validateTracker({ items: [incompleteProposal] }).join('\n'), /proposed_start and proposed_end must be provided together/);
+
+  const invalidRange = record('invalid-proposal-range', {
+    proposed_start: '2026-10-12',
+    proposed_end: '2026-10-10'
+  });
+  assert.match(validateTracker({ items: [invalidRange] }).join('\n'), /proposed_end must be >= proposed_start/);
 });
 
 test('the same item advances from approved draft readiness to planned and then accepted', () => {

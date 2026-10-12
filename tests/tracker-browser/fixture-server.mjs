@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -49,11 +50,124 @@ function isolatedGitEnvironment() {
   };
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return JSON.stringify(value.map(canonicalJsonValue));
+  return JSON.stringify(canonicalJsonValue(value));
+}
+
+function canonicalJsonValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalJsonValue);
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalJsonValue(value[key])]));
+  return value;
+}
+
+function digest(value) {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+}
+
+function episodeReceiptDigest(receipt) {
+  const fields = ['episodeId', 'revision', 'partId', 'valueDigest', 'approvedBy', 'approvedAt', 'approvalRef', 'approvalSource', 'approvedRevision', 'reviewedDetail'];
+  return digest(canonicalJson(Object.fromEntries(fields.map(field => [field, receipt[field]]))));
+}
+
+function episodeFor(plan, reviewStatus) {
+  const parts = plan.outcomes.flatMap(outcome => ['task', 'assignment', 'schedule'].map(kind => ({
+    partId: `${kind}:${outcome.taskId}`,
+    kind,
+    taskId: outcome.taskId,
+    valueDigest: digest(canonicalJson({ kind, outcome })),
+    approved: reviewStatus === 'approved',
+  })));
+  const approvalReceipts = reviewStatus === 'approved'
+    ? parts.map((part, index) => {
+      const receipt = {
+        episodeId: `${plan.week}:${plan.revision}`,
+        revision: plan.revision,
+        partId: part.partId,
+        valueDigest: part.valueDigest,
+        approvedBy: 'synthetic-reviewer',
+        approvedAt: `2026-10-12T0${index + 1}:00:00Z`,
+        approvalRef: `synthetic-review-${index + 1}`,
+        approvalSource: 'synthetic-review',
+        approvedRevision: plan.revision,
+        reviewedDetail: `Approve this exact ${part.kind} part.`,
+      };
+      return { ...receipt, approvalDigest: episodeReceiptDigest(receipt) };
+    })
+    : [];
+  return {
+    schemaVersion: 1,
+    kind: 'weekly-episode',
+    week: plan.week,
+    revision: plan.revision,
+    planDigest: digest(canonicalJson(plan)),
+    generatedAt: '2026-10-12T03:00:00Z',
+    status: reviewStatus,
+    parts,
+    approvalReceipts,
+  };
+}
+
 function runGit(dataRepo, args) {
   execFileSync('git', ['-C', dataRepo, ...args], {
     env: isolatedGitEnvironment(),
     stdio: 'ignore',
   });
+}
+
+function writePlanningFixtures(dataRepo, folderPath) {
+  const root = join(dataRepo, folderPath);
+  const week = '2026-W42';
+  const episodes = [
+    { revision: 'r1', reviewStatus: 'approved', title: 'Synthetic approved presentation' },
+    { revision: 'r2', reviewStatus: 'draft', title: 'Synthetic current draft presentation' },
+  ];
+  const entries = [];
+  mkdirSync(join(root, 'episodes'), { recursive: true });
+  for (const episode of episodes) {
+    const base = `planning/weeks/${week}/${episode.revision}`;
+    const planPath = `${base}/plan.json`;
+    const manifestPath = `${base}/manifest.json`;
+    const presentationPath = `${base}/presentation.html`;
+    const plan = {
+      schemaVersion: 1, kind: 'weekly-plan', week, revision: episode.revision,
+      status: 'draft', timezone: 'Asia/Manila', asOf: '2026-10-12T00:00:00Z',
+      source: { sourceCommit: 'synthetic-planning-source', contentRevision: 'synthetic', inputDigest: `sha256:${'1'.repeat(64)}`, policyRevision: 'sharing-v1', generatorVersion: 'synthetic', producerRevision: 'synthetic-producer' },
+      coverage: { kind: 'synthetic', complete: true },
+      outcomes: [{ taskId: 'fixture-foundation-task', title: 'Synthetic foundation outcome', status: 'queued', owner: { personId: 'fixture-owner', confirmation: 'unknown' }, nextStep: 'Review synthetic evidence', completionCondition: 'Synthetic evidence recorded', forecastDate: '2026-10-18' }],
+      queues: [{ personId: 'fixture-owner', primaryTaskId: 'fixture-foundation-task', startedTaskIds: [], queuedSlices: [], capacity: { state: 'unknown' } }],
+      gaps: [], proposals: [{ kind: 'review', summary: 'Confirm synthetic weekly priority', taskIds: ['fixture-foundation-task'] }],
+    };
+    const planBytes = `${canonicalJson(plan)}\n`;
+    const presentation = `<article><h1>${episode.title}</h1><p>Coverage is synthetic and bounded.</p></article>`;
+    const presentationBytes = `${presentation}\n`;
+    const manifest = {
+      schemaVersion: 1, kind: 'weekly-plan-manifest', week, revision: episode.revision, status: 'draft',
+      generatedAt: '2026-10-12T00:00:00Z', generatorVersion: 'synthetic', producerRevision: 'synthetic-producer', sourceCommit: 'synthetic-planning-source', sourceContentRevision: 'synthetic', inputDigest: `sha256:${'1'.repeat(64)}`,
+      planDigest: `sha256:${createHash('sha256').update(planBytes).digest('hex')}`,
+      htmlDigest: `sha256:${createHash('sha256').update(presentationBytes).digest('hex')}`,
+      policyRevision: 'sharing-v1', coverage: plan.coverage,
+      artifactPaths: { manifest: manifestPath, plan: planPath, html: presentationPath },
+      artifactDigests: { manifest: null, plan: `sha256:${createHash('sha256').update(planBytes).digest('hex')}`, html: `sha256:${createHash('sha256').update(presentationBytes).digest('hex')}` },
+      outcomeTaskIds: [], immutable: true,
+    };
+    manifest.artifactDigests.manifest = `sha256:${createHash('sha256').update(`${canonicalJson(manifest)}\n`).digest('hex')}`;
+    mkdirSync(join(root, base), { recursive: true });
+    writeFileSync(join(root, planPath), planBytes);
+    const manifestBytes = `${canonicalJson(manifest)}\n`;
+    writeFileSync(join(root, manifestPath), manifestBytes);
+    writeFileSync(join(root, presentationPath), presentationBytes);
+    const episodeValue = episodeFor(plan, episode.reviewStatus);
+    const episodePath = `episodes/${week}-${episode.revision}${episode.reviewStatus === 'approved' ? '-approved' : ''}.json`;
+    const episodeBytes = `${canonicalJson(episodeValue)}\n`;
+    writeFileSync(join(root, episodePath), episodeBytes);
+    entries.push({ week, revision: episode.revision, status: 'draft', coverage: plan.coverage, manifestPath, planPath, htmlPath: presentationPath,
+      manifestDigest: `sha256:${createHash('sha256').update(manifestBytes).digest('hex')}`, planDigest: manifest.planDigest, htmlDigest: manifest.htmlDigest,
+      episodePath, episodeDigest: digest(episodeBytes), episodeStatus: episodeValue.status, episodePlanDigest: episodeValue.planDigest,
+      episodeApprovalDigest: digest(canonicalJson(episodeValue.approvalReceipts)), episodeGeneratedAt: episodeValue.generatedAt });
+  }
+  mkdirSync(join(root, 'planning'), { recursive: true });
+  writeFileSync(join(root, 'planning/index.json'), `${JSON.stringify({ schemaVersion: 1, kind: 'weekly-plan-index', currentDraft: `${week}/r2`, latestApproved: `${week}/r1`, entries })}\n`);
 }
 
 function createOwnedRunRoot() {
@@ -63,13 +177,14 @@ function createOwnedRunRoot() {
   return mkdtempSync(join(parent, 'tracker-browser-run-'));
 }
 
-function makeProject({ id, folderPath, mode, accessKind, publishKind, port, root }) {
+function makeProject({ id, folderPath, mode, accessKind, publishKind, weeklyPlanning = true, port, root }) {
   const projectRoot = join(root, id);
   const dataRepo = join(projectRoot, 'data');
   const output = join(projectRoot, 'output');
   mkdirSync(dataRepo, { recursive: true });
-  const instance = fixtureInstance({ id, folderPath, accessKind, publishKind });
+  const instance = fixtureInstance({ id, folderPath, accessKind, publishKind, weeklyPlanning });
   const fixture = writeFixtureData({ repositoryPath: dataRepo, instance, mode });
+  if (mode === 'populated') writePlanningFixtures(dataRepo, folderPath);
   runGit(dataRepo, ['init', '--quiet', '--initial-branch=main']);
   runGit(dataRepo, ['config', 'user.name', 'Fixture Browser']);
   runGit(dataRepo, ['config', 'user.email', 'fixture-browser@fixture.test']);
@@ -101,7 +216,11 @@ function startDevServer(project) {
   });
   // Keep the child pipes drained without copying build output into test logs.
   child.stdout?.resume();
-  child.stderr?.resume();
+  project.stderrTail = [];
+  child.stderr?.on('data', chunk => {
+    project.stderrTail.push(String(chunk));
+    if (project.stderrTail.join('').length > 4_000) project.stderrTail.splice(0, project.stderrTail.length - 1);
+  });
   project.spawnError = null;
   child.once('error', () => { project.spawnError = true; });
   project.child = child;
@@ -113,7 +232,7 @@ async function waitForHealth(project) {
   while (Date.now() < deadline) {
     if (project.spawnError) throw new Error(`fixture server failed to start: ${project.id}`);
     if (project.child?.exitCode != null || project.child?.signalCode != null) {
-      throw new Error(`fixture server stopped before becoming healthy: ${project.id}`);
+      throw new Error(`fixture server stopped before becoming healthy: ${project.id}\n${project.stderrTail?.join('') ?? ''}`);
     }
     try {
       const response = await fetch(`http://127.0.0.1:${project.port}/__health`);
@@ -198,7 +317,7 @@ async function main() {
   try {
     // Register teardown before any fixture or caller metadata write can fail.
     projects.push(
-      makeProject({ id: 'empty-0000', folderPath: 'tooling/project-tracker', mode: 'empty', accessKind: 'unconfigured', publishKind: 'disabled', port: basePort + 1, root }),
+      makeProject({ id: 'empty-0000', folderPath: 'tooling/project-tracker', mode: 'empty', accessKind: 'unconfigured', publishKind: 'disabled', weeklyPlanning: false, port: basePort + 1, root }),
       makeProject({ id: 'populated-root', folderPath: '', mode: 'populated', accessKind: 'ready', publishKind: 'enabled', port: basePort + 2, root }),
       makeProject({ id: 'populated-nested', folderPath: 'tooling/project-tracker', mode: 'populated', accessKind: 'unconfigured', publishKind: 'disabled', port: basePort + 3, root }),
     );

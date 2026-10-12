@@ -2,6 +2,7 @@ import { acceptanceState as sharedAcceptanceState } from '../../../tooling/track
 import { normalizeActivityEvidence } from '../../../tooling/tracker/activity-evidence.mjs';
 import { extractMarkdownSections, extractMarkdownTitle, scanMarkdownHeadings } from '../../../tooling/tracker/markdown.mjs';
 import { normalizeDeliveryRecords } from '../../../tooling/tracker/delivery-records.mjs';
+import { taskCodeForId } from '../../../tooling/tracker/task-codes.mjs';
 import { approvalData, approvedParts, buildProposal, commitmentValue, deriveProgress, isAccepted, numberValue } from './planning.mjs';
 
 function refs(value) {
@@ -86,6 +87,9 @@ function scheduleFields(data = {}) {
   return {
     plannedStart: dateOrNull(data.planned_start),
     plannedEnd: dateOrNull(data.planned_end),
+    proposedStart: dateOrNull(data.proposed_start),
+    proposedEnd: dateOrNull(data.proposed_end),
+    proposedScheduleKind: textOrNull(data.proposed_schedule_kind),
     forecastStart: dateOrNull(data.forecast_start),
     forecastEndMin: dateOrNull(data.forecast_end_min),
     forecastEndMax: dateOrNull(data.forecast_end_max),
@@ -95,10 +99,12 @@ function scheduleFields(data = {}) {
 
 function scheduleFor(data, { approved = false, preserveProposed = false } = {}) {
   const fields = scheduleFields(data);
+  const proposedExplicit = Boolean(fields.proposedStart || fields.proposedEnd);
   return {
     ...fields,
     plannedStart: approved || preserveProposed ? fields.plannedStart : null,
     plannedEnd: approved || preserveProposed ? fields.plannedEnd : null,
+    proposedExplicit,
     approved: Boolean(approved)
   };
 }
@@ -180,8 +186,8 @@ function approvalManifestEntry(legacyApprovals, id) {
   return legacyApprovals && id ? legacyApprovals[id] ?? null : null;
 }
 
-function acceptanceState(record, allRecords, legacyApprovals, decisions) {
-  return sharedAcceptanceState(record, allRecords, legacyApprovals, decisions);
+function acceptanceState(record, allRecords, legacyApprovals, decisions, options = {}) {
+  return sharedAcceptanceState(record, allRecords, legacyApprovals, decisions, options);
 }
 
 function approvalPartsOf(value) {
@@ -197,10 +203,10 @@ function scheduleApproved(acceptance) {
   return acceptance.scheduleApproved === true;
 }
 
-function normalizeAcceptance(record, allRecords, legacyApprovals, decisions, commitment) {
+function normalizeAcceptance(record, allRecords, legacyApprovals, decisions, commitment, options = {}) {
   const data = rawData(record);
   const legacyApproval = approvalManifestEntry(legacyApprovals, data.id);
-  const resolved = acceptanceState(record, allRecords, legacyApprovals, decisions);
+  const resolved = acceptanceState(record, allRecords, legacyApprovals, decisions, options);
   const legacyApproved = resolved.legacyApproved === true;
   const legacyDecision = legacyApproved && legacyApproval?.decision
     ? decisions.find(candidate => rawData(candidate).id === legacyApproval.decision)
@@ -227,7 +233,7 @@ function normalizeAcceptance(record, allRecords, legacyApprovals, decisions, com
   };
 }
 
-function itemRecord(record, relationships, progressByItem, allRecords, legacyApprovals, decisions) {
+function itemRecord(record, relationships, progressByItem, allRecords, legacyApprovals, decisions, options = {}) {
   const data = rawData(record);
   const { title, sections } = titleAndSections(record);
   const commitment = commitmentValue(data);
@@ -236,12 +242,13 @@ function itemRecord(record, relationships, progressByItem, allRecords, legacyApp
   const completed = data.status === 'done' || data.status === 'completed' || data.status === 'archived' || isArchivedPath(record.path);
   const childIds = relationships.children.get(data.id) ?? [];
   const progress = isAccepted(data) ? (progressByItem.get(data.id) ?? { scoped: false, percent: null, milestones: [] }) : { scoped: false, percent: null, milestones: [] };
-  const acceptance = normalizeAcceptance(record, allRecords, legacyApprovals, decisions, commitment);
+  const acceptance = normalizeAcceptance(record, allRecords, legacyApprovals, decisions, commitment, options);
   const approval = acceptance.approval ?? approvalView(data);
   const plan = textOrNull(data.plan);
   const schedule = scheduleFor(data, { approved: isAccepted(data) && acceptance.scheduleApproved, preserveProposed: !isAccepted(data) });
   return {
     id: data.id,
+    referenceCode: taskCodeForId(data.id),
     title,
     type: data.type,
     status: data.status,
@@ -402,6 +409,7 @@ function mergeItemRecords(records) {
 }
 
 export function buildTrackerData(records, source = {}) {
+  const options = { approverIds: source.approverIds };
   const itemsRecords = mergeItemRecords(records);
   const byId = new Map(itemsRecords.map(record => [rawData(record).id, record]));
   const children = new Map();
@@ -448,7 +456,7 @@ export function buildTrackerData(records, source = {}) {
       sourcePath: record.path
     }, { title: firstHeading(record?.body, record?.data?.id ?? 'untitled'), sections: extractUpdateSections(record?.body) });
   }).sort((a, b) => `${a.item}/${a.id}`.localeCompare(`${b.item}/${b.id}`));
-  const activityEvidence = normalizeActivityEvidence(records);
+  const activityEvidence = normalizeActivityEvidence(records, options);
 
   const decisionLinks = decisions.map(({ body, sections, ...summary }) => summary);
   const decisionsByItem = mapByItem(decisionLinks, record => record.affects);
@@ -459,7 +467,7 @@ export function buildTrackerData(records, source = {}) {
   const milestones = records.milestones ?? [];
   const progressByItem = new Map(itemsRecords.map(record => {
     const data = rawData(record);
-    return [data.id, deriveProgress(data.id, milestones, plansRecords)];
+    return [data.id, deriveProgress(data.id, milestones, plansRecords, options)];
   }));
   const legacyApprovals = records.legacyApprovals ?? {};
   const plansByTask = new Map();
@@ -478,7 +486,7 @@ export function buildTrackerData(records, source = {}) {
     list.push(taskId);
     itemsByPlan.set(planId, list);
   }
-  const items = itemsRecords.map(record => itemRecord(record, relationships, progressByItem, itemsRecords, legacyApprovals, rawDecisions)).sort((a, b) => a.id.localeCompare(b.id));
+  const items = itemsRecords.map(record => itemRecord(record, relationships, progressByItem, itemsRecords, legacyApprovals, rawDecisions, options)).sort((a, b) => a.id.localeCompare(b.id));
   const rootIds = items.filter(item => !item.parent).map(item => item.id);
   const rootsByBucket = new Map();
   for (const rootId of rootIds) {
@@ -491,7 +499,7 @@ export function buildTrackerData(records, source = {}) {
   for (const list of rootsByBucket.values()) list.sort((a, b) => a.localeCompare(b));
 
   const plans = plansRecords.map(record => planRecord(record, relationships, itemsByPlan)).sort((a, b) => a.id.localeCompare(b.id));
-  const deliveryRecords = normalizeDeliveryRecords(records);
+  const deliveryRecords = normalizeDeliveryRecords(records, options);
   const people = (records.people ?? []).map(person => {
     const aliases = [...new Set((Array.isArray(person.aliases) ? person.aliases : [])
       .map(textOrNull)

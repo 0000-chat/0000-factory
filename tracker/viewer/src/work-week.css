@@ -1,0 +1,36 @@
+.work-week-controls { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 8px 0 10px; border-bottom: 1px solid var(--border); }
+.work-workflow-selector, .work-week-actions { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 4px; }
+.work-workflow-selector { padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-quiet); }
+.work-workflow-option { min-height: 32px; padding-inline: 9px; font-size: 0.72rem; }
+.work-week-actions { color: var(--muted-foreground); }
+.work-week-nav { width: 32px; min-width: 32px; height: 32px; padding: 0; }
+.work-week-label { display: inline-flex; min-width: 116px; align-items: center; justify-content: center; gap: 6px; color: var(--foreground); font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
+.work-week-label > span { display: grid; gap: 2px; text-align: center; }
+.work-week-label small { color: var(--muted-foreground); font-size: 0.58rem; font-weight: 550; }
+.work-week-toggle { min-height: 32px; gap: 5px; padding-inline: 8px; font-size: 0.7rem; }
+.work-undated-active { display: grid; gap: 8px; margin: 8px 0 12px; border: 1px solid color-mix(in srgb, var(--amber, #d5a63b) 45%, var(--border)); border-radius: 9px; padding: 10px 12px; background: color-mix(in srgb, var(--amber, #d5a63b) 8%, var(--surface)); }
+.work-undated-active .group-heading { align-items: flex-start; }
+.work-undated-active .group-heading h3 { margin: 0; font-size: 0.78rem; }
+.work-undated-active .group-heading p { margin: 3px 0 0; }
+.work-undated-active-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 5px; }
+.work-undated-active-list button { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--border); border-radius: 7px; padding: 7px 9px; background: var(--card); color: var(--foreground); cursor: pointer; text-align: left; }
+.work-undated-active-list button:hover, .work-undated-active-list button:focus-visible { border-color: var(--ring); background: var(--accent); }
+.work-undated-active-list button > span { display: grid; min-width: 0; gap: 2px; }
+.work-undated-active-list strong, .work-undated-active-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-undated-active-list strong { font-size: 0.72rem; }
+.work-undated-active-list small { color: var(--muted-foreground); font-size: 0.64rem; }
+.work-card.work-card-presentation { position: fixed; z-index: 200; inset: 12px; display: flex; max-height: calc(100vh - 24px); flex-direction: column; overflow: auto; margin: 0; background: var(--card); box-shadow: 0 20px 70px color-mix(in srgb, #000 35%, transparent); }
+.work-card-presentation .surface-card-header { flex: 0 0 auto; }
+.work-card-presentation .work-view-switcher, .work-card-presentation .work-toolbar, .work-card-presentation .work-content-topbar, .work-card-presentation .external-deps, .work-card-presentation .work-undated-active, .work-card-presentation .work-next-week-note { display: none; }
+.work-card-presentation .work-content { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.work-card-presentation .work-week-controls { position: sticky; z-index: 5; top: 0; background: var(--card); }
+.work-card-presentation .work-tree, .work-card-presentation .work-gantt-view { min-height: min(70vh, 720px); }
+.work-next-week-note { margin: 8px 0 2px; border-left: 3px solid var(--primary); padding: 6px 9px; color: var(--muted-foreground); background: var(--surface-quiet); font-size: 0.68rem; line-height: 1.4; }
+@media (max-width: 760px) {
+  .work-week-controls { align-items: stretch; }
+  .work-workflow-selector, .work-week-actions { width: 100%; }
+  .work-workflow-selector { overflow-x: auto; }
+  .work-workflow-option { flex: 1 0 auto; }
+  .work-week-actions { justify-content: space-between; }
+  .work-week-label { flex: 1 1 auto; }
+}

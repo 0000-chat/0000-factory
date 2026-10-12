@@ -570,7 +570,7 @@ function CompactItemDetail({ item, data, onSelectItem }) {
   const linked = item.linked ?? {};
   const historicalRecords = (data?.history ?? []).filter(entry => entry.supersededBy === item.id);
   return <div className="detail-body">
-    <div className="detail-title-row"><div><p className="eyebrow">Selected work</p><h2>{item.title}</h2><p className="detail-id">{item.id}</p></div><ItemChips item={item} /></div>
+    <div className="detail-title-row"><div><p className="eyebrow">Selected work</p><h2>{item.title}</h2><p className="detail-id">{item.referenceCode ? <><span>{item.referenceCode}</span> · </> : null}{item.id}</p></div><ItemChips item={item} /></div>
     <ProgressSummary item={item} />
     <HealthSummary health={item.health} />
     <ApprovalSummary item={item} />
@@ -627,23 +627,74 @@ function canonicalFieldBaseline(canonicalData, item, field, visibleValue) {
   };
 }
 
-function ItemPageHeader({ item, data, canonicalData, renderItemLink, returnLink, taskDraft, taskEdit }) {
+function ItemPageHeader({ item, data, canonicalData, renderItemLink, returnLink, taskDraft, taskEdit, readOnly = false, contextOnly = false }) {
   const [titleEditing, setTitleEditing] = useState(false);
   return <header className="detail-page-header">
     <div className="detail-page-nav">{returnLink ? <span className="detail-page-return">{returnLink}</span> : null}</div>
     <div className="detail-page-heading">
-      <div className="detail-page-title"><p className="eyebrow">Work item</p><h1 aria-label={titleEditing ? 'Editing task title' : (item.title || 'Untitled task')}><EditableTaskTitle
+      <div className="detail-page-title"><p className="eyebrow">Work item</p><h1 aria-label={titleEditing ? 'Editing task title' : (item.title || 'Untitled task')}>{readOnly ? item.title || 'Untitled task' : <EditableTaskTitle
         itemId={item.id}
         value={item.title}
         fieldState={taskDraft?.payload.fields.title ?? null}
         canonicalAtStart={canonicalFieldBaseline(canonicalData, item, 'title', item.title)}
         taskEdit={taskEdit}
         onEditingChange={setTitleEditing}
-      /></h1><p className="detail-id">{item.id}</p></div>
-      <ItemChips item={item} />
+      />}</h1><p className="detail-id">{item.referenceCode ? <><span>{item.referenceCode}</span> · </> : null}{item.id}</p></div>
+      {readOnly ? (contextOnly ? null : <div className="item-chips"><BadgeChip tone={statusTone(item.status)}>{humanize(item.status)}</BadgeChip>{item.owner && item.owner !== 'unassigned' ? <PersonLink data={data} value={item.owner} name={item.ownerName || item.owner} avatar pill className="item-assignee-link" /> : <BadgeChip>Unassigned</BadgeChip>}</div>) : <ItemChips item={item} />}
     </div>
     <ItemBreadcrumbs item={item} data={data} renderItemLink={renderItemLink} />
   </header>;
+}
+
+function projectedText(value) {
+  if (typeof value === 'string') return value.trim();
+  if (value && typeof value === 'object' && typeof value.summary === 'string') return value.summary.trim();
+  return '';
+}
+
+function TeamProjectionContextBody({ item, data, renderItemLink, returnLink }) {
+  return <article className="item-detail-page team-context-detail">
+    <ItemPageHeader item={item} data={data} renderItemLink={renderItemLink} returnLink={returnLink} readOnly contextOnly />
+    <div className="detail-page-content">
+      <section className="detail-page-section" aria-label="Structural context">
+        <h2>Structural context</h2>
+        <p>This node provides hierarchy context for shared tasks. It is not an actionable task.</p>
+        <dl><div><dt>Kind</dt><dd>{humanize(item.type)}</dd></div><div><dt>Parent</dt><dd>{item.parent ?? 'Root'}</dd></div></dl>
+      </section>
+    </div>
+  </article>;
+}
+
+function TeamProjectionItemBody({ item, data, canonicalData, renderItemLink, returnLink }) {
+  if (item.contextOnly === true) return <TeamProjectionContextBody item={item} data={data} renderItemLink={renderItemLink} returnLink={returnLink} />;
+  const projection = item.teamProjection ?? {};
+  const dependencies = Array.isArray(projection.dependencies) ? projection.dependencies.map(projectedText).filter(Boolean) : [];
+  const reviewer = projectedText(projection.reviewer);
+  const checkpoint = projectedText(projection.checkpoint);
+  const approvedDate = projectedText(projection.approvedDate);
+  const forecastDate = projectedText(projection.forecastDate);
+  return <article className="item-detail-page">
+    <ItemPageHeader item={item} data={data} canonicalData={canonicalData} renderItemLink={renderItemLink} returnLink={returnLink} readOnly />
+    <div className="detail-page-content">
+      <div className="detail-page-layout">
+        <div className="detail-page-primary">
+          <MarkdownSection title="Outcome" value={item.sections?.outcome} data={data} />
+          <MarkdownSection title="Next step" value={item.sections?.nextStep} data={data} />
+          <MarkdownSection title="Completion condition" value={item.sections?.completionCondition} data={data} />
+          <MarkdownSection title="Evidence" value={item.sections?.evidence} data={data} />
+        </div>
+        <aside className="detail-page-sidebar" aria-label="Shared task details">
+          <section className="detail-page-section"><h2>Shared details</h2><dl>
+            {reviewer ? <div><dt>Reviewer</dt><dd>{reviewer}</dd></div> : null}
+            {checkpoint ? <div><dt>Checkpoint</dt><dd>{formatDate(checkpoint)}</dd></div> : null}
+            {approvedDate ? <div><dt>Approved date</dt><dd>{formatDate(approvedDate)}</dd></div> : null}
+            {forecastDate ? <div><dt>Forecast date</dt><dd>{formatDate(forecastDate)}</dd></div> : null}
+          </dl>{!reviewer && !checkpoint && !approvedDate && !forecastDate ? <p className="empty-copy">No additional shared details recorded.</p> : null}</section>
+        </aside>
+      </div>
+      {dependencies.length ? <section className="detail-page-section"><div className="detail-section-heading"><h2>Dependencies</h2><span>{dependencies.length}</span></div><ul className="detail-child-list">{dependencies.map((dependency, index) => <li key={`${dependency}-${index}`}>{dependency}</li>)}</ul></section> : null}
+    </div>
+  </article>;
 }
 
 function DecisionAndReleaseRecords({ item, data }) {
@@ -710,7 +761,7 @@ function ItemPageRelated({ item, data, renderItemLink }) {
   </div>;
 }
 
-function ItemPageBody({ item, data, canonicalData, renderItemLink, returnLink, taskDraft, taskEdit }) {
+function ItemPageBody({ item, data, canonicalData, renderItemLink, returnLink, taskDraft, taskEdit, readOnly = false }) {
   const fields = taskDraft?.payload.fields;
   return <article className="item-detail-page">
     <ItemPageHeader
@@ -721,14 +772,15 @@ function ItemPageBody({ item, data, canonicalData, renderItemLink, returnLink, t
       returnLink={returnLink}
       taskDraft={taskDraft}
       taskEdit={taskEdit}
+      readOnly={readOnly}
     />
     <div className="detail-page-content">
       <div className="detail-page-layout">
         <div className="detail-page-primary">
-          <EditableTaskSection itemId={item.id} field="sections.outcome" title="Outcome" value={item.sections?.outcome ?? ''} fieldState={fields?.['sections.outcome'] ?? null} canonicalAtStart={canonicalFieldBaseline(canonicalData, item, 'sections.outcome', item.sections?.outcome ?? '')} data={data} taskEdit={taskEdit} />
-          <EditableTaskSection itemId={item.id} field="sections.nextStep" title="Next step" value={item.sections?.nextStep ?? ''} fieldState={fields?.['sections.nextStep'] ?? null} canonicalAtStart={canonicalFieldBaseline(canonicalData, item, 'sections.nextStep', item.sections?.nextStep ?? '')} data={data} taskEdit={taskEdit} />
-          <EditableTaskSection itemId={item.id} field="sections.completionCondition" title="Completion condition" value={item.sections?.completionCondition ?? ''} fieldState={fields?.['sections.completionCondition'] ?? null} canonicalAtStart={canonicalFieldBaseline(canonicalData, item, 'sections.completionCondition', item.sections?.completionCondition ?? '')} data={data} taskEdit={taskEdit} />
-          <EditableTaskSection itemId={item.id} field="sections.evidence" title="Evidence" value={item.sections?.evidence ?? ''} fieldState={fields?.['sections.evidence'] ?? null} canonicalAtStart={canonicalFieldBaseline(canonicalData, item, 'sections.evidence', item.sections?.evidence ?? '')} data={data} taskEdit={taskEdit} />
+          {readOnly ? <MarkdownSection title="Outcome" value={item.sections?.outcome} data={data} /> : <EditableTaskSection itemId={item.id} field="sections.outcome" title="Outcome" value={item.sections?.outcome ?? ''} fieldState={fields?.['sections.outcome'] ?? null} canonicalAtStart={canonicalFieldBaseline(canonicalData, item, 'sections.outcome', item.sections?.outcome ?? '')} data={data} taskEdit={taskEdit} />}
+          {readOnly ? <MarkdownSection title="Next step" value={item.sections?.nextStep} data={data} /> : <EditableTaskSection itemId={item.id} field="sections.nextStep" title="Next step" value={item.sections?.nextStep ?? ''} fieldState={fields?.['sections.nextStep'] ?? null} canonicalAtStart={canonicalFieldBaseline(canonicalData, item, 'sections.nextStep', item.sections?.nextStep ?? '')} data={data} taskEdit={taskEdit} />}
+          {readOnly ? <MarkdownSection title="Completion condition" value={item.sections?.completionCondition} data={data} /> : <EditableTaskSection itemId={item.id} field="sections.completionCondition" title="Completion condition" value={item.sections?.completionCondition ?? ''} fieldState={fields?.['sections.completionCondition'] ?? null} canonicalAtStart={canonicalFieldBaseline(canonicalData, item, 'sections.completionCondition', item.sections?.completionCondition ?? '')} data={data} taskEdit={taskEdit} />}
+          {readOnly ? <MarkdownSection title="Evidence" value={item.sections?.evidence} data={data} /> : <EditableTaskSection itemId={item.id} field="sections.evidence" title="Evidence" value={item.sections?.evidence ?? ''} fieldState={fields?.['sections.evidence'] ?? null} canonicalAtStart={canonicalFieldBaseline(canonicalData, item, 'sections.evidence', item.sections?.evidence ?? '')} data={data} taskEdit={taskEdit} />}
           {item.sections?.blocker ? <MarkdownSection title="Blocker" value={item.sections.blocker} data={data} /> : null}
         </div>
         <aside className="detail-page-sidebar" aria-label="Work status and planning">
@@ -771,10 +823,11 @@ function FullHistoryPage({ entry, data, renderItemLink, returnLink }) {
 }
 
 /** @param {import('./contracts').ItemPageProps} props */
-export function ItemPage({ item, history, data, canonicalData, taskDraft, taskEdit, renderItemLink, returnLink }) {
+export function ItemPage({ item, history, data, canonicalData, taskDraft, taskEdit, renderItemLink, returnLink, readOnly = false }) {
   if (history) return <FullHistoryPage entry={history} data={data} renderItemLink={renderItemLink} returnLink={returnLink} />;
   if (!item) return <DetailNotFound />;
-  return <ItemPageBody key={item.id} item={item} data={data} canonicalData={canonicalData} renderItemLink={renderItemLink} returnLink={returnLink} taskDraft={taskDraft} taskEdit={taskEdit} />;
+  if (readOnly) return <TeamProjectionItemBody item={item} data={data} canonicalData={canonicalData} renderItemLink={renderItemLink} returnLink={returnLink} />;
+  return <ItemPageBody key={item.id} item={item} data={data} canonicalData={canonicalData} renderItemLink={renderItemLink} returnLink={returnLink} taskDraft={taskDraft} taskEdit={taskEdit} readOnly={readOnly} />;
 }
 
 function DecisionMetaRow({ label, value, name, code = false, data, person = false, avatar = false, pill = false }) {

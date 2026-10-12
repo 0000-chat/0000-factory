@@ -111,6 +111,7 @@ function TreeItem({
   managerProjection,
   managerEnabled,
   managerPeople,
+  ownerContextLabel = null,
 }) {
   const item = data.itemById.get(itemId);
   if (!item || (visibleIds && !visibleIds.has(item.id))) return null;
@@ -123,6 +124,7 @@ function TreeItem({
   const expanded = hasChildren && expandedIds.has(item.id);
   const collapsedForOwnership = entry.childIds.length > 0 && !expandedIds.has(item.id);
   const contextual = contextualIds?.has(item.id) ?? false;
+  const structural = item.contextOnly === true;
   const reasons = attentionFilter
     ? entry.attentionReasons.map(reason => attentionLabel(reason, entry)).filter(Boolean)
     : [];
@@ -195,27 +197,29 @@ function TreeItem({
         </span>
         <div className={`tracker-tree-label ${contextual ? 'tree-contextual' : ''}`}>
           <span className="work-tree-title">
+            {item.referenceCode ? <code className="work-reference-code">{item.referenceCode}</code> : null}
             <strong>{item.title}</strong>
-            {!isAccepted(item) ? <BadgeChip tone={isDraft(item) ? 'slate' : 'amber'} className="tree-planned-chip">{commitmentLabel(item)}</BadgeChip> : null}
+            {!structural && !isAccepted(item) ? <BadgeChip tone={isDraft(item) ? 'slate' : 'amber'} className="tree-planned-chip">{commitmentLabel(item)}</BadgeChip> : null}
           </span>
           <small>
-            {contextual ? `${commitmentLabel(item)} context` : item.childSummary.total ? `${item.childSummary.done}/${item.childSummary.total} children done` : humanize(item.type)}
-            <span className="work-tree-lifecycle" data-testid={`tree-lifecycle-${item.id}`}> · Status · {humanize(item.status)}</span>
+            {structural ? 'Context' : contextual ? `${commitmentLabel(item)} context` : item.childSummary.total ? `${item.childSummary.done}/${item.childSummary.total} children done` : humanize(item.type)}
+            {ownerContextLabel ? <span className="work-tree-owner-context"> · In {ownerContextLabel}</span> : null}
+            {structural ? null : <span className="work-tree-lifecycle" data-testid={`tree-lifecycle-${item.id}`}> · Status · {humanize(item.status)}</span>}
           </small>
         </div>
         <span className="tree-row-meta">
-          <WorkOwnership item={item} data={data} entry={entry} collapsed={collapsedForOwnership} showName size="sm" />
-          <BadgeChip className="tree-health-chip" tone={healthTone(item.health?.state)}>{healthLabel(item.health?.state)}</BadgeChip>
-          {progressInline(item)}
-          {scheduleInline(item)}
-          {reasons.length ? (
+          {structural ? null : <WorkOwnership item={item} data={data} entry={entry} collapsed={collapsedForOwnership} showName size="sm" assignment />}
+          {structural ? null : <BadgeChip className="tree-health-chip" tone={healthTone(item.health?.state)}>{healthLabel(item.health?.state)}</BadgeChip>}
+          {structural ? null : progressInline(item)}
+          {structural ? null : scheduleInline(item)}
+          {!structural && reasons.length ? (
             <span className="work-attention-reasons" data-testid={`attention-reasons-${item.id}`}>
               {reasons.map((reason, index) => <BadgeChip key={`${reason.label}-${index}`} tone={reason.tone} className={`work-attention-${reason.tone}`}>{reason.label}</BadgeChip>)}
             </span>
           ) : null}
-          <WorkActivityIndicator entry={entry} projection={workActivity.projection} collapsed={collapsedForOwnership} paused={workActivity.animationsPaused} evidence={data.activityEvidence} />
-          <WorkActivitySummary entry={entry} projection={workActivity.projection} evidence={data.activityEvidence} />
-          <WorkManagerRowMetadata entry={managerProjection?.byId.get(item.id)} people={managerPeople} itemTitle={item.title} enabled={managerEnabled} />
+          {structural ? null : <WorkActivityIndicator entry={entry} projection={workActivity.projection} collapsed={collapsedForOwnership} paused={workActivity.animationsPaused} evidence={data.activityEvidence} />}
+          {structural ? null : <WorkActivitySummary entry={entry} projection={workActivity.projection} evidence={data.activityEvidence} />}
+          {structural ? null : <WorkManagerRowMetadata entry={managerProjection?.byId.get(item.id)} people={managerPeople} itemTitle={item.title} enabled={managerEnabled} />}
         </span>
       </div>
       {hasChildren ? (
@@ -239,6 +243,7 @@ function TreeItem({
               managerProjection={managerProjection}
               managerEnabled={managerEnabled}
               managerPeople={managerPeople}
+              ownerContextLabel={null}
             />
           ))}
         </div>
@@ -247,18 +252,102 @@ function TreeItem({
   );
 }
 
-/** @param {{ roots: import('./snapshot').TrackerItem[], data: import('./snapshot').TrackerSnapshot, selectedId: string|null, onSelect: (id:string)=>void, visibleIds?: ReadonlySet<string>, contextualIds?: ReadonlySet<string>, workActivity: { projection: Map<string, import('./work-activity-types').WorkProjectionEntry>, expandedIds: ReadonlySet<string>, toggleExpanded: (id: string) => void, animationsPaused: boolean, activityFilter: string }, managerProjection?: import('./work-manager-types').ManagerProjection, managerEnabled?: boolean }} props */
-export function WorkTree({ roots, data, selectedId, onSelect, visibleIds, contextualIds = new Set(), workActivity, managerProjection, managerEnabled = false }) {
+function buildOwnerTreeGroups({ roots, data, visibleIds, contextualIds }) {
+  const groups = new Map();
+  const seen = new Set();
+  const visit = (item, ancestors) => {
+    if (!item || seen.has(item.id) || (visibleIds && !visibleIds.has(item.id))) return;
+    seen.add(item.id);
+    const children = (item.childIds ?? []).map(id => data.itemById.get(id)).filter(Boolean)
+      .filter(child => !visibleIds || visibleIds.has(child.id));
+    if (children.length) {
+      for (const child of children) visit(child, [...ancestors, item.title]);
+      return;
+    }
+    if (contextualIds?.has(item.id) || item.contextOnly === true) return;
+    const ownerValue = String(item.owner ?? '').trim().toLowerCase();
+    const ownerKey = ownerValue && ownerValue !== 'unassigned' ? ownerValue : 'unassigned';
+    const ownerLabel = ownerKey === 'unassigned' ? 'Unassigned' : String(item.ownerName ?? ownerKey).trim() || ownerKey;
+    let group = groups.get(ownerKey);
+    if (!group) {
+      group = { id: `owner-group:${ownerKey}`, ownerKey, label: ownerLabel, rows: [] };
+      groups.set(ownerKey, group);
+    }
+    group.rows.push({ item, contextLabel: ancestors.filter(Boolean).join(' / ') || null });
+  };
+  for (const root of roots) visit(root, []);
+  return [...groups.values()].sort((left, right) => left.ownerKey.localeCompare(right.ownerKey));
+}
+
+function OwnerTreeGroup({ group, treeRef, ...treeProps }) {
+  function handleKeyDown(event) {
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      event.currentTarget.querySelector('[role="group"] [role="treeitem"]')?.focus();
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      focusVisibleItem(treeRef.current, event.currentTarget, event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : event.key === 'Home' ? 'home' : 'end');
+    }
+  }
+  return <div
+    role="treeitem"
+    aria-level={1}
+    aria-expanded="true"
+    data-work-id={group.id}
+    data-owner-group-id={group.ownerKey}
+    tabIndex={0}
+    className="work-tree-owner-group"
+    onKeyDown={handleKeyDown}
+  >
+    <div className="work-tree-owner-group-heading"><strong>{group.label}</strong><span>{group.rows.length} task{group.rows.length === 1 ? '' : 's'}</span></div>
+    <div role="group" aria-label={`${group.label} tasks`} className="work-tree-owner-group-items">
+      {group.rows.map(({ item, contextLabel }) => <TreeItem
+        key={item.id}
+        itemId={item.id}
+        treeRef={treeRef}
+        parentId={group.id}
+        level={1}
+        ownerContextLabel={contextLabel}
+        {...treeProps}
+      />)}
+    </div>
+  </div>;
+}
+
+/** @param {{ roots: import('./snapshot').TrackerItem[], data: import('./snapshot').TrackerSnapshot, selectedId: string|null, onSelect: (id:string)=>void, visibleIds?: ReadonlySet<string>, contextualIds?: ReadonlySet<string>, workActivity: { projection: Map<string, import('./work-activity-types').WorkProjectionEntry>, expandedIds: ReadonlySet<string>, toggleExpanded: (id: string) => void, animationsPaused: boolean, activityFilter: string }, managerProjection?: import('./work-manager-types').ManagerProjection, managerEnabled?: boolean, groupByOwner?: boolean }} props */
+export function WorkTree({ roots, data, selectedId, onSelect, visibleIds, contextualIds = new Set(), workActivity, managerProjection, managerEnabled = false, groupByOwner = false }) {
   const treeRef = useRef(null);
   const rootIds = useMemo(() => roots.map(item => item.id), [roots]);
   const expandedIds = workActivity.expandedIds;
   const toggleExpanded = workActivity.toggleExpanded;
   const activityFilter = workActivity.activityFilter;
   const managerPeople = Array.isArray(data.people) ? data.people : [];
+  const ownerGroups = useMemo(
+    () => groupByOwner ? buildOwnerTreeGroups({ roots, data, visibleIds, contextualIds }) : [],
+    [contextualIds, data, groupByOwner, roots, visibleIds],
+  );
 
   return (
     <div ref={treeRef} role="tree" aria-label="Work hierarchy" aria-multiselectable="false" className="tracker-tree work-tree">
-      {rootIds.length ? rootIds.map(id => (
+      {groupByOwner ? ownerGroups.map(group => <OwnerTreeGroup
+        key={group.id}
+        group={group}
+        treeRef={treeRef}
+        data={data}
+        selectedId={selectedId}
+        onSelect={onSelect}
+        visibleIds={visibleIds}
+        contextualIds={contextualIds}
+        workActivity={workActivity}
+        expandedIds={expandedIds}
+        toggleExpanded={toggleExpanded}
+        attentionFilter={activityFilter === 'attention'}
+        managerProjection={managerProjection}
+        managerEnabled={managerEnabled}
+        managerPeople={managerPeople}
+      />) : rootIds.length ? rootIds.map(id => (
         <TreeItem
           key={id}
           itemId={id}

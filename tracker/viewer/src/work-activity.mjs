@@ -183,7 +183,9 @@ function childRefs(item) {
 }
 
 function statusOf(item) {
-  return text(item?.status ?? item?.data?.status) ?? 'unknown';
+  const status = text(item?.status ?? item?.data?.status);
+  if (item?.contextOnly === true || item?.teamProjection?.contextOnly === true) return status ?? '';
+  return status ?? 'unknown';
 }
 
 function isCompleted(item, status = statusOf(item)) {
@@ -230,8 +232,10 @@ function ownSchedule(item) {
     plannedDue: approved ? plannedDue : null,
     forecastStart,
     forecastEnd,
-    proposedStart: proposed ? explicitProposedStart ?? plannedStart : null,
-    proposedEnd: proposed ? explicitProposedEnd ?? plannedDue : null,
+    proposedStart: explicitProposedStart ?? (proposed ? plannedStart : null),
+    proposedEnd: explicitProposedEnd ?? (proposed ? plannedDue : null),
+    proposedScheduleKind: text(schedule.proposedScheduleKind ?? schedule.proposed_schedule_kind),
+    proposedExplicit: Boolean(explicitProposedStart || explicitProposedEnd || schedule.proposedExplicit === true),
     partial: approved && Boolean(plannedStart) !== Boolean(plannedDue),
     hasApprovedPlan: approved && Boolean(plannedStart || plannedDue),
   };
@@ -285,6 +289,26 @@ function streakFor(evidence) {
   return { days, endDate: dayAtOrdinal(endOrdinal) };
 }
 
+function observedIntervalsForDays(days) {
+  const ordinals = [...new Set(days.map(dayOrdinal).filter(ordinal => ordinal !== null))].sort((left, right) => left - right);
+  const intervals = [];
+  for (const ordinal of ordinals) {
+    const previous = intervals.at(-1);
+    if (previous && ordinal <= previous.endOrdinal + 1) {
+      previous.endOrdinal = ordinal;
+      previous.endDay = dayAtOrdinal(ordinal);
+    } else {
+      intervals.push({
+        startOrdinal: ordinal,
+        endOrdinal: ordinal,
+        startDay: dayAtOrdinal(ordinal),
+        endDay: dayAtOrdinal(ordinal),
+      });
+    }
+  }
+  return intervals.map(({ startDay, endDay }) => ({ startDay, endDay }));
+}
+
 function ownActivity(events, now) {
   const dated = events.filter(entry => evidenceDay(entry)).sort(compareEvidence);
   const latest = dated.at(-1) ?? null;
@@ -302,6 +326,7 @@ function ownActivity(events, now) {
     state: ageBusinessDays === null ? 'unknown' : ageBusinessDays <= 2 ? 'recent' : 'quiet',
     firstDate: dated.length ? evidenceDay(dated[0]) : null,
     lastDate: latest ? evidenceDay(latest) : null,
+    observedIntervals: observedIntervalsForDays(dated.map(evidenceDay)),
     firstOccurredAt: dated[0]?.occurredAt ?? null,
     lastOccurredAt: latest?.occurredAt ?? null,
     ageBusinessDays,
@@ -488,6 +513,12 @@ export function buildWorkProjection({ items = [], evidence = [], now = new Date(
     const timeline = {
       ownPlannedStart: schedule.plannedStart,
       ownPlannedDue: schedule.plannedDue,
+      ownProposedStart: schedule.proposedStart,
+      ownProposedDue: schedule.proposedEnd,
+      ownProposedScheduleKind: schedule.proposedScheduleKind,
+      ownProposedExplicit: schedule.proposedExplicit,
+      ownForecastStart: schedule.forecastStart,
+      ownForecastDue: schedule.forecastEnd,
       plannedStart,
       plannedDue,
       observedStart,

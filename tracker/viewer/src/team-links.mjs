@@ -18,7 +18,7 @@ export function sourceRepositoryUrl(path, sourceCommit = 'unknown') {
 }
 
 /** Rewrite tracker Markdown references to the matching history API path. */
-export function rewriteTeamTrackerLinks(value, items, sourceCommit = 'unknown') {
+export function rewriteTeamTrackerLinks(value, items, sourceCommit = 'unknown', { allowRepositoryLinks = true } = {}) {
   const markdown = String(value ?? '');
   return markdown.replace(/\]\((\.?\/)?(tracker\/(?:items|decisions)\/[^)]+\.md)\)/g, (match, _prefix, path) => {
     const item = items.find(candidate => candidate.sourcePath === path);
@@ -26,5 +26,5 @@ export function rewriteTeamTrackerLinks(value, items, sourceCommit = 'unknown') 
     const decisionId = /^tracker\/decisions\/([^/]+)\.md$/u.exec(path)?.[1];
     if (decisionId) return `](${decisionPath(decisionId)})`;
     return match;
-  }).replace(/\]\((\.?\/)?(tracker\/(?:history|updates)\/[^)]+\.md)\)/g, (_match, _prefix, path) => `](${sourceRepositoryUrl(path, sourceCommit)})`);
+  }).replace(/\]\((\.?\/)?(tracker\/(?:history|updates)\/[^)]+\.md)\)/g, (match, _prefix, path) => allowRepositoryLinks ? `](${sourceRepositoryUrl(path, sourceCommit)})` : match);
 }

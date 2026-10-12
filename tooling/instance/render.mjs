@@ -16,15 +16,17 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  readdirSync,
   writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { parseInstanceConfig, publicInstanceConfig } from './config.mjs';
 
 const FORMAT_VERSION = 1;
 const TEMPLATE_PATH = fileURLToPath(new URL('./viewer-shell.html', import.meta.url));
+const AVATAR_ASSET = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(?:png|jpe?g|webp|gif)$/iu;
 
 /**
  * Escape JSON for an inline script.  JSON.stringify is not sufficient for an
@@ -88,6 +90,21 @@ function safeAssetPath(root, candidate, label) {
   return absolute;
 }
 
+function avatarAssets(root, allowlist = null) {
+  if (!(allowlist instanceof Set) || allowlist.size === 0) return [];
+  const directory = join(root, 'assets', 'avatars');
+  const stat = lstatSync(directory, { throwIfNoEntry: false });
+  if (!stat) throw new Error('assets/avatars is required by declared local avatars');
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('assets/avatars must be a real directory');
+  const entries = readdirSync(directory, { withFileTypes: true });
+  for (const name of allowlist) if (!entries.some(entry => entry.name === name)) throw new Error(`declared avatar is missing: ${name}`);
+  return entries.sort((left, right) => left.name.localeCompare(right.name)).filter(entry => allowlist.has(entry.name)).map(entry => {
+    if (!entry.isFile() || entry.isSymbolicLink() || !AVATAR_ASSET.test(entry.name)) throw new Error(`avatar asset is not an approved local image: ${entry.name}`);
+    const source = safeAssetPath(root, `assets/avatars/${entry.name}`, `assets/avatars/${entry.name}`);
+    return { name: entry.name, source };
+  });
+}
+
 /** @param {Record<string, unknown>} provenance */
 function manifestProvenance(provenance) {
   const source = provenance && typeof provenance === 'object' ? provenance : {};
@@ -135,7 +152,7 @@ function writeText(path, value) {
 
 /** @param {string} directory @param {string[]} files */
 function artifactHashes(directory, files) {
-  return Object.fromEntries(files.map(file => [file, digestFile(readFileSync(join(directory, file), 'utf8'))]));
+  return Object.fromEntries(files.map(file => [file, digestFile(readFileSync(join(directory, file)))]));
 }
 
 /**
@@ -160,6 +177,9 @@ export function renderInstanceArtifacts({ instance, manifestDir, engineRoot, out
   if (isAbsolute(output) === false && outputPath === '') throw new TypeError('output: invalid path');
 
   const sourceFavicon = safeAssetPath(settingsRoot, parsed.branding.faviconPath, 'settings.branding.faviconPath');
+  const provenanceRecord = provenance && typeof provenance === 'object' ? provenance : {};
+  const avatarNames = Array.isArray(provenanceRecord.avatarNames) ? new Set(provenanceRecord.avatarNames) : null;
+  const avatars = avatarAssets(settingsRoot, avatarNames);
   const publicConfig = publicInstanceConfig(parsed);
   const publicJson = safeJsonForHtml(publicConfig);
   const template = readFileSync(TEMPLATE_PATH, 'utf8');
@@ -176,7 +196,10 @@ export function renderInstanceArtifacts({ instance, manifestDir, engineRoot, out
     'export default Object.freeze({ instance });',
     '',
   ].join('\n');
-  const engineWorker = pathToFileURL(join(engine, 'worker', 'access-gate.mjs')).href;
+  const engineWorkerPath = join(engine, 'worker', 'access-gate.mjs');
+  const relativeEngineWorker = relative(outputPath, engineWorkerPath).split('\\').join('/');
+  if (isAbsolute(relativeEngineWorker)) throw new Error('engine worker must be reachable from the output root');
+  const engineWorker = relativeEngineWorker.startsWith('.') ? relativeEngineWorker : `./${relativeEngineWorker}`;
   const workerEntry = [
     '// Generated Worker entry. The engine is deliberately resolved from the selected engine root.',
     `import { createTrackerWorker } from ${JSON.stringify(engineWorker)};`,
@@ -212,6 +235,8 @@ export function renderInstanceArtifacts({ instance, manifestDir, engineRoot, out
     mkdirSync(join(stage, 'assets'), { recursive: true });
     writeText(join(stage, 'assets/index.html'), shell);
     copyFileSync(sourceFavicon, join(stage, 'assets/favicon.svg'));
+    if (avatars.length) mkdirSync(join(stage, 'assets', 'avatars'), { recursive: true });
+    for (const avatar of avatars) copyFileSync(avatar.source, join(stage, 'assets', 'avatars', avatar.name));
     writeText(join(stage, 'runtime-config.mjs'), runtimeConfig);
     writeText(join(stage, 'worker-entry.mjs'), workerEntry);
     writeText(join(stage, 'wrangler.json'), `${JSON.stringify(wrangler, null, 2)}\n`);
@@ -219,16 +244,20 @@ export function renderInstanceArtifacts({ instance, manifestDir, engineRoot, out
     // A snapshot builder may provide the data payload through provenance. The
     // renderer accepts it for the standalone renderer contract while leaving
     // bundling/data-model concerns to the build entrypoint.
-    const provenanceRecord = provenance && typeof provenance === 'object' ? provenance : {};
     if (Object.hasOwn(provenanceRecord, 'data')) {
       writeText(join(stage, 'assets/data.json'), `${JSON.stringify(provenanceRecord.data, null, 2)}\n`);
+    }
+    if (parsed.features.weeklyPlanning && Object.hasOwn(provenanceRecord, 'planningArchive')) {
+      writeText(join(stage, 'assets/planning/archive.json'), `${JSON.stringify(provenanceRecord.planningArchive, null, 2)}\n`);
     }
 
     const generatedFiles = [
       'assets/index.html', 'assets/favicon.svg', 'runtime-config.mjs',
       'worker-entry.mjs', 'wrangler.json',
     ];
+    for (const avatar of avatars) generatedFiles.push(`assets/avatars/${avatar.name}`);
     if (existsSync(join(stage, 'assets/data.json'))) generatedFiles.push('assets/data.json');
+    if (existsSync(join(stage, 'assets/planning/archive.json'))) generatedFiles.push('assets/planning/archive.json');
     const manifest = {
       ...manifestBase,
       artifactHashes: artifactHashes(stage, generatedFiles),

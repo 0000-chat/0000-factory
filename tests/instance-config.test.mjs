@@ -76,9 +76,53 @@ test('version 1 settings parse as nested, frozen site data', () => {
   assert.equal(parsed.github.repo, 'synthetic-data');
   assert.equal(parsed.model.approvalProtocol, 'don-v1');
   assert.equal(parsed.deployment.workerName, 'tracker-synthetic');
+  assert.deepEqual(parsed.features, { weeklyPlanning: true });
   assert.equal(Object.isFrozen(parsed), true);
   assert.equal(Object.isFrozen(parsed.browser), true);
   assert.throws(() => { parsed.browser.storeId = 'changed'; }, TypeError);
+});
+
+test('approval aliases are validated, normalized, and isolated per instance', () => {
+  const defaults = parseInstanceConfig(settings());
+  assert.deepEqual(defaults.model.approverIds, ['don', 'owner']);
+  assert.equal(Object.isFrozen(defaults.model.approverIds), true);
+
+  const configured = parseInstanceConfig(settings({
+    id: 'configured',
+    browser: {
+      namespace: 'configured',
+      storeId: 'configured-store',
+      themeKey: 'configured-theme',
+      editLockPrefix: 'configured-edit',
+      publishLockName: 'configured-publish',
+      unscheduledCollapsedKey: 'configured.unscheduled',
+      activityPausedKey: 'configured.activity',
+    },
+    model: { approvalProtocol: 'don-v1', approverIds: ['Team-Lead', 'review-owner'] },
+  }));
+  assert.deepEqual(configured.model.approverIds, ['team-lead', 'review-owner']);
+  assert.notStrictEqual(configured.model.approverIds, defaults.model.approverIds);
+
+  for (const approverIds of [null, [], ['team-lead', 'TEAM-LEAD'], ['bad alias']]) {
+    assert.throws(
+      () => parseInstanceConfig(settings({ model: { approvalProtocol: 'don-v1', approverIds } })),
+      /settings\.model\.approverIds/u,
+    );
+  }
+});
+
+test('weekly planning is an optional, strictly typed instance feature', () => {
+  const disabled = parseInstanceConfig(settings({ features: { weeklyPlanning: false } }));
+  assert.deepEqual(disabled.features, { weeklyPlanning: false });
+  assert.deepEqual(publicInstanceConfig(disabled).features, { weeklyPlanning: false });
+  assert.deepEqual(parsePublicInstanceConfig(publicInstanceConfig(disabled)).features, { weeklyPlanning: false });
+
+  for (const features of [null, [], true, {}, { weeklyPlanning: 'false' }, { weeklyPlanning: false, future: true }]) {
+    assert.throws(
+      () => parseInstanceConfig(settings({ features })),
+      /settings\.features(?:\.weeklyPlanning|\.future)?/u,
+    );
+  }
 });
 
 test('ready Access, service, and enabled publishing validate together', () => {
@@ -94,6 +138,62 @@ test('ready Access, service, and enabled publishing validate together', () => {
   assert.equal(parsed.access.teamDomain, 'https://team.synthetic.test');
   assert.deepEqual(parsed.access.service, { kind: 'enabled', clientId: 'synthetic-service' });
   assert.equal(parsed.publish.kind, 'github-app');
+  assert.deepEqual(parsed.access.readerEmailDomains, []);
+});
+
+test('ready Access may authorize a bounded, normalized email domain list', () => {
+  const parsed = parseInstanceConfig(readySettings({
+    access: {
+      kind: 'ready',
+      teamDomain: 'https://team.synthetic.test',
+      audience: 'synthetic-audience',
+      readerEmails: [],
+      readerEmailDomains: ['NEXTFINANCIAL.IO'],
+      service: { kind: 'disabled' },
+    },
+    publish: { kind: 'disabled' },
+  }));
+  assert.deepEqual(parsed.access.readerEmails, []);
+  assert.deepEqual(parsed.access.readerEmailDomains, ['nextfinancial.io']);
+
+  for (const readerEmailDomains of [
+    [],
+    ['127.0.0.1'],
+    ['::1'],
+    ['internal'],
+    ['localhost'],
+    ['team.synthetic.test.'],
+    ['team..synthetic.test'],
+    ['team synthetic.test'],
+  ]) {
+    assert.throws(
+      () => parseInstanceConfig(readySettings({
+        access: {
+          kind: 'ready',
+          teamDomain: 'https://team.synthetic.test',
+          audience: 'synthetic-audience',
+          readerEmails: [],
+          readerEmailDomains,
+          service: { kind: 'disabled' },
+        },
+        publish: { kind: 'disabled' },
+      })),
+      /settings\.access(?:\.readerEmailDomains)?/u,
+    );
+  }
+  assert.throws(
+    () => parseInstanceConfig(readySettings({
+      access: {
+        kind: 'ready',
+        teamDomain: 'https://team.synthetic.test',
+        audience: 'synthetic-audience',
+        readerEmails: [],
+        service: { kind: 'disabled' },
+      },
+      publish: { kind: 'disabled' },
+    })),
+    /must configure readerEmails or readerEmailDomains/u,
+  );
 });
 
 test('public projection round-trips without runtime policy', () => {

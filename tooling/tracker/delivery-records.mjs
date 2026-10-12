@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { extractMarkdownSections } from './markdown.mjs';
 import { normalizeActivityEvidence } from './activity-evidence.mjs';
+import { DEFAULT_DON_APPROVER_IDS } from './planning.mjs';
 
 export const DELIVERY_TYPES = new Set(['discovery', 'brief', 'coordination', 'cycle', 'reflection']);
 export const DISPATCH_STATES = new Set(['draft', 'sent', 'uncertain', 'failed']);
@@ -22,8 +23,9 @@ function isUtcSecond(value) {
   return !Number.isNaN(date.valueOf()) && date.toISOString().replace('.000Z', 'Z') === value;
 }
 
-function isDonIdentity(value) {
-  return ['don', 'owner'].includes(String(value ?? '').trim().toLowerCase());
+function isDonIdentity(value, approverIds = DEFAULT_DON_APPROVER_IDS) {
+  const ids = approverIds instanceof Set ? approverIds : new Set(approverIds);
+  return ids.has(String(value ?? '').trim().toLowerCase());
 }
 
 function dataOf(record) {
@@ -73,9 +75,9 @@ function itemsById(records) {
   }));
 }
 
-function approvalsAreDon(decision) {
+function approvalsAreDon(decision, approverIds) {
   return decision?.state === 'approved'
-    && isDonIdentity(decision?.approved_by ?? decision?.approvedBy)
+    && isDonIdentity(decision?.approved_by ?? decision?.approvedBy, approverIds)
     && isDate(String(decision?.approved_at ?? decision?.approvedAt ?? ''));
 }
 
@@ -112,7 +114,7 @@ function ownerPersonId(task, people) {
   return personIdForIdentity(nullable(task?.owner), people);
 }
 
-function deliveryProjection(record, decisions, evidence, people, items, duplicateDiscoveryLinks) {
+function deliveryProjection(record, decisions, evidence, people, items, duplicateDiscoveryLinks, options = {}) {
   const data = dataOf(record);
   const sections = markdownSections(record);
   const common = {
@@ -148,7 +150,7 @@ function deliveryProjection(record, decisions, evidence, people, items, duplicat
       candidateParents: list(data.candidate_parents),
       attribution: nullable(data.attribution),
       priorityDecision: nullable(data.priority_decision),
-      approved: approvalsAreDon(decisions.get(nullable(data.priority_decision)))
+      approved: approvalsAreDon(decisions.get(nullable(data.priority_decision)), options.approverIds)
         && decisionAffects(decisions.get(nullable(data.priority_decision)), common.itemId),
     };
   }
@@ -162,12 +164,12 @@ function deliveryProjection(record, decisions, evidence, people, items, duplicat
     const next = decisions.get(nextDecision);
     const taskDri = ownerPersonId(items.get(common.itemId), people);
     const nextActor = decisionValue(next, 'next_actor', 'nextActor');
-    const assignmentApproved = approvalsAreDon(assignment)
+    const assignmentApproved = approvalsAreDon(assignment, options.approverIds)
       && decisionAffects(assignment, common.itemId)
       && decisionValue(assignment, 'executor_item', 'executorItem') === common.itemId
       && decisionValue(assignment, 'executor_kind', 'executorKind') === executorKind
       && decisionValue(assignment, 'executor_ref', 'executorRef') === executorRef;
-    const nextApproved = approvalsAreDon(next)
+    const nextApproved = approvalsAreDon(next, options.approverIds)
       && decisionValue(next, 'next_item', 'nextItem') === common.itemId
       && ((meaningful(executorRef) && nextActor === executorRef)
         || (Boolean(taskDri) && personIdForIdentity(nextActor, people) === taskDri))
@@ -193,7 +195,7 @@ function deliveryProjection(record, decisions, evidence, people, items, duplicat
       channel: nullable(data.channel),
       body,
     });
-    const messageApproved = approvalsAreDon(decision)
+    const messageApproved = approvalsAreDon(decision, options.approverIds)
       && decisionAffects(decision, common.itemId)
       && decisionValue(decision, 'coordination_digest', 'coordinationDigest') === expectedDigest
       && data.request_digest === expectedDigest;
@@ -231,9 +233,9 @@ function deliveryProjection(record, decisions, evidence, people, items, duplicat
 }
 
 /** Normalize parsed tracker delivery records for the generated snapshot. */
-export function normalizeDeliveryRecords(records = {}) {
+export function normalizeDeliveryRecords(records = {}, options = {}) {
   if (!Array.isArray(records.delivery)) return [];
-  const evidence = new Map(normalizeActivityEvidence(records).map(entry => [entry.id, entry]));
+  const evidence = new Map(normalizeActivityEvidence(records, options).map(entry => [entry.id, entry]));
   const counts = new Map();
   for (const record of records.delivery) {
     const data = dataOf(record);
@@ -257,7 +259,7 @@ export function normalizeDeliveryRecords(records = {}) {
   const decisions = decisionsById(records);
   const people = peopleById(records);
   const items = itemsById(records);
-  return records.delivery.map(record => deliveryProjection(record, decisions, evidence, people, items, duplicateDiscoveryLinks));
+  return records.delivery.map(record => deliveryProjection(record, decisions, evidence, people, items, duplicateDiscoveryLinks, options));
 }
 
 /** Bind exact payload content to the canonical task, recipient, and channel. */
@@ -280,7 +282,7 @@ export function canonicalPersonId(records, value) {
 }
 
 /** Resolve approval for a normalized coordination record without dispatching it. */
-export function resolveCoordinationApproval({ record, decisions = [] } = {}) {
+export function resolveCoordinationApproval({ record, decisions = [], approverIds } = {}) {
   const source = record && typeof record === 'object' ? record : {};
   const itemId = source.itemId ?? null;
   const body = String(source.sections?.message ?? '');
@@ -297,7 +299,7 @@ export function resolveCoordinationApproval({ record, decisions = [] } = {}) {
     && Boolean(itemId && source.approvalDecision)
     && source.requestDigest === digest
     && decisionDigest === digest
-    && approvalsAreDon(decision)
+    && approvalsAreDon(decision, approverIds)
     && decisionAffects(decision, itemId);
   const reason = approved
     ? null
@@ -306,7 +308,7 @@ export function resolveCoordinationApproval({ record, decisions = [] } = {}) {
         : !source.approvalDecision ? 'approval decision is missing'
           : source.requestDigest !== digest ? 'request digest does not match the exact payload'
             : !decision ? 'approval decision does not exist'
-              : decision.state !== 'approved' || !isDonIdentity(approvedBy) ? 'approval is not an approved Don decision'
+              : decision.state !== 'approved' || !isDonIdentity(approvedBy, approverIds) ? 'approval is not an approved Don decision'
                 : !decisionAffects(decision, itemId) ? 'approval decision does not affect the exact task'
                   : 'approval decision digest does not match the exact payload';
   return { approved, digest, decisionId: source.approvalDecision ?? null, reason };
@@ -336,7 +338,7 @@ function hasFailedReceiptProof(record, receipts, botMessages, digest) {
 }
 
 /** Build durable handoff data after exact approval; this function never sends it. */
-export function prepareCoordinationRequest({ record, decisions = [], botReceipts = [], botMessages = [] } = {}) {
+export function prepareCoordinationRequest({ record, decisions = [], botReceipts = [], botMessages = [], approverIds } = {}) {
   const source = record && typeof record === 'object' ? record : {};
   if (source.dispatchState === 'sent') return { ok: false, request: null, reason: 'coordination is already sent' };
   if (source.dispatchState === 'uncertain') return { ok: false, request: null, reason: 'delivery state is uncertain; blind retry is blocked' };
@@ -346,7 +348,7 @@ export function prepareCoordinationRequest({ record, decisions = [], botReceipts
   }
   const body = source.sections?.message;
   if (typeof body !== 'string' || !body.trim()) return { ok: false, request: null, reason: 'exact message body is missing' };
-  const approval = resolveCoordinationApproval({ record: source, decisions });
+  const approval = resolveCoordinationApproval({ record: source, decisions, approverIds });
   if (!approval.approved) return { ok: false, request: null, reason: approval.reason };
   if (source.dispatchState === 'failed' && !hasFailedReceiptProof(source, botReceipts, botMessages, approval.digest)) {
     return { ok: false, request: null, reason: 'retry requires a matching completed delivery failure receipt with the exact payload digest' };
@@ -392,7 +394,7 @@ function recordByPath(records, collection, path) {
   return recordsOf(records, collection).find(record => record.path === path) ?? null;
 }
 
-function validateCoordinationDelivery(record, records, path, issues, digest) {
+function validateCoordinationDelivery(record, records, path, issues, digest, options = {}) {
   const data = record.data;
   const state = data.dispatch_state;
   if (!DISPATCH_STATES.has(state)) issues.push(`${path}: dispatch_state must be draft, sent, uncertain, or failed`);
@@ -408,7 +410,7 @@ function validateCoordinationDelivery(record, records, path, issues, digest) {
   if (!meaningful(extractMarkdownSections(record.body ?? '').message)) issues.push(`${path}: Message section must contain the exact non-placeholder body`);
   if (['sent', 'uncertain', 'failed'].includes(state)) {
     if (!isSha256(data.request_digest) || data.request_digest !== digest) issues.push(`${path}: dispatched coordination needs the exact request_digest`);
-    if (!approvalsAreDon(approvalDecision) || !decisionAffects(approvalDecision, data.item)
+    if (!approvalsAreDon(approvalDecision, options.approverIds) || !decisionAffects(approvalDecision, data.item)
       || approvalDecision?.coordination_digest !== digest) {
       issues.push(`${path}: dispatched coordination needs an exact Don-approved payload decision`);
     }
@@ -473,12 +475,12 @@ function isSha256(value) {
 }
 
 /** Validate producer records and all references without reading from disk. */
-export function validateDeliveryRecords(records, issues = []) {
+export function validateDeliveryRecords(records, issues = [], options = {}) {
   const delivery = recordsOf(records, 'delivery');
   const itemIds = itemsById(records);
   const people = peopleById(records);
   const decisions = decisionsById(records);
-  const evidence = new Map(normalizeActivityEvidence(records).map(entry => [entry.id, entry]));
+  const evidence = new Map(normalizeActivityEvidence(records, options).map(entry => [entry.id, entry]));
   const seenIds = new Set();
   for (const [id, decision] of decisions) {
     if (meaningful(decision.coordination_digest) && !isSha256(decision.coordination_digest)) {
@@ -544,7 +546,7 @@ export function validateDeliveryRecords(records, issues = []) {
         if (!decision) issues.push(`${path}: priority_decision references unknown decision ${priorityDecision}`);
         else {
           if (!decisionAffects(decision, d.item)) issues.push(`${path}: priority_decision must affect the exact task`);
-          if (!isDonIdentity(decision.owner)) issues.push(`${path}: priority_decision owner must be Don`);
+          if (!isDonIdentity(decision.owner, options.approverIds)) issues.push(`${path}: priority_decision owner must be Don`);
           if (decision.state === 'superseded') issues.push(`${path}: priority_decision cannot reference a superseded decision`);
         }
       }
@@ -587,7 +589,7 @@ export function validateDeliveryRecords(records, issues = []) {
       if (approvalDecision && decision?.state === 'approved' && decision.coordination_digest !== messageDigest) {
         issues.push(`${path}: approved decision coordination_digest does not match the exact payload`);
       }
-      validateCoordinationDelivery(record, records, path, issues, messageDigest);
+      validateCoordinationDelivery(record, records, path, issues, messageDigest, options);
     }
 
     if (type === 'cycle') {

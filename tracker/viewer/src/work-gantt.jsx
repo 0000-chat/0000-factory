@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   CalendarDays,
   ChevronDown,
@@ -19,6 +19,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from './components/ui/dialog.tsx';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from './components/ui/tooltip.tsx';
 import {
   GanttFeatureList,
   GanttFeatureListGroup,
@@ -42,36 +48,49 @@ import {
   addCalendarDay,
   clampGanttZoom,
   chartDateForDay,
+  directMarksForWorkEntry,
   fitZoomForGanttDateRange,
   formatGanttZoom,
+  ganttDateTickInterval,
+  groupWorkGanttRowsByOwner,
   GANTT_DEFAULT_ZOOM,
+  GANTT_DAILY_COLUMN_WIDTH,
   GANTT_FIT_PADDING_DAYS,
+  GANTT_SELECTED_WEEK_PADDING_DAYS,
   GANTT_MAX_ZOOM,
   GANTT_MIN_ZOOM,
   GANTT_ZOOM_STEP,
   marksForWorkEntry,
+  hasForecastMarks,
   manilaTodayForChart,
   paddedGanttDateRange,
   primaryWorkMark,
   shortWorkDate,
+  selectedWeekGanttDateRange,
+  workGanttFitDateRange,
   workGanttDepthExpansion,
   workMarkDescription,
 } from './work-gantt-model.mjs';
-import {
-  WORK_GANTT_COLLAPSED_PARENT_LANES,
-  WORK_GANTT_LANES,
-  WORK_GANTT_ROW_HEIGHT,
-  placeWorkGanttRollups,
-} from './work-gantt-layout.mjs';
-import { WorkGanttDependencies, WorkGanttDependencySummary } from './work-gantt-dependencies.jsx';
+import { WORK_GANTT_ROW_HEIGHT } from './work-gantt-layout.mjs';
+import { WorkGanttDependencies } from './work-gantt-dependencies.jsx';
+import { WorkGanttInvestigation } from './work-gantt-investigation.jsx';
+import { getWorkDateDetails } from './work-schedule-labels.mjs';
 import { trackerInstanceConfig } from './instance-config';
 import './work-gantt.css';
 
 const UNSCHEDULED_COLLAPSED_STORAGE_KEY = trackerInstanceConfig.browser.unscheduledCollapsedKey;
+const GANTT_INITIAL_LOOKBACK_DAYS = 3;
 const EMPTY_MAP = new Map();
 const EMPTY_SET = new Set();
 const EXPANSION_LEVELS = [1, 2, 3, 'all'];
 const PARTIAL_APPROVED_HELP = 'Some work in this schedule has missing or incomplete approved dates.';
+
+function WorkGanttTooltip({ label, children }) {
+  return <Tooltip>
+    <TooltipTrigger asChild>{children}</TooltipTrigger>
+    <TooltipContent side="top" sideOffset={6} className="work-gantt-tooltip">{label}</TooltipContent>
+  </Tooltip>;
+}
 
 function rowStatusLabel(entry) {
   if (entry.completed) return 'Done';
@@ -100,32 +119,6 @@ function readUnscheduledCollapsed() {
   }
 }
 
-function activityMotionRange(entry, mark, collapsed) {
-  if (entry.completed || entry.own.state !== 'recent') {
-    if (!collapsed || entry.completed || entry.descendants.recentIds.length === 0) return null;
-  }
-
-  // Collapsed rows summarize descendant movement across their rolled range.
-  // Expanded rows keep the rollup bar but animate only the row's own evidence.
-  if (collapsed) return { left: 0, width: 100 };
-
-  const start = entry.own.firstDate;
-  const end = entry.own.lastDate;
-  if (!start || !end || start < mark.startDay || end > mark.endDay || start > end) return null;
-  const ordinal = day => {
-    const [year, month, date] = day.split('-').map(Number);
-    return Math.floor(Date.UTC(year, month - 1, date) / 86400000);
-  };
-  const fullDays = ordinal(mark.endDay) - ordinal(mark.startDay) + 1;
-  if (fullDays <= 0) return null;
-  const first = ordinal(start) - ordinal(mark.startDay);
-  const last = ordinal(end) - ordinal(mark.startDay) + 1;
-  return {
-    left: (first / fullDays) * 100,
-    width: ((last - first) / fullDays) * 100,
-  };
-}
-
 function ganttTimelineKey(timelineData) {
   const months = (timelineData ?? []).flatMap(year => (year?.quarters ?? []).flatMap(quarter => quarter?.months ?? []));
   const first = months[0];
@@ -149,7 +142,6 @@ function extendDateRangeToAnchor(dateRange, anchor) {
 // The legacy chart rendered daily cells at provider zoom 60. Keep that
 // physical density while presenting 100% as the neutral UI zoom.
 const GANTT_PROVIDER_ZOOM_SCALE = 0.6;
-const GANTT_DAILY_COLUMN_WIDTH = 30;
 
 function dayOrdinal(day) {
   if (typeof day !== 'string') return null;
@@ -188,6 +180,27 @@ function dayLeft(mark, startDay, pixelsPerDay) {
   return (start - origin) * pixelsPerDay;
 }
 
+function timelineSegmentStyle(segment, timeline) {
+  const start = dayOrdinal(segment?.startDay);
+  const end = dayOrdinal(segment?.endDay);
+  const origin = dayOrdinal(timeline?.startDay);
+  const timelineEnd = dayOrdinal(timeline?.endDay);
+  if ([start, end, origin, timelineEnd].some(value => value === null) || end < start || timelineEnd < origin) return null;
+  const totalDays = timelineEnd - origin + 1;
+  if (totalDays <= 0) return null;
+  return {
+    left: `${((start - origin) / totalDays) * 100}%`,
+    width: `${((end - start + 1) / totalDays) * 100}%`,
+  };
+}
+
+function workGanttRangeLabel(mark) {
+  if (!mark?.startDay || !mark?.endDay) return 'Dates incomplete';
+  const start = shortWorkDate(mark.startDay);
+  const end = shortWorkDate(mark.endDay);
+  return start === end ? start : `${start}–${end}`;
+}
+
 function sameIdsWithin(controlledIds, expandedIds, currentIds) {
   for (const id of controlledIds) {
     if (currentIds.has(id) !== expandedIds.has(id)) return false;
@@ -202,22 +215,10 @@ function rowHighlight(row, activeId, relatedIds, selectedId) {
   return 'none';
 }
 
-function workGanttInteractionLane(row, feature) {
-  if ((row.collapsed || row.isExpanded) && row.hasChildren) {
-    return WORK_GANTT_COLLAPSED_PARENT_LANES[feature.sourceKind] ?? WORK_GANTT_LANES[feature.sourceKind];
-  }
-
-  // A single source gets the full row so an isolated leaf mark is centered.
-  // Keep approved-plus-secondary rows on their established semantic lanes so
-  // their due marker and observed overrun remain visually comparable.
-  const sourceKinds = [...new Set((row.marks ?? []).map(mark => mark.sourceKind))];
-  if (!sourceKinds.includes('approved')) {
-    const ordered = ['proposed', 'observed', 'forecast'].filter(kind => sourceKinds.includes(kind));
-    const index = ordered.indexOf(feature.sourceKind);
-    if (index >= 0) return { index, count: Math.max(1, ordered.length) };
-  }
-  if (sourceKinds.length === 1 && sourceKinds[0] === 'approved') return { index: 0, count: 1 };
-  return WORK_GANTT_LANES[feature.sourceKind];
+function workGanttInteractionLane() {
+  // Every source shares one centered Kibo row so bar thickness never varies
+  // with source kind, parent state, or overlap count.
+  return { index: 0, count: 1 };
 }
 
 function accessibleMarkDescription(mark) {
@@ -234,12 +235,14 @@ function scrollLimit(scrollElement) {
 function ganttViewport(scrollElement) {
   if (!scrollElement) return null;
   const sidebar = scrollElement.querySelector('[data-roadmap-ui="gantt-sidebar"]');
-  const sidebarWidth = sidebar?.getBoundingClientRect().width || 300;
+  const sidebarRect = sidebar?.getBoundingClientRect();
+  const sidebarVisible = Boolean(sidebar && ((sidebar.getClientRects?.().length ?? 0) > 0 || (sidebarRect?.width ?? 0) > 0));
+  const sidebarWidth = sidebarVisible ? (sidebarRect?.width || 300) : 0;
   const viewportWidth = Math.max(0, scrollElement.clientWidth - sidebarWidth);
   return { sidebarWidth, viewportWidth };
 }
 
-function WorkGanttZoomControls({ zoom, onZoomOut, onZoomIn, onZoomChange, onReset, onFitAll, canFitAll }) {
+function WorkGanttZoomControls({ zoom, onZoomOut, onZoomIn, onZoomChange, onReset, onFitAll, canFitAll, onFitFocusWindow, canFitFocusWindow, onFitSelectedWeek, canFitSelectedWeek, compact = false }) {
   const zoomLabel = formatGanttZoom(zoom);
   const handleSliderKeyDown = event => {
     const isArrow = event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown';
@@ -284,12 +287,18 @@ function WorkGanttZoomControls({ zoom, onZoomOut, onZoomIn, onZoomChange, onRese
       disabled={zoom >= GANTT_MAX_ZOOM}
       onClick={onZoomIn}
     ><ZoomIn size={14} aria-hidden="true" /></Button>
-    <Button size="sm" variant="outline" type="button" onClick={onReset} title="Reset zoom to 100%">
+    {compact ? null : <Button size="sm" variant="outline" type="button" onClick={onReset} title="Reset zoom to 100%">
       <RotateCcw size={14} aria-hidden="true" />Reset
-    </Button>
-    <Button size="sm" variant="outline" type="button" onClick={onFitAll} disabled={!canFitAll} title="Fit all visible dated work">
+    </Button>}
+    {compact ? null : <Button size="sm" variant="outline" type="button" onClick={onFitAll} disabled={!canFitAll} title="Fit all visible dated work">
       Fit all
-    </Button>
+    </Button>}
+    {onFitFocusWindow ? <Button className="work-gantt-fit-context" size="sm" variant="default" type="button" onClick={onFitFocusWindow} disabled={!canFitFocusWindow} title="Fit the four-week meeting context">
+      Fit 4 weeks
+    </Button> : null}
+    {onFitSelectedWeek ? <Button size="sm" variant="outline" type="button" onClick={onFitSelectedWeek} disabled={!canFitSelectedWeek} title="Fit the selected Monday to Friday week">
+      Fit selected week
+    </Button> : null}
   </div>;
 }
 
@@ -334,6 +343,19 @@ function WorkGanttInitialPosition({ feature, navigationDate = null }) {
   return null;
 }
 
+function WorkGanttOwnerGroupRow({ row }) {
+  return <div
+    className="work-gantt-owner-group-row"
+    data-owner-group-id={row.ownerGroupKey}
+    data-work-row-id={row.id}
+    data-contextual="true"
+    aria-label={`${row.ownerGroupLabel} · ${row.ownerGroupCount} work item${row.ownerGroupCount === 1 ? '' : 's'}`}
+  >
+    <span className="work-gantt-owner-group-label">{row.ownerGroupLabel}</span>
+    <span className="work-gantt-owner-group-count">{row.ownerGroupCount} work item{row.ownerGroupCount === 1 ? '' : 's'}</span>
+  </div>;
+}
+
 function WorkGanttSidebarRow({
   row,
   item,
@@ -347,11 +369,15 @@ function WorkGanttSidebarRow({
   onBlur,
   toggleExpanded,
   workActivity,
+  showActivity,
   managerProjection,
   managerEnabled,
 }) {
   const { entry } = row;
   const title = item?.title ?? entry.title;
+  const contextual = row.contextual === true || item?.contextOnly === true;
+  const itemKind = String(item?.type ?? item?.data?.type ?? '').toLowerCase();
+  const kindLabel = itemKind === 'project' ? 'Project' : itemKind === 'workstream' ? 'Workstream' : null;
   const summaryLabel = row.hasChildren
     ? entry.timeline.partial ? 'Partial summary' : 'Summary'
     : entry.timeline.partial ? 'Partial plan' : null;
@@ -363,7 +389,7 @@ function WorkGanttSidebarRow({
     && entry.timeline.overdueCalendarDays > 0) {
     reasons.push(attentionDetails('overdue', entry));
   }
-  const status = rowStatusLabel(entry);
+  const status = contextual ? null : rowStatusLabel(entry);
   const inferred = row.marks.some(mark => mark.sourceKind === 'approved' && mark.inferred);
   const highlight = rowHighlight(row, activeId, relatedIds, selectedId);
   const childSummary = `Direct children · ${row.eligibleChildCount ?? 0} eligible · ${row.undatedChildCount ?? 0} undated`;
@@ -399,36 +425,40 @@ function WorkGanttSidebarRow({
       >{row.collapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}</button>
       : <span className="work-gantt-expander-spacer" aria-hidden="true" />}
     <div className="work-gantt-row-main">
-      <button
-        className="work-gantt-title-button"
-        type="button"
-        aria-label={'Open details for ' + title}
-        aria-current={selectedId === row.id ? 'true' : undefined}
-        title={title}
-        onClick={() => onSelect(row.id)}
-      >
-        <span className="work-gantt-title">{title}</span>
-        <span className="work-gantt-title-meta">
-          <span className="work-gantt-row-meta work-gantt-status" title={'Lifecycle status · ' + status}>{status}</span>
-          {row.contextual ? <span className="work-gantt-row-meta">Context</span> : summaryLabel ? <span className="work-gantt-row-meta" title={summaryLabel}>{summaryLabel}</span> : null}
-          {entry.timeline.partial ? <span className="work-gantt-row-meta work-gantt-partial-badge" title={PARTIAL_APPROVED_HELP} aria-label={PARTIAL_APPROVED_HELP}>Partial dates</span> : null}
-          {inferred ? <span className="work-gantt-row-meta work-gantt-inferred-badge" title="Approved display start is inferred from recorded evidence">Inferred start</span> : null}
-          {reasons.map((reason, index) => <span
-            className={'work-gantt-reason work-gantt-reason-' + reason.tone}
-            key={reason.label + '-' + index}
-            title={reason.label}
-            aria-label={reason.label}
-          >{reason.label}</span>)}
-        </span>
-      </button>
+      <WorkGanttTooltip label={title}>
+        <button
+          className="work-gantt-title-button"
+          type="button"
+          aria-label={'Open details for ' + title}
+          aria-current={selectedId === row.id ? 'true' : undefined}
+          onClick={() => onSelect(row.id)}
+        >
+          {item?.referenceCode ? <code className="work-reference-code work-gantt-reference-code">{item.referenceCode}</code> : null}
+          <span className="work-gantt-title">{title}</span>
+          {kindLabel ? <span className="work-gantt-kind" title={`Work kind · ${kindLabel}`}>{kindLabel}</span> : null}
+          <span className="work-gantt-title-meta">
+            {status ? <span className="work-gantt-row-meta work-gantt-status" title={'Lifecycle status · ' + status}>{status}</span> : null}
+            {contextual ? <span className="work-gantt-row-meta">Context</span> : kindLabel ? <span className="work-gantt-row-meta" title={`Work kind · ${kindLabel}`}>{kindLabel}</span> : summaryLabel ? <span className="work-gantt-row-meta" title={summaryLabel}>{summaryLabel}</span> : null}
+            {row.ownerContextLabel ? <span className="work-gantt-row-meta work-gantt-owner-context" title={`Hierarchy context · ${row.ownerContextLabel}`}>In {row.ownerContextLabel}</span> : null}
+            {entry.timeline.partial ? <span className="work-gantt-row-meta work-gantt-partial-badge" title={PARTIAL_APPROVED_HELP} aria-label={PARTIAL_APPROVED_HELP}>Partial dates</span> : null}
+            {inferred ? <span className="work-gantt-row-meta work-gantt-inferred-badge" title="Approved display start is inferred from recorded evidence">Inferred start</span> : null}
+            {reasons.map((reason, index) => <span
+              className={'work-gantt-reason work-gantt-reason-' + reason.tone}
+              key={reason.label + '-' + index}
+              title={reason.label}
+              aria-label={reason.label}
+            >{reason.label}</span>)}
+          </span>
+        </button>
+      </WorkGanttTooltip>
       <div className="work-gantt-row-details">
-        <div className="work-gantt-row-ownership">
-          <WorkOwnership item={item ?? entry} data={data} entry={entry} collapsed={row.collapsed} showName size="sm" />
-        </div>
-        <div className="work-gantt-row-activity" aria-label="Activity summary">
+        {contextual ? null : <div className="work-gantt-row-ownership">
+          <WorkOwnership item={item ?? entry} data={data} entry={entry} collapsed={row.collapsed} showName size="sm" assignment />
+        </div>}
+        {showActivity ? <div className="work-gantt-row-activity" aria-label="Activity summary">
           <WorkActivityIndicator entry={entry} evidence={data?.activityEvidence} projection={workActivity.projection} collapsed={row.collapsed} paused={workActivity.animationsPaused} />
           {row.hasChildren ? <WorkActivitySummary entry={entry} evidence={data?.activityEvidence} projection={workActivity.projection} compact /> : null}
-        </div>
+        </div> : null}
       </div>
       <div className="work-gantt-row-manager">
         <WorkManagerRowMetadata
@@ -438,11 +468,15 @@ function WorkGanttSidebarRow({
           enabled={managerEnabled}
           compact
         />
-        {row.collapsed && row.hasChildren ? <span
-          className="work-gantt-child-count"
-          title={childSummary}
-          aria-label={childSummary}
-        >{String(row.eligibleChildCount ?? 0) + ' children · ' + String(row.undatedChildCount ?? 0) + ' without approved dates'}</span> : null}
+        {row.collapsed && row.hasChildren ? <WorkGanttTooltip label={childSummary}>
+          <span
+            className="work-gantt-child-count"
+            title={childSummary}
+            aria-label={childSummary}
+            role="img"
+            tabIndex={0}
+          >{String(row.eligibleChildCount ?? 0) + ' children · ' + String(row.undatedChildCount ?? 0) + ' without approved dates'}</span>
+        </WorkGanttTooltip> : null}
       </div>
     </div>
   </div>;
@@ -497,9 +531,9 @@ function agendaDate(mark) {
   return start === end ? start : start + '–' + end;
 }
 
-function WorkGanttMobileAgenda({ rows, data, onSelect, showForecast }) {
+function WorkGanttMobileAgenda({ rows, data, onSelect, showForecast, showActivity }) {
   const eligibleRows = rows.map(row => {
-    const marks = row.marks.filter(mark => showForecast || mark.sourceKind !== 'forecast');
+    const marks = row.marks.filter(mark => (showActivity || mark.sourceKind !== 'observed') && (showForecast || mark.sourceKind !== 'forecast'));
     return { ...row, marks, primary: primaryWorkMark(marks) };
   }).filter(row => row.primary);
   if (!eligibleRows.length) return null;
@@ -526,23 +560,6 @@ function WorkGanttMobileAgenda({ rows, data, onSelect, showForecast }) {
   </div>;
 }
 
-function observedOverrunRange(mark, pixelsPerDay) {
-  if (!mark.observedOverrun || !mark.dueDay) return null;
-  const firstOverrunDay = addCalendarDay(mark.dueDay);
-  if (!firstOverrunDay || firstOverrunDay > mark.endDay) return null;
-  const ordinal = day => {
-    const [year, month, date] = day.split('-').map(Number);
-    return Math.floor(Date.UTC(year, month - 1, date) / 86400000);
-  };
-  const totalDays = ordinal(mark.endDay) - ordinal(mark.startDay) + 1;
-  if (totalDays <= 0) return null;
-  const firstIndex = Math.max(0, ordinal(firstOverrunDay) - ordinal(mark.startDay));
-  return {
-    left: firstIndex * pixelsPerDay,
-    width: (totalDays - firstIndex) * pixelsPerDay,
-  };
-}
-
 function WorkGanttTimeline({
   rows,
   data,
@@ -562,8 +579,13 @@ function WorkGanttTimeline({
   onPointerIntent,
   onClearHover,
   dateRange,
-  releases,
+  selectedWeek,
+  focusWindow = null,
+  groupByOwner = false,
+  itemsById = new Map(),
+  presentationMode = false,
   showForecast,
+  showActivity,
   initialFeature,
   navigationDate,
   showAllDependencies,
@@ -572,14 +594,27 @@ function WorkGanttTimeline({
   className = '',
 }) {
   const today = manilaTodayForChart();
-  const displayedRows = rows.map(row => {
-    const marks = row.marks.filter(mark => showForecast || mark.sourceKind !== 'forecast');
-    return { ...row, marks, primaryMark: primaryWorkMark(marks) };
+  const sourceRows = groupByOwner ? groupWorkGanttRowsByOwner(rows, itemsById) : rows;
+  const displayedRows = sourceRows.map(row => {
+    const visibleMarks = row.marks.filter(mark => showActivity || mark.sourceKind !== 'observed')
+      .filter(mark => showForecast || mark.sourceKind !== 'forecast');
+    return {
+      ...row,
+      marks: visibleMarks,
+      fitMarks: row.timelineBar?.mark ? [row.timelineBar.mark] : [],
+      primaryMark: row.timelineBar?.mark ?? primaryWorkMark(visibleMarks),
+    };
   });
-  const releaseDays = releases
-    .map(release => typeof release?.target === 'string' && chartDateForDay(release.target) ? release.target : null)
-    .filter(Boolean);
-  const canFitAll = displayedRows.some(row => row.marks.length > 0) || releaseDays.length > 0;
+  const selectedWeekRange = useMemo(
+    () => selectedWeekGanttDateRange(selectedWeek),
+    [selectedWeek?.start, selectedWeek?.end],
+  );
+  const focusWindowRange = useMemo(
+    () => selectedWeekGanttDateRange(focusWindow),
+    [focusWindow?.start, focusWindow?.end],
+  );
+  const canFitAll = displayedRows.some(row => row.fitMarks.length > 0);
+  const canFitSelectedWeek = Boolean(selectedWeekRange);
   const shellRef = useRef(null);
   const zoomRef = useRef(zoom);
   const pendingScrollRef = useRef(null);
@@ -629,16 +664,9 @@ function WorkGanttTimeline({
     onZoomChange(nextZoom);
   }, [applyPendingScroll, onZoomChange]);
 
-  const fitAll = useCallback(() => {
-    const datedMarks = displayedRows.flatMap(row => row.marks).filter(mark => mark?.startDay && mark?.endDay);
-    const fitDays = [
-      ...datedMarks.flatMap(mark => [mark.startDay, mark.endDay]),
-      ...releaseDays,
-    ];
-    if (!fitDays.length) return;
-    const startDay = fitDays.reduce((earliest, day) => day < earliest ? day : earliest, fitDays[0]);
-    const endDay = fitDays.reduce((latest, day) => day > latest ? day : latest, fitDays[0]);
-    const padded = paddedGanttDateRange(startDay, endDay, GANTT_FIT_PADDING_DAYS);
+  const fitRange = useCallback((range, paddingDays = GANTT_FIT_PADDING_DAYS) => {
+    if (!range) return;
+    const padded = paddedGanttDateRange(range.startDay, range.endDay, paddingDays);
     const scrollElement = shellRef.current?.querySelector('.gantt');
     const viewport = ganttViewport(scrollElement);
     const timelineStartDay = dateDayKey(dateRange?.startAt);
@@ -647,17 +675,40 @@ function WorkGanttTimeline({
     if (!padded || !viewport || viewport.viewportWidth <= 0 || timelineStartOrdinal === null || paddedStartOrdinal === null) return;
 
     const fitZoom = fitZoomForGanttDateRange(
-      startDay,
-      endDay,
+      range.startDay,
+      range.endDay,
       viewport.viewportWidth,
       GANTT_DAILY_COLUMN_WIDTH,
-      GANTT_FIT_PADDING_DAYS,
+      paddingDays,
     );
     if (fitZoom === null) return;
     const targetLeft = (paddedStartOrdinal - timelineStartOrdinal)
       * GANTT_DAILY_COLUMN_WIDTH * fitZoom / 100;
     changeZoom(fitZoom, { preserveCenter: false, targetLeft });
-  }, [changeZoom, dateRange, displayedRows, releaseDays]);
+  }, [changeZoom, dateRange]);
+
+  const fitAll = useCallback(() => {
+    const datedMarks = displayedRows.flatMap(row => row.fitMarks).filter(mark => mark?.startDay && mark?.endDay);
+    const fitDays = datedMarks.flatMap(mark => [mark.startDay, mark.endDay]);
+    if (!fitDays.length) return;
+    const startDay = fitDays.reduce((earliest, day) => day < earliest ? day : earliest, fitDays[0]);
+    const endDay = fitDays.reduce((latest, day) => day > latest ? day : latest, fitDays[0]);
+    fitRange(workGanttFitDateRange({ startDay, endDay }));
+  }, [displayedRows, fitRange]);
+
+  const fitSelectedWeek = useCallback(() => fitRange(selectedWeekRange, GANTT_SELECTED_WEEK_PADDING_DAYS), [fitRange, selectedWeekRange]);
+  const fitFocusWindow = useCallback(
+    () => fitRange(focusWindowRange ?? selectedWeekRange, focusWindowRange ? GANTT_FIT_PADDING_DAYS : GANTT_SELECTED_WEEK_PADDING_DAYS),
+    [fitRange, focusWindowRange, selectedWeekRange],
+  );
+
+  useEffect(() => {
+    if (!focusWindowRange && !selectedWeekRange) return undefined;
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => fitFocusWindow());
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [fitFocusWindow, focusWindowRange?.startDay, focusWindowRange?.endDay, selectedWeekRange?.startDay, selectedWeekRange?.endDay]);
 
   return <div
     ref={shellRef}
@@ -676,12 +727,22 @@ function WorkGanttTimeline({
       onReset={() => changeZoom(GANTT_DEFAULT_ZOOM)}
       onFitAll={fitAll}
       canFitAll={canFitAll}
+      onFitFocusWindow={focusWindowRange ? fitFocusWindow : null}
+      canFitFocusWindow={Boolean(focusWindowRange)}
+      onFitSelectedWeek={fitSelectedWeek}
+      canFitSelectedWeek={canFitSelectedWeek}
+      compact={presentationMode}
     />
-    <GanttProvider range="daily" zoom={zoom * GANTT_PROVIDER_ZOOM_SCALE} dateRange={dateRange} rowHeight={WORK_GANTT_ROW_HEIGHT}>
+    <GanttProvider
+      range="daily"
+      zoom={zoom * GANTT_PROVIDER_ZOOM_SCALE}
+      dailyTickEvery={ganttDateTickInterval(zoom)}
+      dateRange={dateRange}
+      rowHeight={WORK_GANTT_ROW_HEIGHT}
+    >
       <WorkGanttTimelineContent
         rows={displayedRows}
         data={data}
-        projection={projection}
         dependencyEdges={dependencyEdges}
         selectedId={selectedId}
         activeId={activeId}
@@ -698,6 +759,8 @@ function WorkGanttTimeline({
         firstFeature={initialFeature}
         navigationDate={navigationDate}
         showAllDependencies={showAllDependencies}
+        showActivity={showActivity}
+        focusWeek={focusWindow?.focus ?? selectedWeek}
         layoutKey={`${zoom}:${className.includes('expanded') ? 'expanded' : 'compact'}:${rows.map(row => row.id).join(',')}`}
       />
     </GanttProvider>
@@ -707,7 +770,6 @@ function WorkGanttTimeline({
 function WorkGanttTimelineContent({
   rows,
   data,
-  projection,
   dependencyEdges,
   selectedId,
   activeId,
@@ -724,18 +786,27 @@ function WorkGanttTimelineContent({
   firstFeature,
   navigationDate,
   showAllDependencies,
+  showActivity,
+  focusWeek,
   layoutKey,
 }) {
   const gantt = useGantt();
   const pixelsPerDay = gantt.columnWidth * gantt.zoom / 100;
   const chartStartDay = timelineStartDay(gantt.timelineData);
+  const chartWidth = gantt.timelineData
+    .flatMap(year => year?.quarters?.flatMap(quarter => quarter?.months ?? []) ?? [])
+    .reduce((total, month) => total + (month?.days ?? 0), 0) * pixelsPerDay;
+  const focusWeekRange = selectedWeekGanttDateRange(focusWeek);
+  const focusWeekLeft = focusWeekRange ? dayLeft(focusWeekRange, chartStartDay, pixelsPerDay) : null;
+  const focusWeekWidth = focusWeekRange ? dayWidth(focusWeekRange, pixelsPerDay) : 0;
   const bodyRef = useRef(null);
 
   return <>
     <WorkGanttInitialPosition feature={firstFeature} navigationDate={navigationDate} />
-    <GanttSidebar>
+    <GanttSidebar primaryHeader="Task" secondaryHeader="Owner">
       <GanttSidebarGroup name="Work hierarchy">
         {rows.map(row => {
+          if (row.ownerGroup) return <WorkGanttOwnerGroupRow key={row.id} row={row} />;
           const item = data?.itemById?.get(row.id) ?? row.entry;
           return <WorkGanttSidebarRow
             key={row.id}
@@ -751,6 +822,7 @@ function WorkGanttTimelineContent({
             onBlur={onBlur}
             toggleExpanded={toggleExpanded}
             workActivity={workActivity}
+            showActivity={showActivity}
             managerProjection={managerProjection}
             managerEnabled={managerEnabled}
           />;
@@ -763,71 +835,31 @@ function WorkGanttTimelineContent({
       <GanttFeatureList className="work-gantt-feature-list">
         <GanttFeatureListGroup>
           <div ref={bodyRef} className="work-gantt-row-body">
-          <div className="work-gantt-container-layer" aria-hidden="true">
-            {rows.map(row => {
-              if (!row.isExpanded || !row.parentEnvelope || row.rowIndex === undefined) return null;
-              const left = dayLeft(row.parentEnvelope, chartStartDay, pixelsPerDay);
-              const width = dayWidth(row.parentEnvelope, pixelsPerDay);
-              if (left === null || width <= 0) return null;
-              const rowCount = Math.max(1, (row.lastVisibleDescendantRowIndex ?? row.rowIndex) - row.rowIndex + 1);
-              return <span
-                className="work-gantt-parent-container"
-                key={row.id}
-                data-container-id={row.id}
-                data-work-parent-id={row.id}
-                data-parent-state="expanded"
-                data-container-source-kind={row.parentEnvelope.primaryKind ?? 'mixed'}
-                data-container-completed={row.entry.completed ? 'true' : undefined}
-                role="img"
-                aria-label={`${row.entry.title} parent container · ${row.parentEnvelope.startDay} to ${row.parentEnvelope.endDay}`}
-                title={`${row.entry.title} · parent container · ${row.parentEnvelope.startDay} to ${row.parentEnvelope.endDay}`}
-                data-container-depth={row.depth}
-                style={{
-                  left: `${left}px`,
-                  top: `${row.rowIndex * WORK_GANTT_ROW_HEIGHT}px`,
-                  width: `${width}px`,
-                  height: `${rowCount * WORK_GANTT_ROW_HEIGHT}px`,
-                  zIndex: row.depth + 1,
-                }}
-              />;
-            })}
-          </div>
+          {focusWeekLeft !== null && focusWeekWidth > 0 ? <span
+            className="work-gantt-focus-week"
+            aria-hidden="true"
+            data-focus-week-start={focusWeekRange.startDay}
+            data-focus-week-end={focusWeekRange.endDay}
+            style={{ left: `${focusWeekLeft}px`, width: `${focusWeekWidth}px` }}
+          /> : null}
           {rows.map(row => {
+            if (row.ownerGroup) return <div
+              className="work-gantt-owner-group-chart-row"
+              key={row.id}
+              data-work-row-id={row.id}
+              data-owner-group-id={row.ownerGroupKey}
+              aria-hidden="true"
+            />;
             const item = data?.itemById?.get(row.id) ?? row.entry;
             const title = item.title ?? row.entry.title;
-            const primaryId = row.primaryMark?.id;
-            const rollups = row.collapsed && row.hasChildren
-              ? placeWorkGanttRollups(row.childSummaryIntervals?.length ? row.childSummaryIntervals : row.childRollups ?? [])
-              : { positionedRollups: [], overflowCount: 0 };
-            const rollupSummary = `Direct approved child schedules · ${row.eligibleChildCount ?? 0} eligible child${row.eligibleChildCount === 1 ? '' : 'ren'} · ${row.undatedChildCount ?? 0} undated`;
-            const rollupSources = [...new Set((row.childSummaryIntervals ?? []).map(interval => interval.sourceKind))].join(', ');
-            const rollupIntervals = (row.childSummaryIntervals ?? []).map(interval => `${interval.sourceKind} ${interval.startDay}–${interval.endDay}`).join('; ');
-            const rollupDescription = rollups.overflowCount
-              ? `${rollupSummary} · ${rollups.overflowCount} additional approved date mark${rollups.overflowCount === 1 ? '' : 's'} summarized as +${rollups.overflowCount}.`
-                + (rollupSources ? ` Sources: ${rollupSources}.` : '')
-                + (rollupIntervals ? ` Intervals: ${rollupIntervals}.` : '')
-              : rollupSummary + (rollupIntervals ? ` · Intervals: ${rollupIntervals}.` : '');
-            const parentEnvelopeLeft = row.parentEnvelope
-              ? dayLeft(row.parentEnvelope, chartStartDay, pixelsPerDay)
-              : null;
-            const parentEnvelopeWidth = row.parentEnvelope
-              ? dayWidth(row.parentEnvelope, pixelsPerDay)
-              : 0;
-            const envelopeLeft = row.collapsed && row.parentEnvelope
-              ? parentEnvelopeLeft
-              : null;
-            const envelopeWidth = row.collapsed && row.parentEnvelope
-              ? parentEnvelopeWidth
-              : 0;
-            const envelopeRight = envelopeLeft === null ? null : envelopeLeft + envelopeWidth;
-            const primaryLeft = row.primaryMark ? dayLeft(row.primaryMark, chartStartDay, pixelsPerDay) : null;
-            const rawOverflowLeft = primaryLeft === null
-              ? 3
-              : primaryLeft + dayWidth(row.primaryMark, pixelsPerDay) + 3;
-            const overflowLeft = envelopeRight === null || envelopeWidth < 24
-              ? rawOverflowLeft
-              : Math.max(envelopeLeft + 3, Math.min(rawOverflowLeft, envelopeRight - 24));
+            const referenceCode = item.referenceCode;
+            const titleWithReference = referenceCode ? `${referenceCode} · ${title}` : title;
             const highlight = rowHighlight(row, activeId, relatedIds, selectedId);
+            const dateDetails = getWorkDateDetails(row);
+            const scheduleLabel = dateDetails.label;
+            const incompleteScheduleLabel = row.childSummaryIncomplete && scheduleLabel === 'Scheduled'
+              ? 'Dates incomplete'
+              : scheduleLabel;
             return <div
               className={'work-gantt-feature-row-wrap' + (row.collapsed && row.hasChildren ? ' is-collapsed-parent' : '') + (row.isExpanded ? ' is-expanded-parent' : '')}
               key={row.id}
@@ -837,110 +869,60 @@ function WorkGanttTimelineContent({
               onFocusCapture={event => onFocus(row.id, event)}
               onBlurCapture={onBlur}
             >
-              {envelopeLeft !== null && envelopeWidth > 0 ? <button
-                className="work-gantt-parent-envelope"
-                type="button"
-                data-work-parent-id={row.id}
-                data-parent-state="collapsed"
-                data-envelope-source-kind={row.parentEnvelope.primaryKind ?? 'mixed'}
-                data-envelope-completed={row.entry.completed ? 'true' : undefined}
-                aria-label={`Open details for ${title} · parent timeline · ${row.parentEnvelope.sourceKinds.join(', ')} · ${row.parentEnvelope.startDay} to ${row.parentEnvelope.endDay}`}
-                title={`${title} · parent timeline · ${row.parentEnvelope.sourceKinds.join(', ')} · ${row.parentEnvelope.startDay} to ${row.parentEnvelope.endDay}`}
-                style={{ left: `${envelopeLeft}px`, width: `${envelopeWidth}px` }}
-                onClick={() => onSelect(row.id)}
-                onPointerDown={event => event.stopPropagation()}
-              ><span className="work-gantt-parent-envelope-label">{title} · {shortWorkDate(row.parentEnvelope.startDay)}–{shortWorkDate(row.parentEnvelope.endDay)}</span></button> : null}
-              {row.isExpanded && row.parentEnvelope && parentEnvelopeLeft !== null && parentEnvelopeWidth > 0 ? <button
-                className="work-gantt-expanded-parent-label"
-                type="button"
-                data-work-parent-id={row.id}
-                data-parent-state="expanded"
-                data-parent-source-kind={row.parentEnvelope.primaryKind ?? 'mixed'}
-                data-parent-completed={row.entry.completed ? 'true' : undefined}
-                aria-label={`Open details for ${title} · parent timeline · ${row.parentEnvelope.sourceKinds.join(', ')} · ${row.parentEnvelope.startDay} to ${row.parentEnvelope.endDay}`}
-                title={`${title} · parent timeline · ${row.parentEnvelope.sourceKinds.join(', ')} · ${row.parentEnvelope.startDay} to ${row.parentEnvelope.endDay}`}
-                style={{ left: `${parentEnvelopeLeft}px`, width: `${parentEnvelopeWidth}px` }}
-                onClick={() => onSelect(row.id)}
-                onPointerDown={event => event.stopPropagation()}
-              >{title} · {shortWorkDate(row.parentEnvelope.startDay)}–{shortWorkDate(row.parentEnvelope.endDay)}</button> : null}
-              {row.marks.length ? <GanttFeatureRow
+              {row.childSummaryIncomplete && row.hasChildren ? <WorkGanttTooltip label={`${incompleteScheduleLabel}; summary shows known dates.`}><span
+                className="work-gantt-missing-dates"
+                role="note"
+                title={`${incompleteScheduleLabel}; summary shows known dates.`}
+                aria-label={incompleteScheduleLabel}
+                tabIndex={0}
+                style={{ left: '4px' }}
+              >{incompleteScheduleLabel}</span></WorkGanttTooltip> : null}
+              {row.timelineBar?.mark ? <GanttFeatureRow
                 rowId={row.id}
-                features={row.marks}
+                features={[row.timelineBar.mark]}
                 overlapMode="overlay"
                 hitTesting="lanes"
                 getInteractionLane={feature => workGanttInteractionLane(row, feature)}
-                getAriaLabel={feature => title + ' · ' + accessibleMarkDescription(feature)}
-                getTitle={feature => title + ' · ' + accessibleMarkDescription(feature)}
-                getClassName={feature => {
-                  const classes = ['work-gantt-mark', 'work-gantt-mark-' + feature.sourceKind];
-                  if (row.hasChildren && row.collapsed) classes.push('work-gantt-summary');
-                  if (row.hasChildren && row.isExpanded) classes.push('work-gantt-expanded-parent-mark');
-                  if (feature.point) classes.push('work-gantt-point');
-                  if (feature.inferred) classes.push('work-gantt-inferred');
-                  if (feature.observedOverrun) classes.push('work-gantt-overrun');
-                  if (row.entry.completed) classes.push('work-gantt-completed');
-                  return classes.join(' ');
-                }}
+                getAriaLabel={feature => titleWithReference + ' · ' + accessibleMarkDescription(feature)}
+                getTitle={feature => titleWithReference + ' · ' + accessibleMarkDescription(feature)}
+                getClassName={() => 'work-gantt-mark work-gantt-mark-timeline' + (row.entry.completed ? ' work-gantt-completed' : '')}
                 onSelect={() => onSelect(row.id)}
                 className="work-gantt-feature-row"
               >
                 {feature => {
-                  const motion = feature.sourceKind === 'observed'
-                    ? activityMotionRange(row.entry, feature, row.collapsed)
-                    : null;
-                  const overrun = feature.sourceKind === 'observed' ? observedOverrunRange(feature, pixelsPerDay) : null;
                   const featureWidth = dayWidth(feature, pixelsPerDay);
                   const dateLabel = feature.startDay === feature.endDay
                     ? shortWorkDate(feature.endDay)
                     : `${shortWorkDate(feature.startDay)}–${shortWorkDate(feature.endDay)}`;
-                  const label = row.hasChildren
-                    ? null
-                    : feature.sourceKind === 'approved'
-                      ? featureWidth >= 240 ? `${title} · ${dateLabel}` : featureWidth >= 120 ? dateLabel : null
-                      : null;
+                  const label = featureWidth >= 240 ? `${title} · ${dateLabel}` : featureWidth >= 120 ? dateLabel : null;
                   return <span className={'work-gantt-feature-content work-gantt-lane-' + feature.laneKey}>
                     <span
                       className="work-gantt-lane-mark"
-                      data-work-approved-anchor={feature.sourceKind === 'approved' && !feature.point ? row.id : undefined}
+                      data-work-timeline-anchor={row.id}
+                      data-source-kinds={feature.timeline?.sourceKinds?.join(',')}
                       aria-hidden="true"
                     />
-                    {feature.sourceKind === 'approved' && feature.point
-                      ? <span className="work-gantt-point-glyph" data-work-approved-anchor={row.id} data-work-approved-point="true" aria-hidden="true" />
-                      : feature.sourceKind === 'approved' ? <span className="work-gantt-due-marker" aria-hidden="true" /> : null}
-                    {overrun ? <span
-                      className="work-gantt-overrun-segment"
-                      aria-hidden="true"
-                      style={{ '--overrun-left': String(overrun.left) + 'px', '--overrun-width': String(overrun.width) + 'px' }}
-                    /> : null}
-                    {motion ? <span
-                      className="work-gantt-motion"
-                      aria-hidden="true"
-                      style={{ '--motion-left': String(motion.left) + '%', '--motion-width': String(motion.width) + '%' }}
-                    /> : null}
-                    {label && feature.id === primaryId ? <span className="gantt-feature-label work-gantt-label">{label}</span> : null}
+                    {(feature.timeline?.observedIntervals ?? []).map((segment, index) => {
+                      const style = timelineSegmentStyle(segment, feature.timeline);
+                      return style ? <span
+                        className="work-gantt-observed-segment"
+                        key={`${feature.id}:observed:${index}`}
+                        aria-hidden="true"
+                        title={`Recorded activity · ${workGanttRangeLabel(segment)}`}
+                        style={style}
+                      /> : null;
+                    })}
+                    {label ? <span className="gantt-feature-label work-gantt-label">{referenceCode ? <code className="work-reference-code">{referenceCode}</code> : null}{label}</span> : null}
                   </span>;
                 }}
               </GanttFeatureRow> : null}
-              {rollups.positionedRollups.map(rollup => {
-                const left = dayLeft(rollup, chartStartDay, pixelsPerDay);
-                if (left === null) return null;
-                const width = rollup.point ? 3 : Math.max(3, dayWidth(rollup, pixelsPerDay));
-                return <span
-                  key={`${rollup.childId}:${rollup.sourceKind ?? 'approved'}:${rollup.startDay}:${rollup.endDay}`}
-                  className={'work-gantt-child-rollup work-gantt-child-rollup-' + (rollup.sourceKind ?? 'approved') + (rollup.point ? ' is-point' : '')}
-                  data-rollup-track={rollup.trackIndex}
-                  data-rollup-source-kind={rollup.sourceKind ?? 'approved'}
-                  style={{ left: `${left}px`, width: `${width}px` }}
-                  aria-hidden="true"
-                />;
-              })}
-              {row.collapsed && row.hasChildren && rollups.overflowCount > 0 ? <span
-                className="work-gantt-rollup-overflow"
-                role="img"
-                aria-label={rollupDescription}
-                title={rollupDescription}
-                style={{ left: `${Math.max(2, overflowLeft)}px` }}
-              >+{rollups.overflowCount}</span> : null}
+              {!row.hasChildren && row.entry.timeline.partial ? <WorkGanttTooltip label={PARTIAL_APPROVED_HELP}><span
+                className="work-gantt-missing-dates work-gantt-missing-dates-leaf"
+                title={PARTIAL_APPROVED_HELP}
+                aria-label="Dates incomplete"
+                role="note"
+                tabIndex={0}
+              >Dates incomplete</span></WorkGanttTooltip> : null}
             </div>;
           })}
             <WorkGanttDependencies
@@ -1007,9 +989,18 @@ export function WorkGantt({
   managerProjection,
   managerEnabled = false,
   navigationDate,
+  selectedWeek = null,
+  focusWindow = null,
+  groupByOwner = false,
+  presentationMode = false,
+  onExitPresentationMode,
 }) {
   const [expanded, setExpanded] = useState(false);
+  const forecastStatusId = useId();
   const [showForecast, setShowForecast] = useState(false);
+  const [showActivity, setShowActivity] = useState(true);
+  const [investigationId, setInvestigationId] = useState(null);
+  const investigationTriggerRef = useRef(null);
   const [showAllDependencies, setShowAllDependencies] = useState(false);
   const [hoveredId, setHoveredId] = useState(null);
   const [keyboardFocusId, setKeyboardFocusId] = useState(null);
@@ -1020,8 +1011,27 @@ export function WorkGantt({
   const [zoom, setZoom] = useState(GANTT_DEFAULT_ZOOM);
   const selectWorkItem = itemId => {
     if (expanded) setExpanded(false);
-    onSelect(itemId);
+    if (model.rows.some(row => row.id === itemId)) {
+      const trigger = document.activeElement;
+      investigationTriggerRef.current = trigger instanceof HTMLElement ? trigger : null;
+      setInvestigationId(itemId);
+    } else {
+      // Collapsed descendants still appear in the mobile agenda and the
+      // unscheduled list. They are not rendered rows, so let the existing
+      // work details route handle them instead of opening an empty panel.
+      investigationTriggerRef.current = null;
+      setInvestigationId(null);
+      onSelect?.(itemId);
+    }
   };
+  useEffect(() => {
+    if (!investigationId) return undefined;
+    const handleKeyDown = event => {
+      if (event.key === 'Escape') closeInvestigation();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [investigationId]);
   const projection = workActivity?.projection ?? EMPTY_MAP;
   const fallbackItemIds = useMemo(() => items.map(item => item?.id ?? item?.data?.id).filter(Boolean), [items]);
   const itemIds = visibleIds ?? fallbackItemIds;
@@ -1050,34 +1060,70 @@ export function WorkGantt({
   const model = useMemo(() => buildWorkGanttModel({
     projection,
     visibleIds: itemIds,
-    expandedIds,
+    // Owner mode is a filtered workload view: include every matching leaf
+    // regardless of the hierarchy depth preset used by the normal tree.
+    expandedIds: groupByOwner ? (allExpansion?.expandedIds ?? expandedIds) : expandedIds,
     contextualIds,
     releaseDates,
     itemsById: data?.itemById,
     showForecast,
-  }), [projection, itemIds, expandedIds, contextualIds, releaseDates, data?.itemById, showForecast]);
+  }), [allExpansion?.expandedIds, contextualIds, data?.itemById, expandedIds, groupByOwner, itemIds, projection, releaseDates, showForecast]);
   const navigationAnchor = useMemo(
     () => typeof navigationDate === 'string' ? chartDateForDay(navigationDate) : null,
     [navigationDate],
   );
   const validNavigationDate = navigationAnchor ? navigationDate : null;
+  const initialPositionDate = useMemo(() => {
+    if (validNavigationDate) return validNavigationDate;
+    const today = manilaTodayForChart();
+    if (!today) return null;
+    return dateDayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() - GANTT_INITIAL_LOOKBACK_DAYS));
+  }, [validNavigationDate]);
+  const initialPositionAnchor = useMemo(
+    () => initialPositionDate ? chartDateForDay(initialPositionDate) : null,
+    [initialPositionDate],
+  );
+  const selectedWeekRange = useMemo(
+    () => selectedWeekGanttDateRange(selectedWeek),
+    [selectedWeek?.start, selectedWeek?.end],
+  );
+  const focusWindowRange = useMemo(
+    () => selectedWeekGanttDateRange(focusWindow),
+    [focusWindow?.start, focusWindow?.end],
+  );
+  const selectedWeekStartAnchor = useMemo(
+    () => selectedWeekRange ? chartDateForDay(selectedWeekRange.startDay) : null,
+    [selectedWeekRange],
+  );
+  const selectedWeekEndAnchor = useMemo(
+    () => selectedWeekRange ? chartDateForDay(selectedWeekRange.endDay) : null,
+    [selectedWeekRange],
+  );
   const viewportDateRange = useMemo(
-    () => extendDateRangeToAnchor(model.dateRange, navigationAnchor),
-    [model.dateRange, navigationAnchor],
+    () => extendDateRangeToAnchor(
+      extendDateRangeToAnchor(
+        extendDateRangeToAnchor(model.dateRange, initialPositionAnchor),
+        focusWindowRange ? chartDateForDay(focusWindowRange.startDay) : selectedWeekStartAnchor,
+      ),
+      focusWindowRange ? chartDateForDay(focusWindowRange.endDay) : selectedWeekEndAnchor,
+    ),
+    [focusWindowRange, model.dateRange, initialPositionAnchor, selectedWeekEndAnchor, selectedWeekStartAnchor],
   );
   const contextual = contextualIds instanceof Set ? contextualIds : new Set(contextualIds ?? []);
   const unscheduledIds = model.unscheduledIds.filter(id => !contextual.has(id));
-  const hasDisplayedMarks = model.rows.some(row => row.marks.some(mark => showForecast || mark.sourceKind !== 'forecast'));
-  const sourceMarks = [...itemIds].flatMap(id => marksForWorkEntry(projection.get(id)));
-  const positionMarks = sourceMarks.filter(mark => mark.sourceKind !== 'forecast');
-  const initialFeature = (positionMarks.length ? positionMarks : showForecast ? sourceMarks : [])
-    .sort((left, right) => left.startAt.valueOf() - right.startAt.valueOf())[0];
-  const scrollTarget = navigationAnchor
-    ? { id: 'navigation-date:' + validNavigationDate, startAt: navigationAnchor, endAt: navigationAnchor }
-    : initialFeature;
+  const hasDisplayedMarks = model.rows.some(row => Boolean(row.timelineBar?.mark));
+  const forecastAvailable = hasForecastMarks(projection, itemIds);
+  const scrollTarget = initialPositionAnchor
+    ? { id: (validNavigationDate ? 'navigation-date:' : 'initial-date:') + initialPositionDate, startAt: initialPositionAnchor, endAt: initialPositionAnchor }
+    : null;
   const mobileAgendaRows = [...itemIds].map(id => {
     const entry = projection.get(id);
-    return entry ? { id, entry, marks: marksForWorkEntry(entry) } : null;
+    if (!entry) return null;
+    // Grouping rows own only the fields returned by directMarksForWorkEntry.
+    // Their projected timeline also contains descendant ranges; using it here
+    // would label a child schedule as the parent's approved plan.
+    const marks = entry.childIds?.length ? directMarksForWorkEntry(entry) : marksForWorkEntry(entry);
+    return { id, entry, marks };
   }).filter(Boolean);
   const rowIds = useMemo(() => new Set(model.rows.map(row => row.id)), [model.rows]);
   useEffect(() => {
@@ -1088,9 +1134,36 @@ export function WorkGantt({
       setKeyboardFocusId(null);
     }
   }, [rowIds, hoveredId, keyboardFocusId]);
+  const selectedWorkId = investigationId ?? selectedId;
+  const investigationRow = useMemo(
+    () => investigationId ? model.rows.find(row => row.id === investigationId) ?? null : null,
+    [investigationId, model.rows],
+  );
+  const openFullDetails = useCallback((itemId) => {
+    setInvestigationId(null);
+    investigationTriggerRef.current = null;
+    onSelect?.(itemId);
+  }, [onSelect]);
+  const closeInvestigation = useCallback(() => {
+    setInvestigationId(null);
+    const trigger = investigationTriggerRef.current;
+    investigationTriggerRef.current = null;
+    if (trigger?.isConnected) requestAnimationFrame(() => trigger.focus?.());
+  }, []);
+  useEffect(() => {
+    if (!presentationMode || typeof onExitPresentationMode !== 'function') return undefined;
+    const handleKeyDown = event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onExitPresentationMode();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onExitPresentationMode, presentationMode]);
   const activeId = (keyboardFocusId && rowIds.has(keyboardFocusId) ? keyboardFocusId : null)
     ?? (hoveredId && rowIds.has(hoveredId) ? hoveredId : null)
-    ?? (rowIds.has(selectedId) ? selectedId : null);
+    ?? (rowIds.has(selectedWorkId) ? selectedWorkId : null);
   const activeRow = model.rows.find(row => row.id === activeId);
   const relatedIds = useMemo(() => new Set([
     ...(activeRow?.ancestorIds ?? []),
@@ -1158,7 +1231,7 @@ export function WorkGantt({
     data={data}
     projection={projection}
     dependencyEdges={model.dependencyEdges ?? []}
-    selectedId={selectedId}
+    selectedId={selectedWorkId}
     activeId={activeId}
     relatedIds={relatedIds}
     onSelect={selectWorkItem}
@@ -1173,25 +1246,46 @@ export function WorkGantt({
     managerEnabled={managerEnabled}
     dateRange={viewportDateRange}
     releases={releases}
+    selectedWeek={selectedWeek}
+    focusWindow={focusWindow}
+    groupByOwner={groupByOwner}
+    itemsById={data?.itemById ?? EMPTY_MAP}
+    presentationMode={presentationMode}
     showForecast={showForecast}
+    showActivity={showActivity}
     initialFeature={scrollTarget}
-    navigationDate={validNavigationDate}
+    navigationDate={initialPositionDate}
     showAllDependencies={showAllDependencies}
     zoom={zoom}
     onZoomChange={setZoom}
     className={className}
   />;
 
-  return <div className="schedule-view work-gantt-view">
+  return <TooltipProvider delayDuration={350}><div className={'schedule-view work-gantt-view' + (presentationMode ? ' work-gantt-presentation-mode' : '')} data-presentation-mode={presentationMode ? 'true' : undefined}>
     <div className="schedule-legend work-gantt-legend">
-      <span><i className="legend-dot baseline" />Approved plan</span>
-      <span><i className="legend-dot work-gantt-legend-observed" />Observed work</span>
-      <span><i className="legend-dot proposed" />Proposed</span>
-      <button className="work-gantt-forecast-toggle" type="button" aria-pressed={showForecast} onClick={() => setShowForecast(value => !value)}>
-        <i className="legend-dot forecast" aria-hidden="true" />{showForecast ? 'Hide forecast' : 'Show forecast'}
+      <span><i className="legend-dot work-gantt-legend-plan" />Light schedule</span>
+      <button
+        className="work-gantt-activity-toggle"
+        type="button"
+        aria-pressed={showActivity}
+        onClick={() => setShowActivity(value => !value)}
+      aria-label={showActivity ? 'Hide recorded activity' : 'Show recorded activity'}
+      ><i className="legend-dot work-gantt-legend-observed" aria-hidden="true" />Dark actual activity · {showActivity ? 'Hide' : 'Show'}</button>
+      <button
+        className="work-gantt-forecast-toggle"
+        type="button"
+        aria-pressed={showForecast}
+        aria-describedby={forecastAvailable ? undefined : `work-gantt-forecast-status${forecastStatusId}`}
+        onClick={() => setShowForecast(value => !value)}
+      >
+        {showForecast ? 'Hide forecast dates' : 'Include forecast dates'}
       </button>
-      <span className="schedule-readonly">Dates come from approved plans and qualifying source activity.</span>
+      {!forecastAvailable ? <span id={`work-gantt-forecast-status${forecastStatusId}`} className="work-gantt-forecast-status" role="status">No forecast dates recorded for visible work.</span> : null}
+      <span className="schedule-readonly">Dates come from approved plans, explicit proposals, and qualifying source activity.</span>
     </div>
+    {presentationMode && typeof onExitPresentationMode === 'function' ? <Button className="work-gantt-presentation-return" size="sm" variant="outline" type="button" onClick={onExitPresentationMode} aria-label="Return to full work view">
+      Return to full view
+    </Button> : null}
     <WorkGanttDeadlines releases={releases} />
     {!hasDisplayedMarks ? <div className="schedule-empty work-gantt-empty">
       <CalendarDays size={24} aria-hidden="true" />
@@ -1227,27 +1321,21 @@ export function WorkGantt({
                 idPrefix="work-gantt-dialog"
               />
               <div className="work-gantt-dialog-chart">{timeline('gantt-shell-expanded')}</div>
-              <div className="work-gantt-dialog-summary">
-                <WorkGanttDependencySummary
-                  activeId={activeId}
-                  rows={model.rows}
-                  dependencyEdges={model.dependencyEdges ?? []}
-                  entries={data?.itemById ?? EMPTY_MAP}
-                />
-              </div>
             </div>
           </DialogContent>
         </Dialog>
       </div>
     </div>
-    {timeline('')}
-    <WorkGanttDependencySummary
-      activeId={activeId}
-      rows={model.rows}
-      dependencyEdges={model.dependencyEdges ?? []}
-      entries={data?.itemById ?? EMPTY_MAP}
-    />
-    <WorkGanttMobileAgenda rows={mobileAgendaRows} data={data} onSelect={onSelect} showForecast={showForecast} />
-    <WorkGanttUnscheduledList ids={unscheduledIds} data={data} projection={projection} onSelect={onSelect} />
-  </div>;
+    <div className={'work-gantt-chart-region' + (investigationRow ? ' has-investigation' : '')}>
+      <div className="work-gantt-chart-main">{timeline('')}</div>
+      {investigationRow ? <WorkGanttInvestigation
+        row={investigationRow}
+        data={data}
+        onClose={closeInvestigation}
+        onOpenFullDetails={openFullDetails}
+      /> : null}
+    </div>
+    <WorkGanttMobileAgenda rows={mobileAgendaRows} data={data} onSelect={selectWorkItem} showForecast={showForecast} showActivity={showActivity} />
+    <WorkGanttUnscheduledList ids={unscheduledIds} data={data} projection={projection} onSelect={selectWorkItem} />
+  </div></TooltipProvider>;
 }

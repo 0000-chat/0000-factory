@@ -7,7 +7,8 @@ import type { SnapshotRecord } from './snapshot';
 export type PersonRecord = SnapshotRecord;
 
 const STABLE_FIELDS = ['id', 'slug', 'handle', 'githubHandle'] as const;
-const HUMAN_FIELDS = ['name', 'fullName'] as const;
+const HUMAN_FIELDS = ['name', 'fullName', 'displayName'] as const;
+const AVATAR_ASSET = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(?:png|jpe?g|webp|gif)$/iu;
 const SPECIAL_IDENTITIES = new Set([
   '',
   '-',
@@ -27,6 +28,12 @@ function textValue(value: unknown): string {
   if (typeof value === 'string') return value.trim();
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   return '';
+}
+
+/** Resolve only an allowlisted local avatar basename to a public asset path. */
+export function avatarAssetPath(value: unknown): string | null {
+  const asset = textValue(value);
+  return AVATAR_ASSET.test(asset) && !asset.includes('..') ? `/avatars/${asset}` : null;
 }
 
 /** Normalize a stable roster key without deleting punctuation. */

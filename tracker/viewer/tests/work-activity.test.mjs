@@ -129,6 +129,11 @@ test('activity age and streaks are per task, count weekdays once, and skip weeke
   assert.deepEqual(projection.get('child').own.streak, { days: 1, endDate: '2026-10-06' });
   assert.equal(projection.get('parent').descendants.streaks[0].days, 1);
   assert.deepEqual(projection.get('hole').own.streak, { days: 1, endDate: '2026-10-07' });
+  assert.deepEqual(projection.get('hole').own.observedIntervals, [
+    { startDay: '2026-10-05', endDay: '2026-10-05' },
+    { startDay: '2026-10-07', endDay: '2026-10-07' },
+    { startDay: '2026-10-10', endDay: '2026-10-10' },
+  ]);
   assert.equal(projection.get('hole').own.ageBusinessDays, 1);
   assert.deepEqual(projection.get('weekend-streak').own.streak, { days: 2, endDate: '2026-10-12' });
 });
@@ -246,6 +251,38 @@ test('approved schedules roll up independently from observed, proposed, and expl
   assert.equal(projection.get('proposal').timeline.forecastStart, '2026-11-03');
 });
 
+test('accepted tasks retain explicit proposed spans and checkpoints separately from approved dates', () => {
+  const projection = buildWorkProjection({
+    items: [
+      item('accepted-proposal', {
+        schedule: {
+          approved: true,
+          plannedStart: '2026-10-01',
+          plannedEnd: '2026-10-05',
+          proposedStart: '2026-10-08',
+          proposedEnd: '2026-10-08',
+          proposedScheduleKind: 'checkpoint',
+          proposedExplicit: true,
+        },
+      }),
+    ],
+    evidence: [],
+    now: '2026-10-01',
+  });
+  const timeline = projection.get('accepted-proposal').timeline;
+  assert.deepEqual([
+    timeline.ownPlannedStart,
+    timeline.ownPlannedDue,
+    timeline.ownProposedStart,
+    timeline.ownProposedDue,
+    timeline.ownProposedScheduleKind,
+    timeline.ownProposedExplicit,
+  ], ['2026-10-01', '2026-10-05', '2026-10-08', '2026-10-08', 'checkpoint', true]);
+  assert.equal(timeline.plannedStart, '2026-10-01');
+  assert.equal(timeline.proposedStart, '2026-10-08');
+  assert.equal(timeline.proposedEnd, '2026-10-08');
+});
+
 test('separately approved draft schedules count as planned while missing endpoints remain partial', () => {
   const projection = buildWorkProjection({
     items: [
@@ -267,6 +304,56 @@ test('separately approved draft schedules count as planned while missing endpoin
   assert.equal(projection.get('forecast-only').timeline.plannedDue, null);
   assert.equal(projection.get('forecast-only').timeline.observedStart, null);
   assert.equal(projection.get('forecast-only').own.state, 'unknown');
+});
+
+test('shared scheduled rows keep approved dates when commitment metadata is absent', () => {
+  const projection = buildWorkProjection({
+    items: [item('shared-scheduled', {
+      commitment: null,
+      status: 'active',
+      owner: 'fixture-owner',
+      ownerName: 'Fixture Owner',
+      schedule: { approved: true, plannedStart: '2026-10-10', plannedEnd: '2026-10-12' },
+    })],
+    evidence: [],
+    now: '2026-10-09',
+  });
+
+  const entry = projection.get('shared-scheduled');
+  assert.equal(entry.status, 'active');
+  assert.equal(entry.owner, 'fixture-owner');
+  assert.equal(entry.ownerName, 'Fixture Owner');
+  assert.equal(entry.timeline.plannedStart, '2026-10-10');
+  assert.equal(entry.timeline.plannedDue, '2026-10-12');
+  assert.equal(entry.timeline.partial, false);
+});
+
+test('structural context keeps neutral metadata while child schedules and owners roll up', () => {
+  const projection = buildWorkProjection({
+    items: [
+      item('context-parent', {
+        status: '',
+        owner: null,
+        contextOnly: true,
+        childIds: ['shared-child'],
+      }),
+      item('shared-child', {
+        parent: 'context-parent',
+        status: 'started',
+        owner: 'fixture-owner',
+        schedule: { approved: true, plannedStart: '2026-10-01', plannedEnd: '2026-10-02' },
+      }),
+    ],
+    evidence: [],
+    now: '2026-09-30',
+  });
+
+  const context = projection.get('context-parent');
+  assert.equal(context.status, '');
+  assert.equal(context.owner, null);
+  assert.deepEqual(context.timeline.plannedStart, '2026-10-01');
+  assert.deepEqual(context.timeline.plannedDue, '2026-10-02');
+  assert.deepEqual(context.descendants.ownerIds, ['fixture-owner']);
 });
 
 test('inferred starts and overdue age use only dated evidence and approved effective due dates', () => {

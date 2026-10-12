@@ -167,6 +167,46 @@ test('joins active accepted work, explicit blockers, latest owned-work evidence,
   assert.equal(directory.find(profile => profile.id === 'fixture-gamma').latestActivity.activityKind, 'guide-observation');
 });
 
+test('removes guide profile context from team projections while preserving private directory behavior', () => {
+  const profile = {
+    ...buildTeamProfiles(fixtureRegistry, guide).find(candidate => candidate.id === 'fixture-alpha'),
+    current: 'PRIVATE current assignment context',
+    strongAt: 'PRIVATE capability context',
+    experience: 'PRIVATE experience context',
+    bestAssignments: 'PRIVATE assignment context',
+    preference: 'PRIVATE preference context',
+    observedWork: 'PRIVATE observed work context',
+    observedWorkAt: '2026-10-02',
+    observedWorkLinks: [{ label: 'private', href: 'https://private.example/evidence' }],
+    email: 'private@example.test',
+    capacityPath: 'private/capacity.json',
+    managerMemo: 'PRIVATE future manager memo',
+  };
+
+  const privateMember = buildTeamDirectory([profile], [])[0];
+  assert.equal(privateMember.strongAt, 'PRIVATE capability context');
+  assert.equal(privateMember.latestActivity.activityKind, 'guide-observation');
+  assert.deepEqual(filterTeamMembers([privateMember], { query: 'private capability' }), [privateMember]);
+
+  const sharedTask = item('shared-task', 'fixture-alpha', { publicTaskDetail: 'PUBLIC task detail' });
+  const sharedMember = buildTeamDirectory([profile], [sharedTask], { teamProjection: true })[0];
+  for (const field of ['current', 'strongAt', 'experience', 'experienceLinks', 'bestAssignments', 'preference', 'observedWork', 'observedWorkStart', 'observedWorkAt', 'observedWorkLinks', 'email', 'capacityPath', 'managerMemo']) {
+    assert.equal(sharedMember[field], undefined, `${field} should stay private in a team projection`);
+  }
+  assert.equal(sharedMember.acceptedWork[0].publicTaskDetail, 'PUBLIC task detail');
+  assert.equal(sharedMember.latestActivity, null);
+  assert.deepEqual(filterTeamMembers([sharedMember], { query: 'private capability', teamProjection: true }), []);
+
+  const unprojectedMember = { ...sharedMember, current: 'PRIVATE fallback current', strongAt: 'PRIVATE fallback capability' };
+  assert.deepEqual(filterTeamMembers([unprojectedMember], { query: 'private fallback', teamProjection: true }), []);
+
+  const guideActivityMember = {
+    ...sharedMember,
+    latestActivity: { activityKind: 'guide-observation', sections: { observation: 'PRIVATE guide activity' } },
+  };
+  assert.deepEqual(filterTeamMembers([guideActivityMember], { query: 'private guide activity', teamProjection: true }), []);
+});
+
 test('keeps a visible accepted focus free of a hidden proposal badge', () => {
   const accepted = item('accepted-focus', 'fxa', { title: 'Synthetic accepted focus' });
   const proposal = item('hidden-proposal', 'fxa', { title: 'Synthetic hidden proposal', commitment: 'planned', status: 'queued' });
@@ -290,4 +330,7 @@ test('builds stable Team paths and rewrites tracker Markdown links to router rou
     '[work](/work/item%2F1) [decision](/decisions/launch) [history](https://github.com/synthetic-org/synthetic-tracker/blob/main/tracker-data/tracker/history/old.md)',
   );
   assert.doesNotMatch(markdown, /#\//);
+
+  const projectionMarkdown = rewriteTeamTrackerLinks('[history](tracker/history/old.md)', [], 'projection-commit', { allowRepositoryLinks: false });
+  assert.equal(projectionMarkdown, '[history](tracker/history/old.md)');
 });

@@ -54,6 +54,11 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/tracker/viewer/src/components/ui/context-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/tracker/viewer/src/components/ui/tooltip";
 import { cn } from "@/tracker/viewer/src/lib/utils";
 
 const draggingAtom = atom(false);
@@ -114,6 +119,7 @@ export type GanttContextProps = {
   onAddItem: ((date: Date) => void) | undefined;
   placeholderLength: number;
   timelineData: TimelineData;
+  dailyTickEvery: number;
   ref: RefObject<HTMLDivElement | null> | null;
   scrollToFeature?: (
     feature: GanttFeature,
@@ -350,6 +356,7 @@ const GanttContext = createContext<GanttContextProps>({
   onAddItem: undefined,
   placeholderLength: 2,
   timelineData: [],
+  dailyTickEvery: 1,
   ref: null,
   scrollToFeature: undefined,
 });
@@ -406,6 +413,9 @@ export const GanttContentHeader: FC<GanttContentHeaderProps> = ({
 
 const DailyHeader: FC = () => {
   const gantt = useContext(GanttContext);
+  const timelineStartDate = getTimelineStartDate(gantt.timelineData);
+  const dailyColumnWidth = (gantt.columnWidth * gantt.zoom) / 100;
+  const showWeekday = gantt.dailyTickEvery === 1 && dailyColumnWidth >= 42;
 
   return gantt.timelineData.map((year) =>
     year.quarters
@@ -414,19 +424,15 @@ const DailyHeader: FC = () => {
         <div className="relative flex flex-col" key={`${year.year}-${month.month ?? index}`}>
           <GanttContentHeader
             columns={month.days}
-            renderHeaderItem={(item: number) => (
-              <div className="gantt-day-cell">
-                <p>
-                  {format(addDays(new Date(year.year, month.month ?? index, 1), item), "d")}
-                </p>
-                <p className="text-muted-foreground">
-                  {format(
-                    addDays(new Date(year.year, month.month ?? index, 1), item),
-                    "EEEEE"
-                  )}
-                </p>
-              </div>
-            )}
+            renderHeaderItem={(item: number) => {
+              const date = addDays(new Date(year.year, month.month ?? index, 1), item);
+              const dayIndex = differenceInDays(date, timelineStartDate);
+              const showTick = dayIndex % gantt.dailyTickEvery === 0;
+              return <div className="gantt-day-cell" data-tick-visible={showTick ? "true" : "false"}>
+                {showTick ? <p>{format(date, "d")}</p> : null}
+                {showTick && showWeekday ? <p className="text-muted-foreground">{format(date, "EEEEE")}</p> : null}
+              </div>;
+            }}
             title={format(new Date(year.year, month.month ?? index, 1), "MMMM yyyy")}
           />
           <GanttColumns
@@ -581,14 +587,22 @@ export const GanttSidebarItem: FC<GanttSidebarItemProps> = ({
   );
 };
 
-export const GanttSidebarHeader: FC = () => (
+export type GanttSidebarHeaderProps = {
+  primaryLabel?: string;
+  secondaryLabel?: string;
+};
+
+export const GanttSidebarHeader: FC<GanttSidebarHeaderProps> = ({
+  primaryLabel = "Issues",
+  secondaryLabel = "Duration",
+}) => (
   <div
     className="sticky top-0 z-10 flex shrink-0 items-end justify-between gap-2.5 border-border/50 border-b bg-backdrop/90 p-2.5 font-medium text-muted-foreground text-xs backdrop-blur-sm"
     style={{ height: "var(--gantt-header-height)" }}
   >
     {/* <Checkbox className="shrink-0" /> */}
-    <p className="flex-1 truncate text-left">Issues</p>
-    <p className="shrink-0">Duration</p>
+    <p className="flex-1 truncate text-left">{primaryLabel}</p>
+    <p className="shrink-0">{secondaryLabel}</p>
   </div>
 );
 
@@ -617,11 +631,15 @@ export const GanttSidebarGroup: FC<GanttSidebarGroupProps> = ({
 export type GanttSidebarProps = {
   children: ReactNode;
   className?: string;
+  primaryHeader?: string;
+  secondaryHeader?: string;
 };
 
 export const GanttSidebar: FC<GanttSidebarProps> = ({
   children,
   className,
+  primaryHeader,
+  secondaryHeader,
 }) => (
   <div
     className={cn(
@@ -630,7 +648,7 @@ export const GanttSidebar: FC<GanttSidebarProps> = ({
     )}
     data-roadmap-ui="gantt-sidebar"
   >
-    <GanttSidebarHeader />
+    <GanttSidebarHeader primaryLabel={primaryHeader} secondaryLabel={secondaryHeader} />
     <div className="space-y-4">{children}</div>
   </div>
 );
@@ -773,6 +791,7 @@ export const GanttCreateMarkerTrigger: FC<GanttCreateMarkerTriggerProps> = ({
   );
 
   const date = getDateByMousePosition(gantt, x);
+  const dateLabel = formatDate(date, "MMM dd, yyyy");
 
   const handleClick = () => onCreateMarker(date);
 
@@ -788,16 +807,19 @@ export const GanttCreateMarkerTrigger: FC<GanttCreateMarkerTriggerProps> = ({
         className="-ml-2 pointer-events-auto sticky top-6 z-20 flex w-4 flex-col items-center justify-center gap-1 overflow-visible opacity-0 group-hover:opacity-100"
         style={{ transform: `translateX(${x}px)` }}
       >
-        <button
-          className="z-50 inline-flex h-4 w-4 items-center justify-center rounded-full bg-card"
-          onClick={handleClick}
-          type="button"
-        >
-          <PlusIcon className="text-muted-foreground" size={12} />
-        </button>
-        <div className="whitespace-nowrap rounded-full border border-border/50 bg-background/90 px-2 py-1 text-foreground text-xs backdrop-blur-lg">
-          {formatDate(date, "MMM dd, yyyy")}
-        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={`Add marker on ${dateLabel}`}
+              className="z-50 inline-flex h-4 w-4 items-center justify-center rounded-full bg-card"
+              onClick={handleClick}
+              type="button"
+            >
+              <PlusIcon className="text-muted-foreground" size={12} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{dateLabel}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );
@@ -820,19 +842,20 @@ export const GanttFeatureDragHelper: FC<GanttFeatureDragHelperProps> = ({
   });
 
   const isPressed = Boolean(attributes["aria-pressed"]);
+  const dateLabel = date ? formatDate(date, "MMM dd, yyyy") : null;
 
   useEffect(() => setDragging(isPressed), [isPressed, setDragging]);
 
-  return (
-    <div
-      className={cn(
-        "group -translate-y-1/2 !cursor-col-resize absolute top-1/2 z-[3] h-full w-6 rounded-md outline-none",
-        direction === "left" ? "-left-2.5" : "-right-2.5"
-      )}
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-    >
+  const trigger = <div
+    aria-label={dateLabel ? `Adjust ${direction} edge to ${dateLabel}` : undefined}
+    className={cn(
+      "group -translate-y-1/2 !cursor-col-resize absolute top-1/2 z-[3] h-full w-6 rounded-md outline-none",
+      direction === "left" ? "-left-2.5" : "-right-2.5"
+    )}
+    ref={setNodeRef}
+    {...attributes}
+    {...listeners}
+  >
       <div
         className={cn(
           "-translate-y-1/2 absolute top-1/2 h-[80%] w-1 rounded-sm bg-muted-foreground opacity-0 transition-all",
@@ -843,18 +866,12 @@ export const GanttFeatureDragHelper: FC<GanttFeatureDragHelperProps> = ({
           isPressed && "opacity-100"
         )}
       />
-      {date && (
-        <div
-          className={cn(
-            "-translate-x-1/2 absolute top-10 hidden whitespace-nowrap rounded-lg border border-border/50 bg-background/90 px-2 py-1 text-foreground text-xs backdrop-blur-lg group-hover:block",
-            isPressed && "block"
-          )}
-        >
-          {format(date, "MMM dd, yyyy")}
-        </div>
-      )}
-    </div>
-  );
+  </div>;
+
+  return dateLabel ? <Tooltip>
+    <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+    <TooltipContent side="bottom" sideOffset={6}>{dateLabel}</TooltipContent>
+  </Tooltip> : trigger;
 };
 
 export type GanttFeatureItemCardProps = Pick<GanttFeature, "id"> & {
@@ -876,8 +893,32 @@ export const GanttFeatureItemCard: FC<GanttFeatureItemCardProps> = ({
   ariaLabel,
   title,
   interactionLane,
-}) => onSelect ? (
-  <Card
+}) => {
+  if (!onSelect) return <GanttDraggableFeatureItemCard id={id} className={className}>{children}</GanttDraggableFeatureItemCard>;
+
+  const featureButton = <button
+    aria-label={ariaLabel ?? "Open scheduled work details"}
+    className="gantt-feature-button"
+    data-feature-id={id}
+    onClick={event => {
+      event.stopPropagation();
+      onSelect();
+    }}
+    onPointerDown={event => event.stopPropagation()}
+    style={interactionLane ? {
+      position: "absolute",
+      top: `${(interactionLane.index / interactionLane.count) * 100}%`,
+      right: 0,
+      left: 0,
+      height: `${100 / interactionLane.count}%`,
+      padding: 0,
+    } : undefined}
+    type="button"
+  >
+    {interactionLane ? null : children}
+  </button>;
+
+  return <Card
     className={cn("h-full w-full rounded-md bg-background p-2 text-xs shadow-sm", className, "gantt-feature-clickable")}
     style={interactionLane ? {
       position: "relative",
@@ -906,30 +947,12 @@ export const GanttFeatureItemCard: FC<GanttFeatureItemCardProps> = ({
         {visualChildren}
       </div>
     ) : null}
-    <button
-      aria-label={ariaLabel ?? "Open scheduled work details"}
-      className="gantt-feature-button"
-      data-feature-id={id}
-      onClick={event => {
-        event.stopPropagation();
-        onSelect();
-      }}
-      onPointerDown={event => event.stopPropagation()}
-      style={interactionLane ? {
-        position: "absolute",
-        top: `${(interactionLane.index / interactionLane.count) * 100}%`,
-        right: 0,
-        left: 0,
-        height: `${100 / interactionLane.count}%`,
-        padding: 0,
-      } : undefined}
-      title={title}
-      type="button"
-    >
-      {interactionLane ? null : children}
-    </button>
-  </Card>
-) : <GanttDraggableFeatureItemCard id={id} className={className}>{children}</GanttDraggableFeatureItemCard>;
+    {title ? <Tooltip>
+      <TooltipTrigger asChild>{featureButton}</TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6} className="gantt-feature-tooltip">{title}</TooltipContent>
+    </Tooltip> : featureButton}
+  </Card>;
+};
 
 const GanttDraggableFeatureItemCard: FC<Pick<GanttFeatureItemCardProps, "id" | "children" | "className">> = ({
   id,
@@ -1324,6 +1347,7 @@ export const GanttMarker: FC<
   );
 
   const handleRemove = useCallback(() => onRemove?.(id), [onRemove, id]);
+  const dateLabel = formatDate(date, "MMM dd, yyyy");
 
   return (
     <div
@@ -1334,19 +1358,24 @@ export const GanttMarker: FC<
       }}
     >
       <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div
-            className={cn(
-              "group pointer-events-auto sticky top-0 flex select-auto flex-col flex-nowrap items-center justify-center whitespace-nowrap rounded-b-md bg-card px-2 py-1 text-foreground text-xs",
-              className
-            )}
-          >
-            {label}
-            <span className="max-h-[0] overflow-hidden opacity-80 transition-all group-hover:max-h-[2rem]">
-              {formatDate(date, "MMM dd, yyyy")}
-            </span>
-          </div>
-        </ContextMenuTrigger>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <ContextMenuTrigger asChild>
+              <div
+                aria-label={`${label} · ${dateLabel}`}
+                className={cn(
+                  "group pointer-events-auto sticky top-0 flex select-auto flex-col flex-nowrap items-center justify-center whitespace-nowrap rounded-b-md bg-card px-2 py-1 text-foreground text-xs",
+                  className
+                )}
+                role="img"
+                tabIndex={0}
+              >
+                {label}
+              </div>
+            </ContextMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6} className="gantt-marker-tooltip">{`${label} · ${dateLabel}`}</TooltipContent>
+        </Tooltip>
         <ContextMenuContent>
           {onRemove ? (
             <ContextMenuItem
@@ -1370,6 +1399,7 @@ export type GanttProviderProps = {
   range?: Range;
   zoom?: number;
   rowHeight?: number;
+  dailyTickEvery?: number;
   dateRange?: { startAt: Date; endAt: Date } | null;
   onAddItem?: (date: Date) => void;
   children: ReactNode;
@@ -1380,6 +1410,7 @@ export const GanttProvider: FC<GanttProviderProps> = ({
   zoom = 100,
   range = "monthly",
   rowHeight: requestedRowHeight = 36,
+  dailyTickEvery: requestedDailyTickEvery = 1,
   dateRange,
   onAddItem,
   children,
@@ -1404,6 +1435,9 @@ export const GanttProvider: FC<GanttProviderProps> = ({
   const rowHeight = Number.isFinite(requestedRowHeight) && requestedRowHeight > 0
     ? requestedRowHeight
     : 36;
+  const dailyTickEvery = Number.isFinite(requestedDailyTickEvery) && requestedDailyTickEvery > 0
+    ? Math.max(1, Math.trunc(requestedDailyTickEvery))
+    : 1;
   let columnWidth = 50;
 
   if (range === "monthly") {
@@ -1447,11 +1481,10 @@ export const GanttProvider: FC<GanttProviderProps> = ({
       const sidebarElement = scrollRef.current?.querySelector(
         '[data-roadmap-ui="gantt-sidebar"]'
       );
-      const newWidth = sidebarElement ? 300 : 0;
+      const newWidth = sidebarElement ? sidebarElement.getBoundingClientRect().width : 0;
       setSidebarWidth(newWidth);
     };
 
-    // Update immediately
     updateSidebarWidth();
 
     // Also update on resize or when children change
@@ -1462,9 +1495,11 @@ export const GanttProvider: FC<GanttProviderProps> = ({
         subtree: true,
       });
     }
+    window.addEventListener("resize", updateSidebarWidth);
 
     return () => {
       observer.disconnect();
+      window.removeEventListener("resize", updateSidebarWidth);
     };
   }, []);
 
@@ -1573,6 +1608,7 @@ export const GanttProvider: FC<GanttProviderProps> = ({
         rowHeight,
         onAddItem,
         placeholderLength: 2,
+        dailyTickEvery,
         timelineData,
         ref: scrollRef,
       });
@@ -1607,6 +1643,7 @@ export const GanttProvider: FC<GanttProviderProps> = ({
         onAddItem,
         timelineData,
         placeholderLength: 2,
+        dailyTickEvery,
         ref: scrollRef,
         scrollToFeature,
       }}
@@ -1688,6 +1725,7 @@ export const GanttToday: FC<GanttTodayProps> = ({ className }) => {
   );
 
   if (date < timelineStartDate || date > timelineEndDate) return null;
+  const dateLabel = formatDate(date, "MMM dd, yyyy");
 
   return (
     <div
@@ -1697,17 +1735,22 @@ export const GanttToday: FC<GanttTodayProps> = ({ className }) => {
         transform: `translateX(calc(var(--gantt-column-width) * ${offset} + ${innerOffset}px))`,
       }}
     >
-      <div
-        className={cn(
-          "group pointer-events-auto sticky top-0 flex select-auto flex-col flex-nowrap items-center justify-center whitespace-nowrap rounded-b-md bg-card px-2 py-1 text-foreground text-xs",
-          className
-        )}
-      >
-        {label}
-        <span className="max-h-[0] overflow-hidden opacity-80 transition-all group-hover:max-h-[2rem]">
-          {formatDate(date, "MMM dd, yyyy")}
-        </span>
-      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            aria-label={`${label} · ${dateLabel}`}
+            className={cn(
+              "group pointer-events-auto sticky top-0 flex select-auto flex-col flex-nowrap items-center justify-center whitespace-nowrap rounded-b-md bg-card px-2 py-1 text-foreground text-xs",
+              className
+            )}
+            role="img"
+            tabIndex={0}
+          >
+            {label}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6} className="gantt-marker-tooltip">{`${label} · ${dateLabel}`}</TooltipContent>
+      </Tooltip>
       <div className={cn("h-full w-px bg-card", className)} />
     </div>
   );
