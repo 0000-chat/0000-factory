@@ -16,6 +16,7 @@ import {
   statusTone,
 } from './shared.jsx';
 import { PersonLink } from './person-link.tsx';
+import { getWorkDateDetails } from './work-schedule-labels.mjs';
 import './work-gantt-investigation.css';
 
 function text(value) {
@@ -54,17 +55,7 @@ function activityRange(entry) {
 }
 
 function scheduleLabel(start, due) {
-  return dateRange(start, due) ?? 'No approved dates recorded';
-}
-
-function proposedScheduleLabel(row) {
-  const start = day(row?.entry?.timeline?.ownProposedStart);
-  const due = day(row?.entry?.timeline?.ownProposedDue);
-  if (!start && !due) return null;
-  const kind = row?.entry?.timeline?.ownProposedScheduleKind === 'checkpoint'
-    ? 'Proposed checkpoint'
-    : row?.entry?.timeline?.ownProposedScheduleKind === 'slice' ? 'Proposed slice' : 'Proposed schedule';
-  return `${kind} · ${dateRange(start, due)}`;
+  return dateRange(start, due) ?? 'Unscheduled';
 }
 
 function sourceLabel(item, entry, hasChildSchedule, data) {
@@ -96,7 +87,7 @@ function rowHasChildren(row) {
   return Boolean(row?.hasChildren || row?.entry?.childIds?.length);
 }
 
-function missingDateReasons(row, own, child) {
+function missingDateReasons(row, own, child, schedule) {
   const reasons = [];
   const hasChildren = rowHasChildren(row);
   const ownPlanIsPartial = Boolean(own.start) !== Boolean(own.due);
@@ -107,7 +98,10 @@ function missingDateReasons(row, own, child) {
     if (!own.start) reasons.push('own start date');
     if (!own.due) reasons.push('own due date');
   }
-  if (hasChildren && (!child.start || !child.due || row.childSummaryIncomplete)) {
+  const undatedChildren = schedule?.childCounts?.undated;
+  if (hasChildren && Number.isInteger(undatedChildren) && undatedChildren > 0) {
+    reasons.push(`${undatedChildren} child date${undatedChildren === 1 ? '' : 's'}`);
+  } else if (hasChildren && !Number.isInteger(undatedChildren) && (!child.start || !child.due || row.childSummaryIncomplete)) {
     reasons.push('one or more child dates');
   }
   return reasons;
@@ -166,15 +160,27 @@ export function WorkGanttInvestigation({ row, data, onClose, onOpenFullDetails }
   const closeRef = useRef(null);
   const own = useMemo(() => approvedSchedule(row), [row]);
   const child = useMemo(() => childSchedule(row), [row]);
+  const schedule = useMemo(() => getWorkDateDetails(row), [row]);
   const dependencies = useMemo(() => dependencyIds(item, entry), [item, entry]);
-  const missingDates = useMemo(() => missingDateReasons(row, own, child), [row, own, child]);
+  const missingDates = useMemo(() => missingDateReasons(row, own, child, schedule), [row, own, child, schedule]);
   const contextual = row?.contextual === true || item?.contextOnly === true;
   const owner = ownerId(item, entry);
   const displayOwner = ownerName(item, entry);
   const status = contextual ? null : text(item?.status) ?? text(entry?.status) ?? 'unknown';
   const outcome = text(item?.sections?.outcome) ?? text(item?.description);
   const hasChildSchedule = Boolean(child.start || child.due);
-  const proposedSchedule = proposedScheduleLabel(row);
+  const proposedSchedule = schedule.ownProposed
+    ? `${schedule.ownProposed.kind === 'checkpoint' ? 'Proposed checkpoint' : schedule.ownProposed.kind === 'slice' ? 'Proposed slice' : 'Proposed schedule'} · ${dateRange(schedule.ownProposed.start, schedule.ownProposed.end)}`
+    : null;
+  const childProposedSchedule = schedule.childProposed
+    ? `${schedule.childProposed.kind === 'checkpoint' ? 'Proposed checkpoint' : schedule.childProposed.kind === 'slice' ? 'Proposed slice' : schedule.childProposed.kind === 'schedules' ? 'Proposed schedules' : 'Proposed schedule'} · ${dateRange(schedule.childProposed.start, schedule.childProposed.end)}`
+    : null;
+  const forecastSchedule = schedule.ownForecast
+    ? dateRange(schedule.ownForecast.start, schedule.ownForecast.end)
+    : null;
+  const childForecastSchedule = schedule.childForecast
+    ? dateRange(schedule.childForecast.start, schedule.childForecast.end)
+    : null;
 
   useEffect(() => {
     if (row?.id) closeRef.current?.focus();
@@ -227,10 +233,19 @@ export function WorkGanttInvestigation({ row, data, onClose, onOpenFullDetails }
           {proposedSchedule}
         </DetailField> : null}
         {rowHasChildren(row) ? (
-          <DetailField icon={CalendarDays} label="Child schedule">
+          <DetailField icon={CalendarDays} label="Child approved schedule">
             {scheduleLabel(child.start, child.due)}
           </DetailField>
         ) : null}
+        {childProposedSchedule ? <DetailField icon={CalendarDays} label="Child proposed schedule">
+          {childProposedSchedule}
+        </DetailField> : null}
+        {forecastSchedule ? <DetailField icon={CalendarDays} label="Forecast schedule">
+          {forecastSchedule}
+        </DetailField> : null}
+        {childForecastSchedule ? <DetailField icon={CalendarDays} label="Child forecast schedule">
+          {childForecastSchedule}
+        </DetailField> : null}
         <DetailField icon={CalendarDays} label="Due date">
           {own.due ? formatDate(own.due) : 'Due date not recorded'}
         </DetailField>
@@ -264,6 +279,13 @@ export function WorkGanttInvestigation({ row, data, onClose, onOpenFullDetails }
         <h3>Description / outcome</h3>
         {outcome ? <Markdown value={outcome} data={data} /> : <p className="work-gantt-investigation-empty">No description or outcome recorded.</p>}
       </section>
+
+      {schedule.approvalPending ? (
+        <p className="work-gantt-investigation-info" role="status">
+          <strong>Approval pending</strong>
+          <span>Proposed dates are shown separately and do not change the approved schedule.</span>
+        </p>
+      ) : null}
 
       {missingDates.length ? (
         <p className="work-gantt-investigation-warning" role="note">

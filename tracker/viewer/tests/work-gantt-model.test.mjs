@@ -9,11 +9,14 @@ import {
   directMarksForWorkEntry,
   fitZoomForGanttDateRange,
   formatGanttZoom,
+  groupWorkGanttRowsByOwner,
   ganttDateTickInterval,
   hasForecastMarks,
   paddedGanttDateRange,
   GANTT_DEFAULT_ZOOM,
   GANTT_MAX_ZOOM,
+  GANTT_DAILY_COLUMN_WIDTH,
+  GANTT_SELECTED_WEEK_PADDING_DAYS,
   GANTT_MIN_ZOOM,
   manilaTodayForChart,
   marksForWorkEntry,
@@ -22,6 +25,7 @@ import {
   shortWorkDate,
   workMarkDescription,
   workGanttDepthExpansion,
+  workGanttFitDateRange,
   workMarkLabel,
 } from '../src/work-gantt-model.mjs';
 import {
@@ -52,10 +56,28 @@ test('fit zoom includes date padding and can scale long ranges below 25 percent'
     days: 7,
   });
   assert.equal(fitZoomForGanttDateRange('2026-01-01', '2027-12-31', 800), 2.179);
-  assert.equal(fitZoomForGanttDateRange('2026-10-10', '2026-10-12', 800), GANTT_MAX_ZOOM);
+  assert.equal(fitZoomForGanttDateRange('2026-10-10', '2026-10-12', 800), 228.571);
   assert.equal(fitZoomForGanttDateRange('2026-01-01', '2045-12-31', 220), 0.06);
   assert.equal(fitZoomForGanttDateRange('2026-01-01', '2100-12-31', 220), 0.016);
   assert.equal(fitZoomForGanttDateRange('not-a-date', '2026-10-12', 800), null);
+});
+
+test('selected week fit excludes distant release targets from its date range', () => {
+  assert.deepEqual(workGanttFitDateRange({
+    selectedWeek: { start: '2026-10-12', end: '2026-10-16' },
+    startDay: '2026-10-12',
+    endDay: '2026-11-15',
+  }), {
+    startDay: '2026-10-12',
+    endDay: '2026-10-16',
+    days: 5,
+  });
+  assert.deepEqual(paddedGanttDateRange('2026-10-12', '2026-10-16', GANTT_SELECTED_WEEK_PADDING_DAYS), {
+    startDay: '2026-10-11',
+    endDay: '2026-10-17',
+    days: 7,
+  });
+  assert.equal(fitZoomForGanttDateRange('2026-10-12', '2026-10-16', 800, GANTT_DAILY_COLUMN_WIDTH, GANTT_SELECTED_WEEK_PADDING_DAYS), 380.952);
 });
 
 test('daily date ticks keep a readable minimum width as fit all changes zoom', () => {
@@ -63,6 +85,26 @@ test('daily date ticks keep a readable minimum width as fit all changes zoom', (
   assert.equal(ganttDateTickInterval(50), 2);
   assert.equal(ganttDateTickInterval(22.537), 5);
   assert.equal(ganttDateTickInterval(0.001), 93334);
+});
+
+test('owner grouping preserves canonical leaf IDs and does not count parents as workload', () => {
+  const parent = entry('owner-parent', {}, { title: 'Project context', childIds: ['owner-task'] });
+  const task = entry('owner-task', { plannedStart: '2026-10-12', plannedDue: '2026-10-16' }, {
+    title: 'Task', parentId: parent.id, owner: 'JUAN', ownerName: 'Juan Chiu',
+  });
+  const model = buildWorkGanttModel({
+    projection: new Map([[parent.id, parent], [task.id, task]]),
+    visibleIds: new Set([parent.id, task.id]),
+    expandedIds: new Set([parent.id]),
+    itemsById: new Map([[parent.id, { id: parent.id, title: parent.title }], [task.id, { id: task.id, title: task.title, owner: 'JUAN', ownerName: 'Juan Chiu' }]]),
+  });
+  const grouped = groupWorkGanttRowsByOwner(model.rows, new Map([
+    [parent.id, { id: parent.id, title: parent.title }],
+    [task.id, { id: task.id, title: task.title, owner: 'JUAN', ownerName: 'Juan Chiu' }],
+  ]));
+  assert.deepEqual(grouped.map(row => row.id), ['owner-group:juan', 'owner-task']);
+  assert.equal(grouped[0].ownerGroupCount, 1);
+  assert.equal(grouped[1].ownerContextLabel, 'Project context');
 });
 
 function entry(id, timeline, overrides = {}) {

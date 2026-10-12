@@ -4,6 +4,7 @@ import type { WorkActivityControls } from '../work-activity-controller';
 import type { ParsedTaskContentDraft } from '../task-drafts';
 import type { TaskEditController } from '../router-context';
 import type { ManagerProjection } from '../work-manager-types';
+import type { WorkWeek } from '../work-week';
 
 export type WorkMode = 'tree' | 'table' | 'calendar' | 'kanban' | 'gantt';
 
@@ -24,6 +25,15 @@ export interface WorkViewProps {
   toolbarControls?: ReactNode;
   navigationControls?: ReactNode;
   navigationDate?: string | null;
+  selectedWeek?: WorkWeek;
+  workflow?: 'standard' | 'this-week' | 'daily-review' | 'next-week';
+  onWorkflowChange?: (workflow: 'standard' | 'this-week' | 'daily-review' | 'next-week') => void;
+  onWeekChange?: (direction: -1 | 1) => void;
+  undatedActiveItems?: TrackerItem[];
+  groupByOwner?: boolean;
+  onGroupByOwnerChange?: (value: boolean) => void;
+  presentationMode?: boolean;
+  onPresentationModeChange?: (value: boolean) => void;
 }
 
 export interface TodayViewProps {

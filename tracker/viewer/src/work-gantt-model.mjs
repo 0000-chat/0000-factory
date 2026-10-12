@@ -10,11 +10,12 @@ export const GANTT_DEFAULT_ZOOM = 100;
 // represent a range that would otherwise be clamped to a visibly too-large
 // zoom.
 export const GANTT_MIN_ZOOM = 0.001;
-export const GANTT_MAX_ZOOM = 200;
+export const GANTT_MAX_ZOOM = 1000;
 export const GANTT_ZOOM_STEP = 0.001;
 export const GANTT_DAILY_COLUMN_WIDTH = 30;
 const GANTT_DATE_TICK_MIN_WIDTH = 28;
 export const GANTT_FIT_PADDING_DAYS = 2;
+export const GANTT_SELECTED_WEEK_PADDING_DAYS = 1;
 const GANTT_ZOOM_DECIMALS = 3;
 const GANTT_ZOOM_SCALE = 10 ** GANTT_ZOOM_DECIMALS;
 const MARK_STATUS = {
@@ -103,6 +104,34 @@ export function fitZoomForGanttDateRange(startDay, endDay, viewportWidth, column
   if (!padded || !Number.isFinite(width) || width <= 0 || !Number.isFinite(column) || column <= 0) return null;
   return clampGanttZoom(Math.floor((width / (padded.days * column)) * 100 * GANTT_ZOOM_SCALE) / GANTT_ZOOM_SCALE);
 }
+
+/**
+ * Normalize a date-only week boundary without allowing Date parsing to shift
+ * the displayed Manila calendar day through the runtime timezone.
+ */
+export function selectedWeekGanttDateRange(selectedWeek) {
+  const startDay = selectedWeek?.start;
+  const endDay = selectedWeek?.end;
+  if (!inOrder(startDay, endDay)) return null;
+  return { startDay, endDay, days: dayOrdinal(endDay) - dayOrdinal(startDay) + 1 };
+}
+
+/**
+ * Return the range that a fit action should use. Release targets deliberately
+ * stay out of this calculation: they remain in the bounded timeline and in
+ * the deadline summary, but a distant target must not widen a work-week view.
+ */
+export function workGanttFitDateRange({ selectedWeek = null, startDay = null, endDay = null } = {}) {
+  return selectedWeekGanttDateRange(selectedWeek) ?? (
+    inOrder(startDay, endDay)
+      ? { startDay, endDay, days: dayOrdinal(endDay) - dayOrdinal(startDay) + 1 }
+      : null
+  );
+}
+
+// Keep the descriptive alias available to consumers that use the chart's
+// domain vocabulary directly.
+export const ganttFitDateRange = workGanttFitDateRange;
 
 /** Choose a readable interval for daily date labels at the current chart zoom. */
 export function ganttDateTickInterval(zoom, columnWidth = GANTT_DAILY_COLUMN_WIDTH, minTickWidth = GANTT_DATE_TICK_MIN_WIDTH) {
@@ -655,6 +684,86 @@ export function workGanttDepthExpansion(projection, eligibleIds, depth = 'all') 
   }
 
   return { controlledIds, expandedIds };
+}
+
+function ownerKeyOf(row, itemsById) {
+  const item = itemsById.get(row?.id);
+  const value = item?.owner ?? row?.entry?.owner;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized && normalized !== 'unassigned' ? normalized : 'unassigned';
+}
+
+function ownerLabelOf(row, itemsById, ownerKey) {
+  if (ownerKey === 'unassigned') return 'Unassigned';
+  const item = itemsById.get(row?.id);
+  return String(item?.ownerName ?? row?.entry?.ownerName ?? ownerKey).trim() || ownerKey;
+}
+
+/**
+ * Build deterministic owner buckets for compact schedule views. Only leaf
+ * rows become workload rows; hierarchy parents remain available through the
+ * ordinary tree view and are represented on each leaf as context metadata.
+ * Canonical leaf IDs are preserved exactly once and dependency edges continue
+ * to use those IDs.
+ */
+export function buildWorkOwnerGroups(rows = [], itemsById = new Map()) {
+  const itemMap = asItemMap(itemsById);
+  const groups = new Map();
+  for (const row of rows) {
+    const item = itemMap.get(row?.id);
+    if (!row || row.hasChildren || row.contextual || item?.contextOnly === true) continue;
+    const ownerKey = ownerKeyOf(row, itemMap);
+    let group = groups.get(ownerKey);
+    if (!group) {
+      group = { id: `owner-group:${ownerKey}`, ownerKey, label: ownerLabelOf(row, itemMap, ownerKey), rows: [] };
+      groups.set(ownerKey, group);
+    }
+    const contextTitles = (row.ancestorIds ?? [])
+      .map(id => itemMap.get(id)?.title ?? rows.find(candidate => candidate.id === id)?.entry?.title)
+      .filter(Boolean);
+    group.rows.push({ ...row, ownerGroupKey: ownerKey, ownerContextLabel: contextTitles.join(' / ') || null });
+  }
+  return [...groups.values()].sort((left, right) => left.ownerKey.localeCompare(right.ownerKey));
+}
+
+/** Return rows grouped by owner, including stable non-workload group rows. */
+export function groupWorkGanttRowsByOwner(rows = [], itemsById = new Map()) {
+  const grouped = [];
+  for (const group of buildWorkOwnerGroups(rows, itemsById)) {
+    grouped.push({
+      id: group.id,
+      ownerGroup: true,
+      ownerGroupKey: group.ownerKey,
+      ownerGroupLabel: group.label,
+      ownerGroupCount: group.rows.length,
+      title: group.label,
+      entry: {
+        id: group.id,
+        title: group.label,
+        owner: null,
+        ownerName: null,
+        childIds: [],
+        timeline: {},
+        completed: false,
+      },
+      marks: [],
+      fitMarks: [],
+      primaryMark: null,
+      hasChildren: false,
+      canExpand: false,
+      collapsed: false,
+      contextual: true,
+      depth: 0,
+      ancestorIds: [],
+      visibleDescendantIds: [],
+      childSummaryIntervals: [],
+      eligibleChildCount: 0,
+      undatedChildCount: 0,
+    });
+    grouped.push(...group.rows);
+  }
+  for (const [rowIndex, row] of grouped.entries()) row.rowIndex = rowIndex;
+  return grouped;
 }
 
 /**
