@@ -29,7 +29,7 @@ jobs:
           ref: codex/weekly-planning-archive
           fetch-depth: 1
       - name: Set up Node.js
-        uses: actions/setup-node@v4.4.0
+        uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e
         with:
           node-version: 26.3.1
       - name: Set up Bun
