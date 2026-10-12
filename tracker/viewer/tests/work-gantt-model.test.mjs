@@ -194,6 +194,40 @@ test('owner grouping keeps accepted project and workstream records with direct w
   assert.equal(grouped.some(row => row.id === structural.id), false);
 });
 
+test('owner grouping retains direct work on a contextual container but excludes child-only context', () => {
+  const direct = entry('contextual-direct-project', {
+    ownPlannedStart: '2026-10-01',
+    ownPlannedDue: '2026-10-10',
+    plannedStart: '2026-10-01',
+    plannedDue: '2026-10-10',
+  }, { childIds: ['contextual-direct-child'], owner: 'owner-a', ownerName: 'Owner A' });
+  const childOnly = entry('contextual-child-only-project', {}, {
+    childIds: ['contextual-child-only-child'],
+    owner: 'owner-b',
+    ownerName: 'Owner B',
+  });
+  const items = new Map([
+    [direct.id, { id: direct.id, type: 'project', commitment: 'accepted', owner: direct.owner, ownerName: direct.ownerName }],
+    [childOnly.id, { id: childOnly.id, type: 'project', commitment: 'accepted', owner: childOnly.owner, ownerName: childOnly.ownerName }],
+  ]);
+  const model = buildWorkGanttModel({
+    projection: new Map([
+      [direct.id, direct],
+      [childOnly.id, childOnly],
+      ['contextual-direct-child', entry('contextual-direct-child', {}, { parentId: direct.id })],
+      ['contextual-child-only-child', entry('contextual-child-only-child', {}, { parentId: childOnly.id })],
+    ]),
+    visibleIds: new Set([direct.id, childOnly.id]),
+    contextualIds: new Set([direct.id, childOnly.id]),
+    expandedIds: new Set(),
+    itemsById: items,
+  });
+  const grouped = groupWorkGanttRowsByOwner(model.rows, items);
+  const directRow = grouped.find(row => row.id === direct.id);
+  assert.equal(directRow?.contextual, false);
+  assert.equal(grouped.some(row => row.id === childOnly.id), false);
+});
+
 function entry(id, timeline, overrides = {}) {
   return {
     id,

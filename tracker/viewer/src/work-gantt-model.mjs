@@ -719,9 +719,14 @@ function hasDirectOwnerWork(row, item) {
 }
 
 function isOwnerWorkloadRow(row, item) {
-  if (!row || row.contextual || item?.contextOnly === true) return false;
+  if (!row) return false;
+  const directContainerWork = row.hasChildren
+    && ownerWorkKind(item) !== null
+    && hasDirectOwnerWork(row, item);
+  if (directContainerWork) return true;
+  if (row.contextual || item?.contextOnly === true) return false;
   if (!row.hasChildren) return true;
-  return ownerWorkKind(item) !== null && hasDirectOwnerWork(row, item);
+  return false;
 }
 
 /**
@@ -737,6 +742,9 @@ export function buildWorkOwnerGroups(rows = [], itemsById = new Map()) {
   for (const row of rows) {
     const item = itemMap.get(row?.id);
     if (!isOwnerWorkloadRow(row, item)) continue;
+    const directContainerWork = row.hasChildren
+      && ownerWorkKind(item) !== null
+      && hasDirectOwnerWork(row, item);
     const ownerKey = ownerKeyOf(row, itemMap);
     let group = groups.get(ownerKey);
     if (!group) {
@@ -746,7 +754,12 @@ export function buildWorkOwnerGroups(rows = [], itemsById = new Map()) {
     const contextTitles = (row.ancestorIds ?? [])
       .map(id => itemMap.get(id)?.title ?? rows.find(candidate => candidate.id === id)?.entry?.title)
       .filter(Boolean);
-    group.rows.push({ ...row, ownerGroupKey: ownerKey, ownerContextLabel: contextTitles.join(' / ') || null });
+    group.rows.push({
+      ...row,
+      contextual: directContainerWork ? false : row.contextual,
+      ownerGroupKey: ownerKey,
+      ownerContextLabel: contextTitles.join(' / ') || null,
+    });
   }
   return [...groups.values()].sort((left, right) => left.ownerKey.localeCompare(right.ownerKey));
 }

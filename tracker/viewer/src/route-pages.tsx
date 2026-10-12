@@ -251,11 +251,15 @@ export function WorkPage() {
   const displayedIds: ReadonlySet<string> = applyActivityFilter
     ? new Set([...activityRows.visibleIds].filter(id => visible.visibleIds.has(id) && (dailyAttentionIds === null || dailyAttentionIds.has(id))))
     : visible.visibleIds;
+  const explicitVisibleWorkloadIds = useMemo(
+    () => new Set(visible.items.filter(item => !visible.contextualIds.has(item.id)).map(item => item.id)),
+    [visible.contextualIds, visible.items],
+  );
   const displayedContextualIds: ReadonlySet<string> = useMemo(() => {
-    if (!applyActivityFilter) return visible.contextualIds;
+    if (!applyActivityFilter) return new Set([...visible.contextualIds].filter(id => !explicitVisibleWorkloadIds.has(id)));
     return new Set([...visible.contextualIds, ...activityRows.contextIds]
-      .filter(id => displayedIds.has(id)));
-  }, [activityRows.contextIds, applyActivityFilter, displayedIds, visible.contextualIds]);
+      .filter(id => displayedIds.has(id) && !explicitVisibleWorkloadIds.has(id)));
+  }, [activityRows.contextIds, applyActivityFilter, displayedIds, explicitVisibleWorkloadIds, visible.contextualIds]);
   const candidateIds = useMemo(() => {
     if (workflow !== 'next-week') return null;
     return new Set([...managerProjection.byId.values()]
