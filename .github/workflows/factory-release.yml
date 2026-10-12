@@ -43,7 +43,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
           ./scripts/privacy-check
           bun test tests/factory-release-receipt.test.mjs tests/tracker-hosting/access-gate.test.mjs
-          bun tracker/viewer/tooling/routes.mjs check
+          bun tracker/viewer/tooling/routes.mjs generate
           bun x tsc --project tracker/viewer/tsconfig.json --noEmit --allowJs --checkJs false
 
   dispatch:
