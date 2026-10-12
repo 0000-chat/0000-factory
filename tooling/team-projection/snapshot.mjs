@@ -13,6 +13,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
   const directoryById = new Map(directory.map(entry => [entry.id, entry]));
   const metadataByTaskId = new Map((Array.isArray(companion?.taskMetadata) ? companion.taskMetadata : []).map(entry => [entry.taskId, entry]));
   const companionSchedulesAreAuthoritative = companion?.kind === 'team-safe-companion'
+    && companion.directoryOnly !== true
     && companion.staleSchedule === false
     && Array.isArray(companion.schedules);
   const schedulesByTaskId = new Map((companionSchedulesAreAuthoritative ? companion.schedules : []).map(entry => [entry.taskId, entry]));

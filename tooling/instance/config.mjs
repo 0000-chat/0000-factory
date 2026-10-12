@@ -25,7 +25,7 @@ const ROOT_KEYS = [
 const BRANDING_KEYS = ['name', 'title', 'description', 'markText', 'homeLabel', 'loadingLabel', 'faviconPath'];
 const GITHUB_KEYS = ['owner', 'repo', 'branch'];
 const TRACKER_DATA_KEYS = ['folderPath', 'layout', 'evidence'];
-const TEAM_DATA_KEYS = ['folderPath', 'layout', 'projectionPath', 'companionPath', 'evidence', 'projectionLinkPolicy'];
+const TEAM_DATA_KEYS = ['folderPath', 'layout', 'projectionPath', 'companionPath', 'evidence', 'projectionLinkPolicy', 'directoryRosterDigest'];
 const PROJECTION_LINK_POLICY_KEYS = ['allowedEvidenceHosts', 'forbiddenGitHubRepositories'];
 const MODEL_KEYS = ['approvalProtocol', 'approverIds'];
 const BROWSER_KEYS = [
@@ -54,6 +54,7 @@ const MAX_ACCESS_READER_EMAIL_DOMAINS = 128;
 const MAX_PROJECTION_EVIDENCE_HOSTS = 128;
 const MAX_PROJECTION_GITHUB_REPOSITORIES = 128;
 const GITHUB_REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/u;
+const SHA256_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 
 /** Error raised when settings do not satisfy their versioned contract. */
 export class InstanceConfigError extends TypeError {
@@ -361,6 +362,9 @@ function parseData(value, path) {
       : normalizeRepositoryPath(value.companionPath, `${path}.companionPath`),
     evidence: parseEvidence(value.evidence, `${path}.evidence`),
     projectionLinkPolicy: parseProjectionLinkPolicy(value.projectionLinkPolicy, `${path}.projectionLinkPolicy`),
+    directoryRosterDigest: value.directoryRosterDigest === undefined || value.directoryRosterDigest === null
+      ? null
+      : text(value.directoryRosterDigest, `${path}.directoryRosterDigest`, { pattern: SHA256_DIGEST_PATTERN }),
   };
 }
 
@@ -682,7 +686,7 @@ export function parseInstanceCatalog(value) {
  * @property {string} id
  * @property {{name:string,title:string,description:string,markText:string,homeLabel:string,loadingLabel:string,faviconPath:string}} branding
  * @property {{owner:string,repo:string,branch:string}} github
- * @property {{folderPath:string,layout:'tracker-v1',evidence:{kind:'none'}|{kind:'grok-bot-v1'}}|{folderPath:string,layout:'team-projection-v1',projectionPath:string,companionPath:string|null,evidence:{kind:'none'},projectionLinkPolicy:{allowedEvidenceHosts:string[],forbiddenGitHubRepositories:string[]}}} data
+ * @property {{folderPath:string,layout:'tracker-v1',evidence:{kind:'none'}|{kind:'grok-bot-v1'}}|{folderPath:string,layout:'team-projection-v1',projectionPath:string,companionPath:string|null,evidence:{kind:'none'},projectionLinkPolicy:{allowedEvidenceHosts:string[],forbiddenGitHubRepositories:string[]},directoryRosterDigest:string|null}} data
  * @property {{approvalProtocol:'don-v1',approverIds:readonly string[]}} model
  * @property {{namespace:string,storeId:string,themeKey:string,editLockPrefix:string,publishLockName:string,unscheduledCollapsedKey:string,activityPausedKey:string}} browser
  * @property {{kind:'unconfigured'}|{kind:'ready',teamDomain:string,audience:string,readerEmails:string[],readerEmailDomains:string[],service:{kind:'disabled'}|{kind:'enabled',clientId:string}}} access

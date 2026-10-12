@@ -11,6 +11,7 @@ import {
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { parseInstanceConfig } from '../tooling/instance/config.mjs';
 import { readTeamProjection, TeamProjectionInputError } from '../tooling/team-projection/reader.mjs';
 import { buildTeamProjectionSnapshot } from '../tooling/team-projection/snapshot.mjs';
@@ -18,6 +19,8 @@ import { buildTeamProjectionPlanningArchive } from '../tooling/team-projection/p
 import { parsePlanningArchive } from '../tooling/planning/archive.mjs';
 import { taskCodeForId } from '../tooling/tracker/task-codes.mjs';
 import { buildSnapshot } from '../tracker/viewer/tooling/build.mjs';
+
+const ENGINE_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 const EMPTY_DIGEST = `sha256:${'0'.repeat(64)}`;
@@ -38,6 +41,7 @@ function teamSettings(overrides = {}) {
     data: {
       folderPath: '', layout: 'team-projection-v1', projectionPath: 'team/projection.json',
       evidence: { kind: 'none' }, projectionLinkPolicy: { allowedEvidenceHosts: ['example.com'], forbiddenGitHubRepositories: [] },
+      directoryRosterDigest: digest(['person-1']),
     },
     model: { approvalProtocol: 'don-v1' },
     browser: {
@@ -193,12 +197,71 @@ function fullTaskProjection(tasks = [
   return value;
 }
 
+function directoryOnlyCompanion(projectionValue, overrides = {}) {
+  const value = {
+    schemaVersion: 1,
+    kind: 'team-safe-companion',
+    mode: 'directory-only-v3',
+    projectionDigest: digest({ ...projectionValue, publish: { ...projectionValue.publish, initialProjectionDigest: null } }),
+    projectionRevision: projectionValue.revision,
+    policyRevision: projectionValue.policyRevision,
+    generatedAt: '2026-10-12T00:00:00Z',
+    directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }],
+    schedules: [],
+    taskMetadata: [],
+    audit: {
+      directoryRule: 'approved-roster-safe-display-metadata-only',
+      scheduleRule: 'directory-only-no-task-schedules',
+      sourceTaskCount: projectionValue.tasks.length,
+      rosterDigest: digest(['person-1']),
+    },
+    publish: { reviewed: false, activationEnabled: false },
+    ...overrides,
+  };
+  return { ...value, companionDigest: digest(value) };
+}
+
+function standingCompanion(projectionValue, overrides = {}) {
+  const value = {
+    schemaVersion: 1,
+    kind: 'team-safe-companion',
+    projectionDigest: digest({ ...projectionValue, publish: { ...projectionValue.publish, initialProjectionDigest: null } }),
+    projectionRevision: projectionValue.revision,
+    policyRevision: projectionValue.policyRevision,
+    generatedAt: '2026-10-12T00:00:00Z',
+    directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }],
+    schedules: [],
+    taskMetadata: [],
+    audit: {
+      directoryRule: 'approved-roster-safe-display-metadata-only',
+      scheduleRule: 'approved-endpoint-only-with-existing-task-proof',
+      sourceTaskCount: projectionValue.tasks.length,
+      rosterDigest: digest(['person-1']),
+    },
+    publish: { reviewed: false, activationEnabled: false },
+    ...overrides,
+  };
+  return { ...value, companionDigest: digest(value) };
+}
+
 function writeFixture(value) {
   const root = mkdtempSync(join(tmpdir(), 'team-projection-'));
   mkdirSync(join(root, 'assets'), { recursive: true });
   mkdirSync(join(root, 'team'), { recursive: true });
   writeFileSync(join(root, 'assets/favicon.svg'), '<svg/>\n');
   writeFileSync(join(root, 'team/projection.json'), `${JSON.stringify(value)}\n`);
+  return root;
+}
+
+function writeBuildFixture(projectionValue, companionValue) {
+  const root = writeFixture(projectionValue);
+  const instance = teamSettings();
+  mkdirSync(join(root, 'assets', 'avatars'), { recursive: true });
+  writeFileSync(join(root, 'assets', 'avatars', 'person-1.webp'), 'synthetic avatar bytes\n');
+  writeFileSync(join(root, 'team', 'companion.json'), `${JSON.stringify(companionValue)}\n`);
+  writeFileSync(join(root, 'settings.json'), `${JSON.stringify(teamSettings({
+    data: { ...instance.data, companionPath: 'team/companion.json' },
+  }), null, 2)}\n`);
   return root;
 }
 
@@ -499,7 +562,7 @@ test('standing projection builds the production viewer payload and browser archi
   try {
     writeFileSync(join(root, 'settings.json'), `${JSON.stringify(teamSettings(), null, 2)}\n`);
     const result = buildSnapshot({
-      engineRoot: resolve(import.meta.dir, '..'),
+      engineRoot: ENGINE_ROOT,
       instancePath: join(root, 'settings.json'),
       dataRepo: root,
       output,
@@ -539,7 +602,7 @@ test('hierarchical standing projection builds context rows and breadcrumbs witho
   try {
     writeFileSync(join(root, 'settings.json'), `${JSON.stringify(teamSettings(), null, 2)}\n`);
     buildSnapshot({
-      engineRoot: resolve(import.meta.dir, '..'),
+      engineRoot: ENGINE_ROOT,
       instancePath: join(root, 'settings.json'),
       dataRepo: root,
       output,
@@ -560,6 +623,206 @@ test('hierarchical standing projection builds context rows and breadcrumbs witho
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(output, { recursive: true, force: true });
+  }
+});
+
+test('directory-only v3 survives the production build without mutating full-copy tasks', () => {
+  const projectionValue = fullTaskProjection([
+    {
+      taskId: 'approved-task', title: 'Approved task', description: 'Approved description', assignee: 'person-1', reviewer: null,
+      status: 'active', nextStep: 'Review the approved work.', completionCriteria: 'The approved review is recorded.',
+      deadline: { label: 'approved', date: '2026-10-20' }, parentId: 'project-alpha',
+    },
+    {
+      taskId: 'forecast-task', title: 'Forecast task', description: 'Forecast description', assignee: null, reviewer: 'person-1',
+      status: 'queued', nextStep: 'Choose a forecast owner.', completionCriteria: 'The forecast owner is recorded.',
+      deadline: { label: 'forecast', date: '2026-10-27' }, parentId: 'project-alpha',
+    },
+  ]);
+  const companionValue = directoryOnlyCompanion(projectionValue);
+  const root = writeBuildFixture(projectionValue, companionValue);
+  const output = mkdtempSync(join(tmpdir(), 'directory-only-v3-output-'));
+  const rejectedOutput = mkdtempSync(join(tmpdir(), 'directory-only-v3-rejected-'));
+  try {
+    const result = buildSnapshot({
+      engineRoot: ENGINE_ROOT,
+      instancePath: join(root, 'settings.json'),
+      dataRepo: root,
+      output,
+      builtAt: '2026-10-12T00:00:00Z',
+    });
+    const data = JSON.parse(readFileSync(join(output, 'assets/data.json'), 'utf8'));
+    assert.equal(data.people.length, 1);
+    assert.equal(data.people[0].id, 'person-1');
+    assert.equal(data.people[0].avatarUrl, '/avatars/person-1.webp');
+    assert.equal(data.team.length, 1);
+    assert.deepEqual(data.plans, []);
+    assert.ok(data.items.every(item => item.proposal === null));
+    assert.equal(result.planningArchive.entries[0].plan.proposals.length, 0);
+
+    const itemById = new Map(data.items.map(item => [item.id, item]));
+    for (const sourceTask of projectionValue.tasks) {
+      const item = itemById.get(sourceTask.taskId);
+      assert.ok(item, `missing built task ${sourceTask.taskId}`);
+      const approvedDate = sourceTask.deadline?.label === 'approved' ? sourceTask.deadline.date : null;
+      const forecastDate = sourceTask.deadline?.label === 'forecast' ? sourceTask.deadline.date : null;
+      assert.deepEqual({
+        taskId: item.teamProjection.taskId,
+        title: item.title,
+        description: item.sections.outcome,
+        assignee: item.teamProjection.assignee,
+        reviewer: item.teamProjection.reviewer,
+        status: item.status,
+        nextStep: item.sections.nextStep,
+        completionCriteria: item.sections.completionCondition,
+        deadline: sourceTask.deadline,
+        parentId: item.teamProjection.parentId,
+        approvedDate: item.teamProjection.approvedDate,
+        forecastDate: item.teamProjection.forecastDate,
+        plannedEnd: item.schedule.plannedEnd,
+        forecastEndMin: item.schedule.forecastEndMin,
+        forecastEndMax: item.schedule.forecastEndMax,
+      }, {
+        taskId: sourceTask.taskId,
+        title: sourceTask.title,
+        description: sourceTask.description,
+        assignee: sourceTask.assignee,
+        reviewer: sourceTask.reviewer,
+        status: sourceTask.status,
+        nextStep: sourceTask.nextStep,
+        completionCriteria: sourceTask.completionCriteria,
+        deadline: sourceTask.deadline,
+        parentId: sourceTask.parentId,
+        approvedDate,
+        forecastDate,
+        plannedEnd: approvedDate,
+        forecastEndMin: forecastDate,
+        forecastEndMax: forecastDate,
+      });
+    }
+    const context = itemById.get('project-alpha');
+    assert.deepEqual({ id: context.id, title: context.title, type: context.type, parent: context.parent, contextOnly: context.contextOnly }, {
+      id: 'project-alpha', title: 'Project Alpha', type: 'project', parent: null, contextOnly: true,
+    });
+
+    const trustedSettings = JSON.parse(readFileSync(join(root, 'settings.json'), 'utf8'));
+    const untrustedSettings = { ...trustedSettings, data: { ...trustedSettings.data } };
+    delete untrustedSettings.data.directoryRosterDigest;
+    writeFileSync(join(root, 'settings.json'), `${JSON.stringify(untrustedSettings)}\n`);
+    const untrustedOutput = mkdtempSync(join(tmpdir(), 'directory-only-v3-untrusted-'));
+    try {
+      const untrustedResult = buildSnapshot({
+        engineRoot: ENGINE_ROOT,
+        instancePath: join(root, 'settings.json'),
+        dataRepo: root,
+        output: untrustedOutput,
+        builtAt: '2026-10-12T00:00:00Z',
+      });
+      assert.deepEqual(untrustedResult.data.people, [], 'missing trusted roster constraint must drop the directory');
+    } finally {
+      rmSync(untrustedOutput, { recursive: true, force: true });
+    }
+
+    const wrongSettings = { ...trustedSettings, data: { ...trustedSettings.data, directoryRosterDigest: digest(['different-person']) } };
+    writeFileSync(join(root, 'settings.json'), `${JSON.stringify(wrongSettings)}\n`);
+    const wrongSettingsOutput = mkdtempSync(join(tmpdir(), 'directory-only-v3-wrong-settings-'));
+    try {
+      const wrongSettingsResult = buildSnapshot({
+        engineRoot: ENGINE_ROOT,
+        instancePath: join(root, 'settings.json'),
+        dataRepo: root,
+        output: wrongSettingsOutput,
+        builtAt: '2026-10-12T00:00:00Z',
+      });
+      assert.deepEqual(wrongSettingsResult.data.people, [], 'mismatched trusted roster constraint must drop the directory');
+    } finally {
+      rmSync(wrongSettingsOutput, { recursive: true, force: true });
+    }
+
+    writeFileSync(join(root, 'settings.json'), `${JSON.stringify(trustedSettings)}\n`);
+    const forgedCompanion = directoryOnlyCompanion(projectionValue, {
+      directory: [{ id: 'different-person', displayName: 'Synthetic Different Person', avatar: 'person-1.webp' }],
+      audit: { ...companionValue.audit, rosterDigest: digest(['different-person']) },
+    });
+    writeFileSync(join(root, 'team', 'companion.json'), `${JSON.stringify(forgedCompanion)}\n`);
+    const forgedOutput = mkdtempSync(join(tmpdir(), 'directory-only-v3-forged-'));
+    try {
+      const forgedResult = buildSnapshot({
+        engineRoot: ENGINE_ROOT,
+        instancePath: join(root, 'settings.json'),
+        dataRepo: root,
+        output: forgedOutput,
+        builtAt: '2026-10-12T00:00:00Z',
+      });
+      assert.deepEqual(forgedResult.data.people, [], 'self-hashed forged roster must drop the directory');
+    } finally {
+      rmSync(forgedOutput, { recursive: true, force: true });
+    }
+
+    const rejectedCompanion = directoryOnlyCompanion(projectionValue, {
+      schedules: [{ taskId: 'approved-task', approvedStart: null, approvedEnd: '2026-10-20' }],
+      taskMetadata: [{ taskId: 'approved-task', status: 'active', commitment: null, phase: null, healthState: 'unknown' }],
+    });
+    writeFileSync(join(root, 'team', 'companion.json'), `${JSON.stringify(rejectedCompanion)}\n`);
+    assert.throws(() => buildSnapshot({
+      engineRoot: ENGINE_ROOT,
+      instancePath: join(root, 'settings.json'),
+      dataRepo: root,
+      output: rejectedOutput,
+      builtAt: '2026-10-12T00:00:00Z',
+    }), /directory-only companion/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(output, { recursive: true, force: true });
+    rmSync(rejectedOutput, { recursive: true, force: true });
+  }
+});
+
+test('production build drops a companion directory when its standing roster or policy binding drifts', () => {
+  const base = standingProjection();
+  base.audit.rosterDigest = digest(['person-1']);
+  base.publish.initialProjectionDigest = digest({ ...base, publish: { ...base.publish, initialProjectionDigest: null } });
+  const cases = [
+    ['roster', {
+      projection: {
+        ...base,
+        audit: { ...base.audit, rosterDigest: digest(['different-person']) },
+      },
+    }],
+    ['policy', {
+      projection: { ...base, policyRevision: 'standing-sharing-v3' },
+    }],
+  ];
+  for (const [label, change] of cases) {
+    change.projection = {
+      ...change.projection,
+      publish: {
+        ...change.projection.publish,
+        initialProjectionDigest: digest({ ...change.projection, publish: { ...change.projection.publish, initialProjectionDigest: null } }),
+      },
+    };
+    // The fixture's projection digest is updated so the selected mismatch is
+    // the binding drift under test rather than an unrelated stale projection.
+    const companionValue = standingCompanion(change.projection, {
+      projectionDigest: digest({ ...change.projection, publish: { ...change.projection.publish, initialProjectionDigest: null } }),
+      ...(label === 'policy' ? { policyRevision: base.policyRevision } : {}),
+    });
+    const root = writeBuildFixture(change.projection, companionValue);
+    const output = mkdtempSync(join(tmpdir(), `standing-binding-${label}-`));
+    try {
+      const result = buildSnapshot({
+        engineRoot: ENGINE_ROOT,
+        instancePath: join(root, 'settings.json'),
+        dataRepo: root,
+        output,
+        builtAt: '2026-10-12T00:00:00Z',
+      });
+      assert.deepEqual(result.data.people, [], `${label} mismatch must drop the directory`);
+      assert.deepEqual(result.data.team, [], `${label} mismatch must drop team identity rows`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(output, { recursive: true, force: true });
+    }
   }
 });
 

@@ -104,7 +104,8 @@ layout and projection path explicitly:
     "projectionLinkPolicy": {
       "allowedEvidenceHosts": [],
       "forbiddenGitHubRepositories": []
-    }
+    },
+    "directoryRosterDigest": "sha256:<approved-roster-id-set-digest>"
   },
   "publish": { "kind": "disabled" }
 }
@@ -160,9 +161,22 @@ projection schema or create a publication channel. Its envelope is
 * digest, audit, and disabled-publish fields that bind the supplement to the
   exact projection and approved roster.
 
-The reader validates the companion before use. A projection or roster digest
-mismatch drops schedules and task metadata; a roster mismatch also drops the
-directory, so stale avatars are never staged. A matching companion still must
+For a full current-task copy, a directory-only companion sets
+`mode: "directory-only-v3"`, keeps `schedules` and `taskMetadata` empty, and
+sets `audit.scheduleRule` to `directory-only-no-task-schedules`. Its
+`audit.sourceTaskCount` is the count of raw tasks in the bound full projection;
+it does not claim task metadata or schedule provenance. The full projection
+remains authoritative for every task field, status, and date. The companion
+contributes only the approved directory and its local avatar basenames.
+
+The `directoryRosterDigest` setting is a trusted constraint supplied by the
+consumer's approved roster configuration. The build must verify that its
+value matches the canonical sorted roster ID set before invoking Factory.
+Directory-only companions must carry the same digest; a missing or mismatched
+constraint drops the directory, so a companion cannot authorize a self-hashed
+but unapproved roster. The reader validates the companion before use. A
+projection or roster digest mismatch drops schedules and task metadata; a
+roster mismatch also drops the directory, so stale avatars are never staged. A matching companion still must
 agree with each anchored task status and approved end date. For a valid,
 projection-bound companion, `schedules` is the authoritative allowlist: an
 omitted projected task has no approved start, end, target, or approved-date

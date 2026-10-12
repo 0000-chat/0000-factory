@@ -418,6 +418,7 @@ function loadTeamProjectionInputs({ engine, data, settingsPath, outputPath, load
     dataRoot: selectedRoot,
     companionPath: instance.data.companionPath,
     projection: selectedProjection.rawProjection,
+    expectedRosterDigest: instance.data.directoryRosterDigest,
   });
   const dataMeta = dataGitMetadata(data);
   const engineMeta = engineGitMetadata(engine);
@@ -582,6 +583,7 @@ function assertBuildInputsUnchanged(inputs) {
         dataRoot: selectedRoot,
         companionPath: inputs.instance.data.companionPath,
         projection: currentProjection.rawProjection,
+        expectedRosterDigest: inputs.instance.data.directoryRosterDigest,
       });
       if (!currentCompanion || currentCompanion.fileDigest !== inputs.companion?.fileDigest) {
         throw new Error('team companion input changed during build');
