@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "releaseId": "factory-38289404891-1",
+  "repository": "https://github.com/0000-chat/0000-factory.git",
+  "branch": "codex/weekly-planning-archive",
+  "commit": "ca1f1d67cb5537b18d41287e59eecd45799f665a",
+  "consumers": [
+    {
+      "repository": "kapitolph/nextpay-team-delivery",
+      "branch": "main",
+      "liveUrl": "https://tracker.nextfinancial.xyz"
+    },
+    {
+      "repository": "donmasakayan/nextpay-strategy",
+      "branch": "main",
+      "liveUrl": "https://tracker.nextpay.0000.gold"
+    }
+  ]
+}
