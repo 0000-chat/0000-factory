@@ -995,6 +995,14 @@ function WorkGanttTimelineContent({
             const parentLabelText = parentLabelRange
               ? `${title} · ${workGanttRangeLabel(parentLabelRange)}`
               : title;
+            const dateDetails = getWorkDateDetails(row);
+            const scheduleLabel = dateDetails.label;
+            const incompleteScheduleLabel = row.childSummaryIncomplete && scheduleLabel === 'Scheduled'
+              ? 'Dates incomplete'
+              : scheduleLabel;
+            const missingDatesSuffix = incompleteScheduleLabel && incompleteScheduleLabel !== 'Scheduled'
+              ? ` · ${incompleteScheduleLabel}`
+              : '';
             const collapsedParentDescription = `${title} · parent timeline · ${collapsedEnvelope?.sourceKinds?.join(', ') ?? row.parentEnvelope?.sourceKinds?.join(', ') ?? 'approved'} · ${collapsedEnvelope?.startDay ?? row.parentEnvelope?.startDay ?? 'unknown'} to ${collapsedEnvelope?.endDay ?? row.parentEnvelope?.endDay ?? 'unknown'}${missingDatesSuffix}`;
             const expandedParentDescription = `${title} · parent timeline · ${row.parentEnvelope?.sourceKinds?.join(', ') ?? 'approved'} · ${row.parentEnvelope?.startDay ?? 'unknown'} to ${row.parentEnvelope?.endDay ?? 'unknown'}${missingDatesSuffix}`;
             const parentLabelNeedsCallout = parentEnvelopeWidth > 0 && parentEnvelopeWidth < 180;
@@ -1013,14 +1021,6 @@ function WorkGanttTimelineContent({
               : Math.max(envelopeLeft + 3, Math.min(rawOverflowLeft, envelopeRight - 24));
             const highlight = rowHighlight(row, activeId, relatedIds, selectedId);
             const hasOwnApprovedPlan = Boolean(row.ownApprovedMark);
-            const dateDetails = getWorkDateDetails(row);
-            const scheduleLabel = dateDetails.label;
-            const incompleteScheduleLabel = row.childSummaryIncomplete && scheduleLabel === 'Scheduled'
-              ? 'Dates incomplete'
-              : scheduleLabel;
-            const missingDatesSuffix = incompleteScheduleLabel && incompleteScheduleLabel !== 'Scheduled'
-              ? ` · ${incompleteScheduleLabel}`
-              : '';
             const childLabel = childApprovedEnvelope ? `Child schedule · ${workGanttRangeLabel(childApprovedEnvelope)}` : null;
             const proposedChildLabel = childProposedEnvelope ? `${proposedEnvelopeLabel(childProposedEnvelope)} · ${workGanttRangeLabel(childProposedEnvelope)}` : null;
             const planLabel = row.ownApprovedMark ? `Plan · ${workGanttRangeLabel(row.ownApprovedMark)}` : null;

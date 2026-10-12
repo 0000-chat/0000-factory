@@ -63,6 +63,14 @@ async function editTitle(page: Page, title: string) {
   await expect(page.getByRole('heading', { name: title, exact: true, level: 1 })).toBeVisible();
 }
 
+test('populated Gantt renders without runtime page errors', async ({ page }) => {
+  const pageErrors = watchPageErrors(page);
+  await page.goto('/work?mode=gantt');
+  await waitForShell(page);
+  await expect(page.getByRole('heading', { name: 'Work', exact: true, level: 1 })).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
+
 test('populated synthetic routes show work, plans, reports, and team data', async ({ page }) => {
   const pageErrors = watchPageErrors(page);
   const id = projectId();
