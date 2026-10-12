@@ -42,8 +42,6 @@
 .work-gantt-presentation-mode > .work-gantt-dependency-summary,
 .work-gantt-presentation-mode > .mobile-schedule-agenda,
 .work-gantt-presentation-mode > .unscheduled-list { display: none; }
-.work-gantt-presentation-mode .tracker-work-gantt .gantt { grid-template-columns: minmax(0, 1fr) !important; }
-.work-gantt-presentation-mode .tracker-work-gantt [data-roadmap-ui="gantt-sidebar"] { display: none; }
 .work-gantt-presentation-mode .work-gantt-chart-region { display: block; }
 .work-gantt-presentation-mode .work-gantt-chart-main { width: 100%; }
 .work-gantt-presentation-mode .work-gantt-zoom-controls { min-height: 34px; padding: 4px 6px; }
