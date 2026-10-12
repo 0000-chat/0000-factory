@@ -49,7 +49,7 @@
 .tracker-work-gantt.gantt-shell { display: flex; flex-direction: column; }
 .tracker-work-gantt.gantt-shell > .gantt { flex: 1 1 auto; min-height: 0; }
 .tracker-work-gantt .gantt, .tracker-work-gantt .gantt-feature-list, .tracker-work-gantt .work-gantt-row-body, .tracker-work-gantt .work-gantt-feature-row-wrap { background: var(--card); }
-.tracker-work-gantt .gantt { grid-template-columns: clamp(320px, 34vw, 500px) minmax(0, 1fr) !important; }
+.tracker-work-gantt .gantt { --work-gantt-bar-height: calc(var(--gantt-row-height) - 4px); grid-template-columns: clamp(320px, 34vw, 500px) minmax(0, 1fr) !important; }
 .tracker-work-gantt [data-roadmap-ui="gantt-sidebar"] { box-sizing: border-box; width: clamp(320px, 34vw, 500px) !important; }
 .tracker-work-gantt [data-roadmap-ui="gantt-sidebar"] > .space-y-4 > * + * { margin-top: 0; }
 .tracker-work-gantt [data-roadmap-ui="gantt-sidebar"] > .space-y-4 > div > p { display: flex; align-items: center; margin: 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent); }
