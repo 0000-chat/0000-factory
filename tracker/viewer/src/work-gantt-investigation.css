@@ -227,6 +227,24 @@
   font-size: 0.7rem;
 }
 
+.work-gantt-investigation-info {
+  display: grid;
+  gap: 3px;
+  margin: 17px 0 0;
+  padding: 10px 11px;
+  border: 1px dashed color-mix(in srgb, var(--proposed) 62%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--proposed) 8%, var(--surface-quiet));
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.work-gantt-investigation-info strong {
+  color: var(--proposed);
+  font-size: 0.7rem;
+}
+
 .work-gantt-investigation-actions {
   display: flex;
   margin-top: 20px;
