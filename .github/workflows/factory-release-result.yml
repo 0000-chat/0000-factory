@@ -102,7 +102,7 @@ jobs:
             exit 0
           fi
           git config user.name 'Factory release bot'
-          git config user.email 'factory-release-bot@users.noreply.github.com'
+          git config user.email 'factory-release-bot@example.invalid'
           git commit -m "ci: verify Factory consumer runtimes"
           git fetch origin main
           git rebase origin/main
