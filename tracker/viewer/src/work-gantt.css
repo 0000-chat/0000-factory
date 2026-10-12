@@ -39,7 +39,6 @@
 .work-gantt-presentation-mode .work-gantt-legend,
 .work-gantt-presentation-mode > .work-gantt-empty,
 .work-gantt-presentation-mode > .work-gantt-toolbar,
-.work-gantt-presentation-mode > .work-gantt-dependency-summary,
 .work-gantt-presentation-mode > .mobile-schedule-agenda,
 .work-gantt-presentation-mode > .unscheduled-list { display: none; }
 .work-gantt-presentation-mode .work-gantt-chart-region { display: block; }
@@ -235,19 +234,10 @@
 .tracker-work-gantt-today.w-px { background: var(--primary); }
 .tracker-work-gantt-today > div:first-child { border: 1px solid var(--border); font-size: 0.62rem; }
 .work-gantt-dependency-overlay { overflow: visible; }
-.work-gantt-dependency-summary { display: grid; gap: 8px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; color: var(--muted-foreground); font-size: 0.72rem; }
-.work-gantt-dependency-summary p, .work-gantt-dependency-summary h4 { margin: 0; }
-.work-gantt-dependency-summary h4 { color: var(--foreground); font-size: 0.7rem; }
-.work-gantt-dependency-summary ul { display: grid; gap: 4px; margin: 4px 0 0; padding-left: 18px; }
-.work-gantt-dependency-summary li { display: flex; flex-wrap: wrap; gap: 6px; }
-.work-gantt-dependency-summary li small { color: var(--muted-foreground); }
-.gantt-dialog-body.work-gantt-dialog-body { display: grid; grid-template-rows: auto minmax(0, 1fr) minmax(0, auto); gap: 8px; }
+.gantt-dialog-body.work-gantt-dialog-body { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; }
 .work-gantt-dialog-body .work-gantt-schedule-controls { justify-content: flex-start; }
 .work-gantt-dialog-chart { display: flex; min-height: 0; flex-direction: column; }
 .work-gantt-dialog-chart > .tracker-work-gantt.gantt-shell { height: 100%; min-height: 0; flex: 1 1 auto; }
-.work-gantt-dialog-summary { min-height: 0; max-height: min(180px, 22vh); overflow: auto; }
-.work-gantt-dialog-summary:empty { display: none; }
-.work-gantt-dialog-summary > .work-gantt-dependency-summary { margin-top: 0; }
 
 @keyframes work-gantt-stripes { to { background-position: 12px 0; } }
 @media (prefers-reduced-motion: reduce) {

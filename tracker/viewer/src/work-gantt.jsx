@@ -72,7 +72,7 @@ import {
   WORK_GANTT_ROW_HEIGHT,
   placeWorkGanttRollups,
 } from './work-gantt-layout.mjs';
-import { WorkGanttDependencies, WorkGanttDependencySummary } from './work-gantt-dependencies.jsx';
+import { WorkGanttDependencies } from './work-gantt-dependencies.jsx';
 import { WorkGanttInvestigation } from './work-gantt-investigation.jsx';
 import { getWorkDateDetails } from './work-schedule-labels.mjs';
 import { trackerInstanceConfig } from './instance-config';
@@ -1596,14 +1596,6 @@ export function WorkGantt({
                 idPrefix="work-gantt-dialog"
               />
               <div className="work-gantt-dialog-chart">{timeline('gantt-shell-expanded')}</div>
-              <div className="work-gantt-dialog-summary">
-                <WorkGanttDependencySummary
-                  activeId={activeId}
-                  rows={model.rows}
-                  dependencyEdges={model.dependencyEdges ?? []}
-                  entries={data?.itemById ?? EMPTY_MAP}
-                />
-              </div>
             </div>
           </DialogContent>
         </Dialog>
@@ -1618,12 +1610,6 @@ export function WorkGantt({
         onOpenFullDetails={openFullDetails}
       /> : null}
     </div>
-    <WorkGanttDependencySummary
-      activeId={activeId}
-      rows={model.rows}
-      dependencyEdges={model.dependencyEdges ?? []}
-      entries={data?.itemById ?? EMPTY_MAP}
-    />
     <WorkGanttMobileAgenda rows={mobileAgendaRows} data={data} onSelect={selectWorkItem} showForecast={showForecast} showActivity={showActivity} />
     <WorkGanttUnscheduledList ids={unscheduledIds} data={data} projection={projection} onSelect={selectWorkItem} />
   </div>;
