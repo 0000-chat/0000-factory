@@ -746,6 +746,9 @@ function updateManifest(outputPath) {
 }
 
 function renderStagedOutput(inputs, outputPath, data, provenance) {
+  const avatarNames = inputs.instance.data.layout === 'team-projection-v1'
+    ? inputs.companion?.directory?.map(entry => entry.avatar).filter(Boolean) ?? []
+    : inputs.records?.people?.map(person => person.avatar).filter(Boolean) ?? [];
   renderInstanceArtifacts({
     instance: inputs.instance,
     manifestDir: inputs.manifestDir,
@@ -754,7 +757,7 @@ function renderStagedOutput(inputs, outputPath, data, provenance) {
     provenance: {
       ...provenance,
       data,
-      avatarNames: inputs.companion?.directory?.map(entry => entry.avatar).filter(Boolean) ?? [],
+      avatarNames,
       ...(inputs.instance.features.weeklyPlanning ? { planningArchive: inputs.planningArchive } : {}),
     },
   });

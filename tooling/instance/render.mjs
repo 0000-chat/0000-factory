@@ -94,10 +94,10 @@ function avatarAssets(root, allowlist = null) {
   if (!(allowlist instanceof Set) || allowlist.size === 0) return [];
   const directory = join(root, 'assets', 'avatars');
   const stat = lstatSync(directory, { throwIfNoEntry: false });
-  if (!stat) throw new Error('assets/avatars is required by the safe team companion');
+  if (!stat) throw new Error('assets/avatars is required by declared local avatars');
   if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('assets/avatars must be a real directory');
   const entries = readdirSync(directory, { withFileTypes: true });
-  for (const name of allowlist) if (!entries.some(entry => entry.name === name)) throw new Error(`safe team companion avatar is missing: ${name}`);
+  for (const name of allowlist) if (!entries.some(entry => entry.name === name)) throw new Error(`declared avatar is missing: ${name}`);
   return entries.sort((left, right) => left.name.localeCompare(right.name)).filter(entry => allowlist.has(entry.name)).map(entry => {
     if (!entry.isFile() || entry.isSymbolicLink() || !AVATAR_ASSET.test(entry.name)) throw new Error(`avatar asset is not an approved local image: ${entry.name}`);
     const source = safeAssetPath(root, `assets/avatars/${entry.name}`, `assets/avatars/${entry.name}`);
