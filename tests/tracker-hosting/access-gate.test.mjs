@@ -200,6 +200,40 @@ test('valid Access JWT for the confirmed Don email serves the snapshot', async (
   assert.equal(response.headers.get('cache-control'), 'private, no-store');
 });
 
+test('public provenance is the only unauthenticated asset route', async () => {
+  const result = environment({
+    assetFetch: async request => {
+      assert.equal(new URL(request.url).pathname, '/factory-provenance.json');
+      return Response.json({
+        schemaVersion: 1,
+        factory: {
+          repository: 'https://github.com/0000-chat/0000-factory.git',
+          branch: 'codex/weekly-planning-archive',
+          commit: 'a'.repeat(40),
+        },
+        worker: 'synthetic-access-worker',
+      });
+    },
+  });
+  const response = await request(null, result.env, { path: '/factory-provenance.json?nonce=test' });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    schemaVersion: 1,
+    factory: {
+      repository: 'https://github.com/0000-chat/0000-factory.git',
+      branch: 'codex/weekly-planning-archive',
+      commit: 'a'.repeat(40),
+    },
+    worker: 'synthetic-access-worker',
+  });
+  assert.equal(response.headers.get('cache-control'), 'no-store, max-age=0');
+  assert.equal(result.assetCalls(), 1);
+
+  const privateResponse = await request(null, result.env, { path: '/data.json' });
+  assert.equal(privateResponse.status, 403);
+  assert.equal(result.assetCalls(), 1);
+});
+
 test('human email identity remains authorized on an app-typed Access JWT', async () => {
   mockAccessKeys();
   const token = await tokenFor({ type: 'app' });

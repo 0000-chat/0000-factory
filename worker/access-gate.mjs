@@ -150,6 +150,48 @@ function apiRequest(pathname) {
   return lower === '/api' || lower.startsWith('/api/') || lower.startsWith('/api%');
 }
 
+function isPublicProvenancePath(pathname) {
+  return pathname === '/factory-provenance.json';
+}
+
+async function publicProvenanceResponse(request, env) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return new Response('Method not allowed.\n', {
+      status: 405,
+      headers: { Allow: 'GET, HEAD', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
+    });
+  }
+  if (!env.ASSETS || typeof env.ASSETS.fetch !== 'function') return response('Provenance is unavailable.\n', 503);
+  const asset = await env.ASSETS.fetch(new Request(request.url, { method: 'GET' }));
+  if (!asset.ok) return response('Provenance is unavailable.\n', 503);
+  let value;
+  try {
+    value = await asset.json();
+  } catch {
+    return response('Provenance is unavailable.\n', 503);
+  }
+  const factory = value?.factory;
+  if (
+    value?.schemaVersion !== 1
+    || !factory
+    || factory.repository !== 'https://github.com/0000-chat/0000-factory.git'
+    || factory.branch !== 'codex/weekly-planning-archive'
+    || !/^[0-9a-f]{40}$/u.test(factory.commit ?? '')
+  ) return response('Provenance is unavailable.\n', 503);
+  return new Response(request.method === 'HEAD' ? null : JSON.stringify({
+    schemaVersion: 1,
+    factory: { repository: factory.repository, branch: factory.branch, commit: factory.commit },
+    worker: typeof value.worker === 'string' ? value.worker : undefined,
+  }) + (request.method === 'HEAD' ? '' : '\n'), {
+    status: 200,
+    headers: {
+      'Cache-Control': 'no-store, max-age=0',
+      'Content-Type': 'application/json; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+}
+
 function isPublishPath(pathname) {
   return pathname === '/api/publish' || pathname === '/api/publish/' || pathname.startsWith('/api/publish/');
 }
@@ -189,6 +231,8 @@ function createConfiguredWorker(instance, options) {
   return {
     instance,
     async fetch(request, env = {}) {
+      const pathname = new URL(request.url).pathname;
+      if (isPublicProvenancePath(pathname)) return publicProvenanceResponse(request, env);
       // This check is intentionally before token parsing, Access key fetches,
       // assets, and publisher credential construction.
       if (access.kind !== 'ready') return response('Private viewer is not configured.', 503);
@@ -203,7 +247,6 @@ function createConfiguredWorker(instance, options) {
         return response('Access required.', 403);
       }
 
-      const pathname = new URL(request.url).pathname;
       if (apiRequest(pathname)) {
         if (!isPublishPath(pathname)) return apiJsonError('Not found.', 404, {}, request.method);
         if (typeof verifiedActor !== 'string') {

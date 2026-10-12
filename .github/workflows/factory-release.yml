@@ -7,7 +7,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  actions: write
 
 concurrency:
   group: factory-release-${{ github.ref_name }}
@@ -61,49 +62,47 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Dispatch the immutable release to both consumers
+      - name: Publish the current release manifest
+        uses: actions/github-script@v7
+        env:
+          MANIFEST_PATH: ${{ runner.temp }}/factory-release.json
+          RELEASE_SHA: ${{ steps.manifest.outputs.release_sha }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('node:fs');
+            const path = 'releases/current.json';
+            const content = fs.readFileSync(process.env.MANIFEST_PATH, 'utf8');
+            let sha;
+            try {
+              const existing = await github.rest.repos.getContent({ owner: '0000-chat', repo: '0000-factory', path, ref: 'main' });
+              sha = existing.data.sha;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            await github.rest.repos.createOrUpdateFileContents({
+              owner: '0000-chat',
+              repo: '0000-factory',
+              path,
+              branch: 'main',
+              message: `ci: record Factory release ${process.env.RELEASE_SHA}`,
+              content: Buffer.from(content).toString('base64'),
+              ...(sha ? { sha } : {}),
+            });
+
+      - name: Start the default-branch runtime verifier
         uses: actions/github-script@v7
         env:
           RELEASE_SHA: ${{ steps.manifest.outputs.release_sha }}
           RELEASE_ID: ${{ steps.manifest.outputs.release_id }}
-          FACTORY_REPOSITORY: ${{ env.FACTORY_REPOSITORY }}
-          FACTORY_BRANCH: ${{ env.FACTORY_BRANCH }}
-          FACTORY_RELEASE_TOKEN: ${{ secrets.FACTORY_RELEASE_TOKEN }}
         with:
-          github-token: ${{ secrets.FACTORY_RELEASE_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
-            const targets = [
-              { owner: 'kapitolph', repo: 'nextpay-team-delivery', liveUrl: 'https://tracker.nextfinancial.xyz' },
-              { owner: 'donmasakayan', repo: 'nextpay-strategy', liveUrl: 'https://tracker.nextpay.0000.gold' },
-            ];
-            if (!/^[0-9a-f]{40}$/.test(process.env.RELEASE_SHA)) {
-              core.setFailed('release dispatch requires a full immutable Factory SHA');
-              return;
-            }
-            if (!process.env.FACTORY_RELEASE_TOKEN) {
-              core.setFailed('FACTORY_RELEASE_TOKEN is required for cross-repository dispatch');
-              return;
-            }
-            const failures = [];
-            for (const target of targets) {
-              try {
-                await github.rest.repos.createDispatchEvent({
-                  owner: target.owner,
-                  repo: target.repo,
-                  event_type: 'factory-release',
-                  client_payload: {
-                    schema_version: '1',
-                    release_id: process.env.RELEASE_ID,
-                    factory_repository: process.env.FACTORY_REPOSITORY,
-                    factory_branch: process.env.FACTORY_BRANCH,
-                    factory_sha: process.env.RELEASE_SHA,
-                    live_url: target.liveUrl,
-                    sent_at: new Date().toISOString(),
-                  },
-                });
-                core.info(`dispatched ${target.owner}/${target.repo} at ${process.env.RELEASE_SHA}`);
-              } catch (error) {
-                failures.push(`${target.owner}/${target.repo}: ${error.message}`);
-              }
-            }
-            if (failures.length) core.setFailed(`release dispatch failed: ${failures.join('; ')}`);
+            await github.rest.actions.createWorkflowDispatch({
+              owner: '0000-chat',
+              repo: '0000-factory',
+              workflow_id: 'factory-release-result.yml',
+              ref: 'main',
+              inputs: { release_id: process.env.RELEASE_ID, release_sha: process.env.RELEASE_SHA },
+            });
+            core.info(`runtime verifier queued for ${process.env.RELEASE_SHA}`);
