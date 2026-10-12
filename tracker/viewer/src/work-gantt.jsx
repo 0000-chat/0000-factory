@@ -1338,12 +1338,14 @@ export function WorkGantt({
   const model = useMemo(() => buildWorkGanttModel({
     projection,
     visibleIds: itemIds,
-    expandedIds,
+    // Owner mode is a filtered workload view: include every matching leaf
+    // regardless of the hierarchy depth preset used by the normal tree.
+    expandedIds: groupByOwner ? (allExpansion?.expandedIds ?? expandedIds) : expandedIds,
     contextualIds,
     releaseDates,
     itemsById: data?.itemById,
     showForecast,
-  }), [projection, itemIds, expandedIds, contextualIds, releaseDates, data?.itemById, showForecast]);
+  }), [allExpansion?.expandedIds, contextualIds, data?.itemById, expandedIds, groupByOwner, itemIds, projection, releaseDates, showForecast]);
   const navigationAnchor = useMemo(
     () => typeof navigationDate === 'string' ? chartDateForDay(navigationDate) : null,
     [navigationDate],
