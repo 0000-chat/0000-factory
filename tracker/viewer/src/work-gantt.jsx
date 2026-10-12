@@ -259,7 +259,7 @@ function ganttViewport(scrollElement) {
   return { sidebarWidth, viewportWidth };
 }
 
-function WorkGanttZoomControls({ zoom, onZoomOut, onZoomIn, onZoomChange, onReset, onFitAll, canFitAll, onFitSelectedWeek, canFitSelectedWeek, compact = false }) {
+function WorkGanttZoomControls({ zoom, onZoomOut, onZoomIn, onZoomChange, onReset, onFitAll, canFitAll, onFitFocusWindow, canFitFocusWindow, onFitSelectedWeek, canFitSelectedWeek, compact = false }) {
   const zoomLabel = formatGanttZoom(zoom);
   const handleSliderKeyDown = event => {
     const isArrow = event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown';
@@ -310,6 +310,9 @@ function WorkGanttZoomControls({ zoom, onZoomOut, onZoomIn, onZoomChange, onRese
     {compact ? null : <Button size="sm" variant="outline" type="button" onClick={onFitAll} disabled={!canFitAll} title="Fit all visible dated work">
       Fit all
     </Button>}
+    {onFitFocusWindow ? <Button className="work-gantt-fit-context" size="sm" variant="default" type="button" onClick={onFitFocusWindow} disabled={!canFitFocusWindow} title="Fit the four-week meeting context">
+      Fit 4 weeks
+    </Button> : null}
     {onFitSelectedWeek ? <Button size="sm" variant="outline" type="button" onClick={onFitSelectedWeek} disabled={!canFitSelectedWeek} title="Fit the selected Monday to Friday week">
       Fit selected week
     </Button> : null}
@@ -363,10 +366,10 @@ function WorkGanttOwnerGroupRow({ row }) {
     data-owner-group-id={row.ownerGroupKey}
     data-work-row-id={row.id}
     data-contextual="true"
-    aria-label={`${row.ownerGroupLabel} · ${row.ownerGroupCount} task${row.ownerGroupCount === 1 ? '' : 's'}`}
+    aria-label={`${row.ownerGroupLabel} · ${row.ownerGroupCount} work item${row.ownerGroupCount === 1 ? '' : 's'}`}
   >
     <span className="work-gantt-owner-group-label">{row.ownerGroupLabel}</span>
-    <span className="work-gantt-owner-group-count">{row.ownerGroupCount} task{row.ownerGroupCount === 1 ? '' : 's'}</span>
+    <span className="work-gantt-owner-group-count">{row.ownerGroupCount} work item{row.ownerGroupCount === 1 ? '' : 's'}</span>
   </div>;
 }
 
@@ -390,6 +393,8 @@ function WorkGanttSidebarRow({
   const { entry } = row;
   const title = item?.title ?? entry.title;
   const contextual = row.contextual === true || item?.contextOnly === true;
+  const itemKind = String(item?.type ?? item?.data?.type ?? '').toLowerCase();
+  const kindLabel = itemKind === 'project' ? 'Project' : itemKind === 'workstream' ? 'Workstream' : null;
   const summaryLabel = row.hasChildren
     ? entry.timeline.partial ? 'Partial summary' : 'Summary'
     : entry.timeline.partial ? 'Partial plan' : null;
@@ -449,9 +454,10 @@ function WorkGanttSidebarRow({
       >
         {item?.referenceCode ? <code className="work-reference-code work-gantt-reference-code">{item.referenceCode}</code> : null}
         <span className="work-gantt-title">{title}</span>
+        {kindLabel ? <span className="work-gantt-kind" title={`Work kind · ${kindLabel}`}>{kindLabel}</span> : null}
         <span className="work-gantt-title-meta">
           {status ? <span className="work-gantt-row-meta work-gantt-status" title={'Lifecycle status · ' + status}>{status}</span> : null}
-          {contextual ? <span className="work-gantt-row-meta">Context</span> : summaryLabel ? <span className="work-gantt-row-meta" title={summaryLabel}>{summaryLabel}</span> : null}
+          {contextual ? <span className="work-gantt-row-meta">Context</span> : kindLabel ? <span className="work-gantt-row-meta" title={`Work kind · ${kindLabel}`}>{kindLabel}</span> : summaryLabel ? <span className="work-gantt-row-meta" title={summaryLabel}>{summaryLabel}</span> : null}
           {row.ownerContextLabel ? <span className="work-gantt-row-meta work-gantt-owner-context" title={`Hierarchy context · ${row.ownerContextLabel}`}>In {row.ownerContextLabel}</span> : null}
           {entry.timeline.partial ? <span className="work-gantt-row-meta work-gantt-partial-badge" title={PARTIAL_APPROVED_HELP} aria-label={PARTIAL_APPROVED_HELP}>Partial dates</span> : null}
           {inferred ? <span className="work-gantt-row-meta work-gantt-inferred-badge" title="Approved display start is inferred from recorded evidence">Inferred start</span> : null}
@@ -605,6 +611,7 @@ function WorkGanttTimeline({
   onClearHover,
   dateRange,
   selectedWeek,
+  focusWindow = null,
   groupByOwner = false,
   itemsById = new Map(),
   presentationMode = false,
@@ -645,6 +652,10 @@ function WorkGanttTimeline({
   const selectedWeekRange = useMemo(
     () => selectedWeekGanttDateRange(selectedWeek),
     [selectedWeek?.start, selectedWeek?.end],
+  );
+  const focusWindowRange = useMemo(
+    () => selectedWeekGanttDateRange(focusWindow),
+    [focusWindow?.start, focusWindow?.end],
   );
   const canFitAll = displayedRows.some(row => row.fitMarks.length > 0);
   const canFitSelectedWeek = Boolean(selectedWeekRange);
@@ -730,14 +741,18 @@ function WorkGanttTimeline({
   }, [displayedRows, fitRange]);
 
   const fitSelectedWeek = useCallback(() => fitRange(selectedWeekRange, GANTT_SELECTED_WEEK_PADDING_DAYS), [fitRange, selectedWeekRange]);
+  const fitFocusWindow = useCallback(
+    () => fitRange(focusWindowRange ?? selectedWeekRange, focusWindowRange ? GANTT_FIT_PADDING_DAYS : GANTT_SELECTED_WEEK_PADDING_DAYS),
+    [fitRange, focusWindowRange, selectedWeekRange],
+  );
 
   useEffect(() => {
-    if (!selectedWeekRange) return undefined;
+    if (!focusWindowRange && !selectedWeekRange) return undefined;
     let frame = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(() => fitSelectedWeek());
+      frame = requestAnimationFrame(() => fitFocusWindow());
     });
     return () => cancelAnimationFrame(frame);
-  }, [fitSelectedWeek, selectedWeekRange?.startDay, selectedWeekRange?.endDay]);
+  }, [fitFocusWindow, focusWindowRange?.startDay, focusWindowRange?.endDay, selectedWeekRange?.startDay, selectedWeekRange?.endDay]);
 
   return <div
     ref={shellRef}
@@ -756,6 +771,8 @@ function WorkGanttTimeline({
       onReset={() => changeZoom(GANTT_DEFAULT_ZOOM)}
       onFitAll={fitAll}
       canFitAll={canFitAll}
+      onFitFocusWindow={focusWindowRange ? fitFocusWindow : null}
+      canFitFocusWindow={Boolean(focusWindowRange)}
       onFitSelectedWeek={fitSelectedWeek}
       canFitSelectedWeek={canFitSelectedWeek}
       compact={presentationMode}
@@ -787,6 +804,7 @@ function WorkGanttTimeline({
         navigationDate={navigationDate}
         showAllDependencies={showAllDependencies}
         showActivity={showActivity}
+        focusWeek={focusWindow?.focus ?? selectedWeek}
         layoutKey={`${zoom}:${className.includes('expanded') ? 'expanded' : 'compact'}:${rows.map(row => row.id).join(',')}`}
       />
     </GanttProvider>
@@ -813,6 +831,7 @@ function WorkGanttTimelineContent({
   navigationDate,
   showAllDependencies,
   showActivity,
+  focusWeek,
   layoutKey,
 }) {
   const gantt = useGantt();
@@ -821,6 +840,9 @@ function WorkGanttTimelineContent({
   const chartWidth = gantt.timelineData
     .flatMap(year => year?.quarters?.flatMap(quarter => quarter?.months ?? []) ?? [])
     .reduce((total, month) => total + (month?.days ?? 0), 0) * pixelsPerDay;
+  const focusWeekRange = selectedWeekGanttDateRange(focusWeek);
+  const focusWeekLeft = focusWeekRange ? dayLeft(focusWeekRange, chartStartDay, pixelsPerDay) : null;
+  const focusWeekWidth = focusWeekRange ? dayWidth(focusWeekRange, pixelsPerDay) : 0;
   const bodyRef = useRef(null);
 
   return <>
@@ -857,6 +879,13 @@ function WorkGanttTimelineContent({
       <GanttFeatureList className="work-gantt-feature-list">
         <GanttFeatureListGroup>
           <div ref={bodyRef} className="work-gantt-row-body">
+          {focusWeekLeft !== null && focusWeekWidth > 0 ? <span
+            className="work-gantt-focus-week"
+            aria-hidden="true"
+            data-focus-week-start={focusWeekRange.startDay}
+            data-focus-week-end={focusWeekRange.endDay}
+            style={{ left: `${focusWeekLeft}px`, width: `${focusWeekWidth}px` }}
+          /> : null}
           <div className="work-gantt-container-layer" aria-hidden="true">
             {rows.map(row => {
               if (!row.isExpanded || !row.parentEnvelope || row.rowIndex === undefined) return null;
@@ -1269,6 +1298,7 @@ export function WorkGantt({
   managerEnabled = false,
   navigationDate,
   selectedWeek = null,
+  focusWindow = null,
   groupByOwner = false,
   presentationMode = false,
   onExitPresentationMode,
@@ -1276,7 +1306,7 @@ export function WorkGantt({
   const [expanded, setExpanded] = useState(false);
   const forecastStatusId = useId();
   const [showForecast, setShowForecast] = useState(false);
-  const [showActivity, setShowActivity] = useState(false);
+  const [showActivity, setShowActivity] = useState(true);
   const [investigationId, setInvestigationId] = useState(null);
   const investigationTriggerRef = useRef(null);
   const [showAllDependencies, setShowAllDependencies] = useState(false);
@@ -1365,6 +1395,10 @@ export function WorkGantt({
     () => selectedWeekGanttDateRange(selectedWeek),
     [selectedWeek?.start, selectedWeek?.end],
   );
+  const focusWindowRange = useMemo(
+    () => selectedWeekGanttDateRange(focusWindow),
+    [focusWindow?.start, focusWindow?.end],
+  );
   const selectedWeekStartAnchor = useMemo(
     () => selectedWeekRange ? chartDateForDay(selectedWeekRange.startDay) : null,
     [selectedWeekRange],
@@ -1377,11 +1411,11 @@ export function WorkGantt({
     () => extendDateRangeToAnchor(
       extendDateRangeToAnchor(
         extendDateRangeToAnchor(model.dateRange, initialPositionAnchor),
-        selectedWeekStartAnchor,
+        focusWindowRange ? chartDateForDay(focusWindowRange.startDay) : selectedWeekStartAnchor,
       ),
-      selectedWeekEndAnchor,
+      focusWindowRange ? chartDateForDay(focusWindowRange.endDay) : selectedWeekEndAnchor,
     ),
-    [model.dateRange, initialPositionAnchor, selectedWeekEndAnchor, selectedWeekStartAnchor],
+    [focusWindowRange, model.dateRange, initialPositionAnchor, selectedWeekEndAnchor, selectedWeekStartAnchor],
   );
   const contextual = contextualIds instanceof Set ? contextualIds : new Set(contextualIds ?? []);
   const unscheduledIds = model.unscheduledIds.filter(id => !contextual.has(id));
@@ -1523,6 +1557,7 @@ export function WorkGantt({
     dateRange={viewportDateRange}
     releases={releases}
     selectedWeek={selectedWeek}
+    focusWindow={focusWindow}
     groupByOwner={groupByOwner}
     itemsById={data?.itemById ?? EMPTY_MAP}
     presentationMode={presentationMode}
@@ -1544,7 +1579,8 @@ export function WorkGantt({
         type="button"
         aria-pressed={showActivity}
         onClick={() => setShowActivity(value => !value)}
-      ><i className="legend-dot work-gantt-legend-observed" aria-hidden="true" />{showActivity ? 'Hide activity' : 'Show activity'}</button>
+      aria-label={showActivity ? 'Hide recorded activity' : 'Show recorded activity'}
+      ><i className="legend-dot work-gantt-legend-observed" aria-hidden="true" />Recorded activity · {showActivity ? 'Hide' : 'Show'}</button>
       <span><i className="legend-dot proposed" />Proposed schedule</span>
       <button
         className="work-gantt-forecast-toggle"

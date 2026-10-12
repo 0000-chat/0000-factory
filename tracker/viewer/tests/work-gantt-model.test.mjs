@@ -23,6 +23,7 @@ import {
   primaryWorkMark,
   proposedEnvelopeLabel,
   shortWorkDate,
+  selectedWeekGanttDateRange,
   workMarkDescription,
   workGanttDepthExpansion,
   workGanttFitDateRange,
@@ -80,6 +81,24 @@ test('selected week fit excludes distant release targets from its date range', (
   assert.equal(fitZoomForGanttDateRange('2026-10-12', '2026-10-16', 800, GANTT_DAILY_COLUMN_WIDTH, GANTT_SELECTED_WEEK_PADDING_DAYS), 380.952);
 });
 
+test('meeting focus windows keep four calendar weeks and their Monday to Friday focus', () => {
+  const focusWindow = {
+    start: '2026-10-05',
+    end: '2026-10-30',
+    focus: { start: '2026-10-12', end: '2026-10-16' },
+  };
+  assert.deepEqual(selectedWeekGanttDateRange(focusWindow), {
+    startDay: '2026-10-05',
+    endDay: '2026-10-30',
+    days: 26,
+  });
+  assert.deepEqual(selectedWeekGanttDateRange(focusWindow.focus), {
+    startDay: '2026-10-12',
+    endDay: '2026-10-16',
+    days: 5,
+  });
+});
+
 test('daily date ticks keep a readable minimum width as fit all changes zoom', () => {
   assert.equal(ganttDateTickInterval(100), 1);
   assert.equal(ganttDateTickInterval(50), 2);
@@ -105,6 +124,74 @@ test('owner grouping preserves canonical leaf IDs and does not count parents as 
   assert.deepEqual(grouped.map(row => row.id), ['owner-group:juan', 'owner-task']);
   assert.equal(grouped[0].ownerGroupCount, 1);
   assert.equal(grouped[1].ownerContextLabel, 'Project context');
+});
+
+test('owner grouping keeps an undated accepted leaf without inventing a bar', () => {
+  const undated = entry('undated-owner-task', {}, {
+    owner: 'owner-b',
+    ownerName: 'Owner B',
+  });
+  const model = buildWorkGanttModel({
+    projection: new Map([[undated.id, undated]]),
+    visibleIds: new Set([undated.id]),
+    expandedIds: new Set(),
+    itemsById: new Map([[undated.id, { id: undated.id, title: undated.title, owner: undated.owner, ownerName: undated.ownerName }]]),
+  });
+  const grouped = groupWorkGanttRowsByOwner(model.rows, new Map([
+    [undated.id, { id: undated.id, title: undated.title, owner: undated.owner, ownerName: undated.ownerName }],
+  ]));
+  assert.deepEqual(grouped.map(row => row.id), ['owner-group:owner-b', undated.id]);
+  assert.equal(grouped[0].ownerGroupCount, 1);
+  assert.equal(grouped[1].marks.length, 0);
+});
+
+test('owner grouping keeps accepted project and workstream records with direct work', () => {
+  const project = entry('beacon-project', {
+    ownPlannedStart: '2026-09-30',
+    ownPlannedDue: '2026-10-23',
+    plannedStart: '2026-09-30',
+    plannedDue: '2026-10-23',
+  }, { childIds: ['beacon-child'], owner: 'owner-a', ownerName: 'Owner A' });
+  const stream = entry('demo-workstream', {}, {
+    childIds: ['demo-child'],
+    owner: 'owner-b',
+    ownerName: 'Owner B',
+    own: {
+      state: 'recent',
+      firstDate: '2026-10-12',
+      lastDate: '2026-10-12',
+      evidenceIds: ['email-1'],
+    },
+  });
+  const structural = entry('structural-container', {}, {
+    childIds: ['structural-child'],
+    owner: 'owner-b',
+    ownerName: 'Owner B',
+  });
+  const projection = new Map([
+    [project.id, project],
+    [stream.id, stream],
+    [structural.id, structural],
+    ['beacon-child', entry('beacon-child', {}, { parentId: project.id })],
+    ['demo-child', entry('demo-child', {}, { parentId: stream.id })],
+    ['structural-child', entry('structural-child', {}, { parentId: structural.id })],
+  ]);
+  const items = new Map([
+    [project.id, { id: project.id, type: 'project', commitment: 'accepted', owner: project.owner, ownerName: project.ownerName }],
+    [stream.id, { id: stream.id, type: 'workstream', commitment: 'accepted', owner: stream.owner, ownerName: stream.ownerName }],
+    [structural.id, { id: structural.id, type: 'project', commitment: 'accepted', owner: structural.owner, ownerName: structural.ownerName }],
+  ]);
+  const model = buildWorkGanttModel({
+    projection,
+    visibleIds: new Set([project.id, stream.id, structural.id]),
+    expandedIds: new Set(),
+    itemsById: items,
+  });
+  const grouped = groupWorkGanttRowsByOwner(model.rows, items);
+  assert.deepEqual(grouped.filter(row => !row.ownerGroup).map(row => row.id), [project.id, stream.id]);
+  assert.equal(directMarksForWorkEntry(grouped.find(row => row.id === project.id)?.entry).some(mark => mark.sourceKind === 'approved'), true);
+  assert.equal(directMarksForWorkEntry(grouped.find(row => row.id === stream.id)?.entry).some(mark => mark.sourceKind === 'observed'), true);
+  assert.equal(grouped.some(row => row.id === structural.id), false);
 });
 
 function entry(id, timeline, overrides = {}) {
@@ -271,6 +358,20 @@ test('approved and observed end dates include their final calendar cell', () => 
   assert.equal(observed.endAt.getDate(), 4);
   assert.equal(workMarkLabel(approved), '10/2');
   assert.equal(shortWorkDate('2026-10-03'), '10/3');
+});
+
+test('completed work keeps a source-backed historical activity mark', () => {
+  const completed = entry('completed-history', {
+    observedStart: '2026-10-05',
+    observedEnd: '2026-10-09',
+  }, { completed: true, status: 'done' });
+  const model = buildWorkGanttModel({
+    projection: new Map([[completed.id, completed]]),
+    visibleIds: new Set([completed.id]),
+    expandedIds: new Set(),
+  });
+  const observed = model.rows[0].marks.find(mark => mark.sourceKind === 'observed');
+  assert.deepEqual([observed?.startDay, observed?.endDay], ['2026-10-05', '2026-10-09']);
 });
 
 test('accepted proposed marks keep their kind and remain visible in parent rollups', () => {
