@@ -73,8 +73,6 @@ import {
   workMarkDescription,
 } from './work-gantt-model.mjs';
 import {
-  WORK_GANTT_COLLAPSED_PARENT_LANES,
-  WORK_GANTT_LANES,
   WORK_GANTT_ROW_HEIGHT,
   placeWorkGanttRollups,
 } from './work-gantt-layout.mjs';
@@ -233,22 +231,10 @@ function rowHighlight(row, activeId, relatedIds, selectedId) {
   return 'none';
 }
 
-function workGanttInteractionLane(row, feature) {
-  if ((row.collapsed || row.isExpanded) && row.hasChildren) {
-    return WORK_GANTT_COLLAPSED_PARENT_LANES[feature.sourceKind] ?? WORK_GANTT_LANES[feature.sourceKind];
-  }
-
-  // A single source gets the full row so an isolated leaf mark is centered.
-  // Keep approved-plus-secondary rows on their established semantic lanes so
-  // their due marker and observed overrun remain visually comparable.
-  const sourceKinds = [...new Set((row.marks ?? []).map(mark => mark.sourceKind))];
-  if (!sourceKinds.includes('approved')) {
-    const ordered = ['proposed', 'observed', 'forecast'].filter(kind => sourceKinds.includes(kind));
-    const index = ordered.indexOf(feature.sourceKind);
-    if (index >= 0) return { index, count: Math.max(1, ordered.length) };
-  }
-  if (sourceKinds.length === 1 && sourceKinds[0] === 'approved') return { index: 0, count: 1 };
-  return WORK_GANTT_LANES[feature.sourceKind];
+function workGanttInteractionLane() {
+  // Every source shares one centered Kibo row so bar thickness never varies
+  // with source kind, parent state, or overlap count.
+  return { index: 0, count: 1 };
 }
 
 function accessibleMarkDescription(mark) {
