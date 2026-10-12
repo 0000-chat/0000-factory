@@ -17,7 +17,7 @@
 .work-undated-active-list strong, .work-undated-active-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work-undated-active-list strong { font-size: 0.72rem; }
 .work-undated-active-list small { color: var(--muted-foreground); font-size: 0.64rem; }
-.work-card-presentation { position: fixed; z-index: 200; inset: 12px; display: flex; max-height: calc(100vh - 24px); flex-direction: column; overflow: auto; margin: 0; box-shadow: 0 20px 70px color-mix(in srgb, #000 35%, transparent); }
+.work-card.work-card-presentation { position: fixed; z-index: 200; inset: 12px; display: flex; max-height: calc(100vh - 24px); flex-direction: column; overflow: auto; margin: 0; background: var(--card); box-shadow: 0 20px 70px color-mix(in srgb, #000 35%, transparent); }
 .work-card-presentation .surface-card-header { flex: 0 0 auto; }
 .work-card-presentation .work-view-switcher, .work-card-presentation .work-toolbar, .work-card-presentation .work-content-topbar, .work-card-presentation .external-deps, .work-card-presentation .work-undated-active, .work-card-presentation .work-next-week-note { display: none; }
 .work-card-presentation .work-content { flex: 1 1 auto; min-height: 0; overflow: auto; }
