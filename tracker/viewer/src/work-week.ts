@@ -8,6 +8,12 @@ export interface WorkWeek {
   readonly end: string;
 }
 
+export interface WorkWeekWindow {
+  readonly start: string;
+  readonly end: string;
+  readonly focus: WorkWeek;
+}
+
 function dateParts(value: Date): Record<string, string> {
   return Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
     timeZone: MANILA_ZONE,
@@ -60,6 +66,15 @@ export function workWeekForManilaDay(day: string): WorkWeek {
 export function shiftWorkWeek(week: WorkWeek, amount: number): WorkWeek {
   const start = dayOrdinal(week.start) ?? dayOrdinal(workWeekForManilaDay(manilaTodayKey()).start) ?? 0;
   return workWeekForManilaDay(dayAtOrdinal(start + amount * 7));
+}
+
+/** Four Monday–Friday weeks centered on the selected focus week. */
+export function workWindowForFocusWeek(focus: WorkWeek): WorkWeekWindow {
+  return {
+    start: shiftWorkWeek(focus, -1).start,
+    end: shiftWorkWeek(focus, 2).end,
+    focus,
+  };
 }
 
 /** Use a recorded range when available, otherwise the current Manila week. */

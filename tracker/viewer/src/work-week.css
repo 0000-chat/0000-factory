@@ -5,6 +5,8 @@
 .work-week-actions { color: var(--muted-foreground); }
 .work-week-nav { width: 32px; min-width: 32px; height: 32px; padding: 0; }
 .work-week-label { display: inline-flex; min-width: 116px; align-items: center; justify-content: center; gap: 6px; color: var(--foreground); font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
+.work-week-label > span { display: grid; gap: 2px; text-align: center; }
+.work-week-label small { color: var(--muted-foreground); font-size: 0.58rem; font-weight: 550; }
 .work-week-toggle { min-height: 32px; gap: 5px; padding-inline: 8px; font-size: 0.7rem; }
 .work-undated-active { display: grid; gap: 8px; margin: 8px 0 12px; border: 1px solid color-mix(in srgb, var(--amber, #d5a63b) 45%, var(--border)); border-radius: 9px; padding: 10px 12px; background: color-mix(in srgb, var(--amber, #d5a63b) 8%, var(--surface)); }
 .work-undated-active .group-heading { align-items: flex-start; }

@@ -1,7 +1,7 @@
 import { ArrowLeft, ArrowRight, CalendarDays, Presentation, Users } from 'lucide-react';
 import { Button } from './components/ui/button.tsx';
 import type { WorkWorkflow } from './routing-state';
-import type { WorkWeek } from './work-week';
+import type { WorkWeek, WorkWeekWindow } from './work-week';
 import { workWeekLabel } from './work-week';
 import './work-week.css';
 
@@ -10,6 +10,7 @@ export type WorkWorkflowSelection = WorkWorkflow | 'standard';
 interface WorkWeekControlsProps {
   readonly workflow: WorkWorkflowSelection;
   readonly selectedWeek: WorkWeek;
+  readonly focusWindow?: WorkWeekWindow | null;
   readonly onWorkflowChange: (workflow: WorkWorkflowSelection) => void;
   readonly onWeekChange: (direction: -1 | 1) => void;
   readonly groupByOwner: boolean;
@@ -27,6 +28,7 @@ const WORKFLOWS: ReadonlyArray<{ value: WorkWorkflow; label: string; description
 export function WorkWeekControls({
   workflow,
   selectedWeek,
+  focusWindow,
   onWorkflowChange,
   onWeekChange,
   groupByOwner,
@@ -50,7 +52,7 @@ export function WorkWeekControls({
       <Button className="work-week-nav" size="sm" variant="outline" aria-label="Previous week" title="Previous week" onClick={() => onWeekChange(-1)}>
         <ArrowLeft size={15} aria-hidden="true" />
       </Button>
-      <span className="work-week-label"><CalendarDays size={15} aria-hidden="true" /><span>{workWeekLabel(selectedWeek)}</span></span>
+      <span className="work-week-label"><CalendarDays size={15} aria-hidden="true" /><span>{workWeekLabel(selectedWeek)}{focusWindow ? <small>4-week context · {focusWindow.start}–{focusWindow.end}</small> : null}</span></span>
       <Button className="work-week-nav" size="sm" variant="outline" aria-label="Next week" title="Next week" onClick={() => onWeekChange(1)}>
         <ArrowRight size={15} aria-hidden="true" />
       </Button>
@@ -71,4 +73,3 @@ export function WorkWeekControls({
     </div>
   </section>;
 }
-
