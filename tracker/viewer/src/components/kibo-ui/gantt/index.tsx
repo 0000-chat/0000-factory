@@ -54,6 +54,11 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/tracker/viewer/src/components/ui/context-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/tracker/viewer/src/components/ui/tooltip";
 import { cn } from "@/tracker/viewer/src/lib/utils";
 
 const draggingAtom = atom(false);
@@ -889,8 +894,33 @@ export const GanttFeatureItemCard: FC<GanttFeatureItemCardProps> = ({
   ariaLabel,
   title,
   interactionLane,
-}) => onSelect ? (
-  <Card
+}) => {
+  if (!onSelect) return <GanttDraggableFeatureItemCard id={id} className={className}>{children}</GanttDraggableFeatureItemCard>;
+
+  const featureButton = <button
+    aria-label={ariaLabel ?? "Open scheduled work details"}
+    className="gantt-feature-button"
+    data-feature-id={id}
+    onClick={event => {
+      event.stopPropagation();
+      onSelect();
+    }}
+    onPointerDown={event => event.stopPropagation()}
+    style={interactionLane ? {
+      position: "absolute",
+      top: `${(interactionLane.index / interactionLane.count) * 100}%`,
+      right: 0,
+      left: 0,
+      height: `${100 / interactionLane.count}%`,
+      padding: 0,
+    } : undefined}
+    title={title}
+    type="button"
+  >
+    {interactionLane ? null : children}
+  </button>;
+
+  return <Card
     className={cn("h-full w-full rounded-md bg-background p-2 text-xs shadow-sm", className, "gantt-feature-clickable")}
     style={interactionLane ? {
       position: "relative",
@@ -919,30 +949,12 @@ export const GanttFeatureItemCard: FC<GanttFeatureItemCardProps> = ({
         {visualChildren}
       </div>
     ) : null}
-    <button
-      aria-label={ariaLabel ?? "Open scheduled work details"}
-      className="gantt-feature-button"
-      data-feature-id={id}
-      onClick={event => {
-        event.stopPropagation();
-        onSelect();
-      }}
-      onPointerDown={event => event.stopPropagation()}
-      style={interactionLane ? {
-        position: "absolute",
-        top: `${(interactionLane.index / interactionLane.count) * 100}%`,
-        right: 0,
-        left: 0,
-        height: `${100 / interactionLane.count}%`,
-        padding: 0,
-      } : undefined}
-      title={title}
-      type="button"
-    >
-      {interactionLane ? null : children}
-    </button>
-  </Card>
-) : <GanttDraggableFeatureItemCard id={id} className={className}>{children}</GanttDraggableFeatureItemCard>;
+    {title ? <Tooltip>
+      <TooltipTrigger asChild>{featureButton}</TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6} className="gantt-feature-tooltip">{title}</TooltipContent>
+    </Tooltip> : featureButton}
+  </Card>;
+};
 
 const GanttDraggableFeatureItemCard: FC<Pick<GanttFeatureItemCardProps, "id" | "children" | "className">> = ({
   id,
@@ -1337,6 +1349,7 @@ export const GanttMarker: FC<
   );
 
   const handleRemove = useCallback(() => onRemove?.(id), [onRemove, id]);
+  const dateLabel = formatDate(date, "MMM dd, yyyy");
 
   return (
     <div
@@ -1347,19 +1360,27 @@ export const GanttMarker: FC<
       }}
     >
       <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div
-            className={cn(
-              "group pointer-events-auto sticky top-0 flex select-auto flex-col flex-nowrap items-center justify-center whitespace-nowrap rounded-b-md bg-card px-2 py-1 text-foreground text-xs",
-              className
-            )}
-          >
-            {label}
-            <span className="max-h-[0] overflow-hidden opacity-80 transition-all group-hover:max-h-[2rem]">
-              {formatDate(date, "MMM dd, yyyy")}
-            </span>
-          </div>
-        </ContextMenuTrigger>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <ContextMenuTrigger asChild>
+              <div
+                aria-label={`${label} · ${dateLabel}`}
+                className={cn(
+                  "group pointer-events-auto sticky top-0 flex select-auto flex-col flex-nowrap items-center justify-center whitespace-nowrap rounded-b-md bg-card px-2 py-1 text-foreground text-xs",
+                  className
+                )}
+                role="img"
+                tabIndex={0}
+              >
+                {label}
+                <span className="max-h-[0] overflow-hidden opacity-80 transition-all group-hover:max-h-[2rem]">
+                  {dateLabel}
+                </span>
+              </div>
+            </ContextMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6} className="gantt-marker-tooltip">{`${label} · ${dateLabel}`}</TooltipContent>
+        </Tooltip>
         <ContextMenuContent>
           {onRemove ? (
             <ContextMenuItem
@@ -1709,6 +1730,7 @@ export const GanttToday: FC<GanttTodayProps> = ({ className }) => {
   );
 
   if (date < timelineStartDate || date > timelineEndDate) return null;
+  const dateLabel = formatDate(date, "MMM dd, yyyy");
 
   return (
     <div
@@ -1718,17 +1740,25 @@ export const GanttToday: FC<GanttTodayProps> = ({ className }) => {
         transform: `translateX(calc(var(--gantt-column-width) * ${offset} + ${innerOffset}px))`,
       }}
     >
-      <div
-        className={cn(
-          "group pointer-events-auto sticky top-0 flex select-auto flex-col flex-nowrap items-center justify-center whitespace-nowrap rounded-b-md bg-card px-2 py-1 text-foreground text-xs",
-          className
-        )}
-      >
-        {label}
-        <span className="max-h-[0] overflow-hidden opacity-80 transition-all group-hover:max-h-[2rem]">
-          {formatDate(date, "MMM dd, yyyy")}
-        </span>
-      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            aria-label={`${label} · ${dateLabel}`}
+            className={cn(
+              "group pointer-events-auto sticky top-0 flex select-auto flex-col flex-nowrap items-center justify-center whitespace-nowrap rounded-b-md bg-card px-2 py-1 text-foreground text-xs",
+              className
+            )}
+            role="img"
+            tabIndex={0}
+          >
+            {label}
+            <span className="max-h-[0] overflow-hidden opacity-80 transition-all group-hover:max-h-[2rem]">
+              {dateLabel}
+            </span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6} className="gantt-marker-tooltip">{`${label} · ${dateLabel}`}</TooltipContent>
+      </Tooltip>
       <div className={cn("h-full w-px bg-card", className)} />
     </div>
   );

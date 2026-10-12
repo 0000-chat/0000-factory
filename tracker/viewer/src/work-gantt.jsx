@@ -20,6 +20,12 @@ import {
   DialogTrigger,
 } from './components/ui/dialog.tsx';
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from './components/ui/tooltip.tsx';
+import {
   GanttFeatureList,
   GanttFeatureListGroup,
   GanttFeatureRow,
@@ -84,6 +90,13 @@ const EMPTY_MAP = new Map();
 const EMPTY_SET = new Set();
 const EXPANSION_LEVELS = [1, 2, 3, 'all'];
 const PARTIAL_APPROVED_HELP = 'Some work in this schedule has missing or incomplete approved dates.';
+
+function WorkGanttTooltip({ label, children }) {
+  return <Tooltip>
+    <TooltipTrigger asChild>{children}</TooltipTrigger>
+    <TooltipContent side="top" sideOffset={6} className="work-gantt-tooltip">{label}</TooltipContent>
+  </Tooltip>;
+}
 
 function rowStatusLabel(entry) {
   if (entry.completed) return 'Done';
@@ -480,11 +493,15 @@ function WorkGanttSidebarRow({
           enabled={managerEnabled}
           compact
         />
-        {row.collapsed && row.hasChildren ? <span
-          className="work-gantt-child-count"
-          title={childSummary}
-          aria-label={childSummary}
-        >{String(row.eligibleChildCount ?? 0) + ' children · ' + String(row.undatedChildCount ?? 0) + ' without approved dates'}</span> : null}
+        {row.collapsed && row.hasChildren ? <WorkGanttTooltip label={childSummary}>
+          <span
+            className="work-gantt-child-count"
+            title={childSummary}
+            aria-label={childSummary}
+            role="img"
+            tabIndex={0}
+          >{String(row.eligibleChildCount ?? 0) + ' children · ' + String(row.undatedChildCount ?? 0) + ' without approved dates'}</span>
+        </WorkGanttTooltip> : null}
       </div>
     </div>
   </div>;
@@ -1011,30 +1028,38 @@ function WorkGanttTimelineContent({
                 <span className="work-gantt-parent-track-label work-gantt-parent-track-label-plan" style={{ left: trackLabelLeft(row.ownApprovedMark) }}>{planLabel}</span>
                 <span className="work-gantt-parent-track-label work-gantt-parent-track-label-child" style={{ left: trackLabelLeft(childApprovedEnvelope) }}>{childLabel}</span>
               </> : null}
-              {row.collapsed && childProposedEnvelope ? <span
-                className="work-gantt-child-proposed-summary"
-                data-work-parent-id={row.id}
-                data-parent-state="collapsed"
-                data-summary-source-kind="proposed"
-                aria-label={`${title} · ${proposedChildLabel}${missingDatesSuffix}`}
-                title={`${title} · ${proposedChildLabel}${missingDatesSuffix}`}
-                style={{ left: `${dayLeft(childProposedEnvelope, chartStartDay, pixelsPerDay)}px`, width: `${Math.max(3, dayWidth(childProposedEnvelope, pixelsPerDay))}px` }}
-              ><span className="work-gantt-child-proposed-summary-label">{proposedChildLabel}</span></span> : null}
-              {row.collapsed && collapsedActivityEnvelope ? <span
-                className="work-gantt-child-activity-summary"
-                data-work-parent-id={row.id}
-                data-parent-state="collapsed"
-                data-summary-source-kind="observed"
-                aria-label={`${title} · recorded activity · ${collapsedActivityEnvelope.startDay} to ${collapsedActivityEnvelope.endDay}${missingDatesSuffix}`}
-                title={`${title} · recorded activity · ${collapsedActivityEnvelope.startDay} to ${collapsedActivityEnvelope.endDay}${missingDatesSuffix}`}
-                style={{
-                  left: `${dayLeft(collapsedActivityEnvelope, chartStartDay, pixelsPerDay)}px`,
-                  width: `${Math.max(3, dayWidth(collapsedActivityEnvelope, pixelsPerDay))}px`,
-                }}
-              ><span
-                className="work-gantt-child-summary-bracket-label"
-                style={{ left: `${Math.max(4, dayWidth(collapsedActivityEnvelope, pixelsPerDay) + 6)}px` }}
-              >Recorded activity · {workGanttRangeLabel(collapsedActivityEnvelope)}</span></span> : null}
+              {row.collapsed && childProposedEnvelope ? <WorkGanttTooltip label={`${title} · ${proposedChildLabel}${missingDatesSuffix}`}>
+                <span
+                  className="work-gantt-child-proposed-summary"
+                  data-work-parent-id={row.id}
+                  data-parent-state="collapsed"
+                  data-summary-source-kind="proposed"
+                  aria-label={`${title} · ${proposedChildLabel}${missingDatesSuffix}`}
+                  title={`${title} · ${proposedChildLabel}${missingDatesSuffix}`}
+                  role="img"
+                  tabIndex={0}
+                  style={{ left: `${dayLeft(childProposedEnvelope, chartStartDay, pixelsPerDay)}px`, width: `${Math.max(3, dayWidth(childProposedEnvelope, pixelsPerDay))}px` }}
+                ><span className="work-gantt-child-proposed-summary-label">{proposedChildLabel}</span></span>
+              </WorkGanttTooltip> : null}
+              {row.collapsed && collapsedActivityEnvelope ? <WorkGanttTooltip label={`${title} · recorded activity · ${collapsedActivityEnvelope.startDay} to ${collapsedActivityEnvelope.endDay}${missingDatesSuffix}`}>
+                <span
+                  className="work-gantt-child-activity-summary"
+                  data-work-parent-id={row.id}
+                  data-parent-state="collapsed"
+                  data-summary-source-kind="observed"
+                  aria-label={`${title} · recorded activity · ${collapsedActivityEnvelope.startDay} to ${collapsedActivityEnvelope.endDay}${missingDatesSuffix}`}
+                  title={`${title} · recorded activity · ${collapsedActivityEnvelope.startDay} to ${collapsedActivityEnvelope.endDay}${missingDatesSuffix}`}
+                  role="img"
+                  tabIndex={0}
+                  style={{
+                    left: `${dayLeft(collapsedActivityEnvelope, chartStartDay, pixelsPerDay)}px`,
+                    width: `${Math.max(3, dayWidth(collapsedActivityEnvelope, pixelsPerDay))}px`,
+                  }}
+                ><span
+                  className="work-gantt-child-summary-bracket-label"
+                  style={{ left: `${Math.max(4, dayWidth(collapsedActivityEnvelope, pixelsPerDay) + 6)}px` }}
+                >Recorded activity · {workGanttRangeLabel(collapsedActivityEnvelope)}</span></span>
+              </WorkGanttTooltip> : null}
               {row.isExpanded && row.parentEnvelope && parentEnvelopeLeft !== null && parentEnvelopeWidth > 0 ? <button
                 className="work-gantt-expanded-parent-label"
                 type="button"
@@ -1051,7 +1076,7 @@ function WorkGanttTimelineContent({
                 onClick={() => onSelect(row.id)}
                 onPointerDown={event => event.stopPropagation()}
               ><span className="work-gantt-expanded-parent-label-text">{item.referenceCode ? <code className="work-reference-code">{item.referenceCode}</code> : null}{parentLabelText}</span></button> : null}
-              {row.isExpanded && visibleChildSummaryEnvelope ? childApprovedEnvelope ? <button
+              {row.isExpanded && visibleChildSummaryEnvelope ? childApprovedEnvelope ? <WorkGanttTooltip label={`${title} · child schedule · ${visibleChildSummaryEnvelope.startDay} to ${visibleChildSummaryEnvelope.endDay}${missingDatesSuffix}`}><button
                 className="work-gantt-child-summary-bracket"
                 type="button"
                 data-work-parent-id={row.id}
@@ -1069,7 +1094,7 @@ function WorkGanttTimelineContent({
               ><span
                 className="work-gantt-child-summary-bracket-label"
                 style={{ left: `${Math.max(4, dayWidth(visibleChildSummaryEnvelope, pixelsPerDay) + 6)}px` }}
-              >{hasOwnApprovedPlan ? childLabel : workGanttRangeLabel(visibleChildSummaryEnvelope)}</span></button> : <span
+              >{hasOwnApprovedPlan ? childLabel : workGanttRangeLabel(visibleChildSummaryEnvelope)}</span></button></WorkGanttTooltip> : <WorkGanttTooltip label={`${title} · recorded activity · ${visibleChildSummaryEnvelope.startDay} to ${visibleChildSummaryEnvelope.endDay}${missingDatesSuffix}`}><span
                 className="work-gantt-child-activity-summary"
                 data-work-parent-id={row.id}
                 data-parent-state="expanded"
@@ -1077,6 +1102,8 @@ function WorkGanttTimelineContent({
                 data-summary-incomplete={row.childSummaryIncomplete ? 'true' : undefined}
                 aria-label={`${title} · recorded activity · ${visibleChildSummaryEnvelope.startDay} to ${visibleChildSummaryEnvelope.endDay}${missingDatesSuffix}`}
                 title={`${title} · recorded activity · ${visibleChildSummaryEnvelope.startDay} to ${visibleChildSummaryEnvelope.endDay}${missingDatesSuffix}`}
+                role="img"
+                tabIndex={0}
                 style={{
                   left: `${dayLeft(visibleChildSummaryEnvelope, chartStartDay, pixelsPerDay)}px`,
                   width: `${Math.max(3, dayWidth(visibleChildSummaryEnvelope, pixelsPerDay))}px`,
@@ -1084,8 +1111,8 @@ function WorkGanttTimelineContent({
               ><span
                 className="work-gantt-child-summary-bracket-label"
                 style={{ left: `${Math.max(4, dayWidth(visibleChildSummaryEnvelope, pixelsPerDay) + 6)}px` }}
-              >Recorded activity · {workGanttRangeLabel(visibleChildSummaryEnvelope)}</span></span> : null}
-              {row.isExpanded && childProposedEnvelope ? <button
+              >Recorded activity · {workGanttRangeLabel(visibleChildSummaryEnvelope)}</span></span></WorkGanttTooltip> : null}
+              {row.isExpanded && childProposedEnvelope ? <WorkGanttTooltip label={`${title} · ${proposedChildLabel}${missingDatesSuffix}`}><button
                 className="work-gantt-child-summary-bracket work-gantt-child-proposed-summary"
                 type="button"
                 data-work-parent-id={row.id}
@@ -1096,18 +1123,19 @@ function WorkGanttTimelineContent({
                 style={{ left: `${dayLeft(childProposedEnvelope, chartStartDay, pixelsPerDay)}px`, width: `${Math.max(3, dayWidth(childProposedEnvelope, pixelsPerDay))}px` }}
                 onClick={() => onSelect(row.id)}
                 onPointerDown={event => event.stopPropagation()}
-              ><span className="work-gantt-child-summary-bracket-label">{proposedChildLabel}</span></button> : null}
+              ><span className="work-gantt-child-summary-bracket-label">{proposedChildLabel}</span></button></WorkGanttTooltip> : null}
               {row.isExpanded && hasOwnApprovedPlan && childApprovedEnvelope ? <span
                 className="work-gantt-parent-track-label work-gantt-parent-track-label-expanded-plan"
                 style={{ left: trackLabelLeft(row.ownApprovedMark) }}
               >{planLabel}</span> : null}
-              {row.childSummaryIncomplete && row.hasChildren ? <span
+              {row.childSummaryIncomplete && row.hasChildren ? <WorkGanttTooltip label={`${incompleteScheduleLabel}; summary shows known dates.`}><span
                 className="work-gantt-missing-dates"
                 role="note"
                 title={`${incompleteScheduleLabel}; summary shows known dates.`}
                 aria-label={incompleteScheduleLabel}
+                tabIndex={0}
                 style={{ left: trackLabelLeft(childApprovedEnvelope ?? collapsedEnvelope ?? row.parentEnvelope) }}
-              >{incompleteScheduleLabel}</span> : null}
+              >{incompleteScheduleLabel}</span></WorkGanttTooltip> : null}
               {row.marks.length ? <GanttFeatureRow
                 rowId={row.id}
                 features={row.marks}
@@ -1190,18 +1218,21 @@ function WorkGanttTimelineContent({
                   aria-hidden="true"
                 />;
               })}
-              {row.collapsed && row.hasChildren && rollups.overflowCount > 0 ? <span
+              {row.collapsed && row.hasChildren && rollups.overflowCount > 0 ? <WorkGanttTooltip label={rollupDescription}><span
                 className="work-gantt-rollup-overflow"
                 role="img"
                 aria-label={rollupDescription}
                 title={rollupDescription}
+                tabIndex={0}
                 style={{ left: `${Math.max(2, overflowLeft)}px` }}
-              >+{rollups.overflowCount}</span> : null}
-              {!row.hasChildren && row.entry.timeline.partial ? <span
+              >+{rollups.overflowCount}</span></WorkGanttTooltip> : null}
+              {!row.hasChildren && row.entry.timeline.partial ? <WorkGanttTooltip label={PARTIAL_APPROVED_HELP}><span
                 className="work-gantt-missing-dates work-gantt-missing-dates-leaf"
                 title={PARTIAL_APPROVED_HELP}
                 aria-label="Dates incomplete"
-              >Dates incomplete</span> : null}
+                role="note"
+                tabIndex={0}
+              >Dates incomplete</span></WorkGanttTooltip> : null}
             </div>;
           })}
             <WorkGanttDependencies
@@ -1536,7 +1567,7 @@ export function WorkGantt({
     className={className}
   />;
 
-  return <div className={'schedule-view work-gantt-view' + (presentationMode ? ' work-gantt-presentation-mode' : '')} data-presentation-mode={presentationMode ? 'true' : undefined}>
+  return <TooltipProvider delayDuration={350}><div className={'schedule-view work-gantt-view' + (presentationMode ? ' work-gantt-presentation-mode' : '')} data-presentation-mode={presentationMode ? 'true' : undefined}>
     <div className="schedule-legend work-gantt-legend">
       <span><i className="legend-dot baseline" />Approved plan</span>
       <button
@@ -1612,5 +1643,5 @@ export function WorkGantt({
     </div>
     <WorkGanttMobileAgenda rows={mobileAgendaRows} data={data} onSelect={selectWorkItem} showForecast={showForecast} showActivity={showActivity} />
     <WorkGanttUnscheduledList ids={unscheduledIds} data={data} projection={projection} onSelect={selectWorkItem} />
-  </div>;
+  </div></TooltipProvider>;
 }

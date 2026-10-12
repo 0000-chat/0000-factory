@@ -1,4 +1,5 @@
 .work-gantt-view { min-width: 0; }
+.gantt-feature-tooltip, .gantt-marker-tooltip, .work-gantt-tooltip { max-width: min(340px, calc(100vw - 24px)); line-height: 1.35; white-space: normal; }
 .work-gantt-legend { align-items: center; gap: 8px 14px; }
 .work-gantt-legend .schedule-readonly { margin-left: auto; }
 .work-gantt-legend-observed { background: var(--warning); }
@@ -206,7 +207,7 @@
 .work-gantt-feature-row-wrap.is-collapsed-parent .work-gantt-child-rollup[data-rollup-track="1"] { bottom: 7px; }
 .work-gantt-child-rollup.is-point { width: 3px !important; }
 .work-gantt-child-rollup.is-point::after { position: absolute; top: -1px; left: 50%; width: 5px; height: 5px; border: 1px solid color-mix(in srgb, var(--primary) 72%, transparent); background: color-mix(in srgb, var(--primary) 45%, var(--card)); content: ""; transform: translateX(-50%) rotate(45deg); }
-.work-gantt-rollup-overflow { position: absolute; bottom: 0; z-index: 6; color: var(--muted-foreground); background: color-mix(in srgb, var(--card) 90%, transparent); font-size: 9px; font-weight: 750; line-height: 10px; pointer-events: none; white-space: nowrap; }
+.work-gantt-rollup-overflow { position: absolute; bottom: 0; z-index: 6; color: var(--muted-foreground); background: color-mix(in srgb, var(--card) 90%, transparent); font-size: 9px; font-weight: 750; line-height: 10px; pointer-events: auto; white-space: nowrap; }
 .work-gantt-feature-row-wrap.is-collapsed-parent .work-gantt-rollup-overflow { bottom: 7px; }
 .work-gantt-rollup-overflow:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .work-gantt-child-summary-bracket { position: absolute; top: 15px; z-index: 5; box-sizing: border-box; display: block; min-width: 3px; height: 28px; overflow: visible; padding: 0; border: 0; border-radius: 0; background: linear-gradient(to bottom, color-mix(in srgb, var(--muted-foreground) 72%, transparent) 0, color-mix(in srgb, var(--muted-foreground) 72%, transparent) 1px, transparent 1px); cursor: pointer; font: inherit; pointer-events: auto; }
@@ -218,7 +219,7 @@
 .work-gantt-child-proposed-summary { top: 43px; background: linear-gradient(to bottom, color-mix(in srgb, var(--proposed) 78%, transparent) 0, color-mix(in srgb, var(--proposed) 78%, transparent) 1px, transparent 1px); }
 .work-gantt-child-proposed-summary::before, .work-gantt-child-proposed-summary::after { background: color-mix(in srgb, var(--proposed) 78%, transparent); }
 .work-gantt-child-proposed-summary-label { position: absolute; top: 5px; left: 4px; color: var(--proposed); font-size: 10px; font-weight: 650; line-height: 1.1; white-space: nowrap; }
-.work-gantt-child-activity-summary { position: absolute; top: 15px; z-index: 5; box-sizing: border-box; display: block; min-width: 3px; height: 28px; overflow: visible; background: linear-gradient(to bottom, color-mix(in srgb, var(--warning) 78%, transparent) 0, color-mix(in srgb, var(--warning) 78%, transparent) 1px, transparent 1px); color: var(--warning); font-size: 10px; font-weight: 650; line-height: 1.1; pointer-events: none; }
+.work-gantt-child-activity-summary { position: absolute; top: 15px; z-index: 5; box-sizing: border-box; display: block; min-width: 3px; height: 28px; overflow: visible; background: linear-gradient(to bottom, color-mix(in srgb, var(--warning) 78%, transparent) 0, color-mix(in srgb, var(--warning) 78%, transparent) 1px, transparent 1px); color: var(--warning); font-size: 10px; font-weight: 650; line-height: 1.1; pointer-events: auto; }
 .work-gantt-child-activity-summary::before, .work-gantt-child-activity-summary::after { position: absolute; top: 0; width: 1px; height: 13px; background: color-mix(in srgb, var(--warning) 78%, transparent); content: ""; }
 .work-gantt-child-activity-summary::before { left: 0; }
 .work-gantt-child-activity-summary::after { right: 0; }
@@ -227,7 +228,8 @@
 .work-gantt-parent-track-label-plan { top: 4px; }
 .work-gantt-parent-track-label-child { top: 42px; }
 .work-gantt-parent-track-label-expanded-plan { top: 42px; color: var(--primary); }
-.work-gantt-missing-dates { position: absolute; top: 49px; left: 4px; z-index: 8; max-width: min(220px, calc(100vw - 36px)); overflow: hidden; padding: 1px 5px; border: 1px solid color-mix(in srgb, var(--muted-foreground) 30%, var(--card)); border-radius: 4px; background: color-mix(in srgb, var(--card) 94%, transparent); color: var(--muted-foreground); font-size: 9px; font-weight: 650; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.work-gantt-missing-dates { position: absolute; top: 49px; left: 4px; z-index: 8; max-width: min(220px, calc(100vw - 36px)); overflow: hidden; padding: 1px 5px; border: 1px solid color-mix(in srgb, var(--muted-foreground) 30%, var(--card)); border-radius: 4px; background: color-mix(in srgb, var(--card) 94%, transparent); color: var(--muted-foreground); font-size: 9px; font-weight: 650; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; pointer-events: auto; }
+.work-gantt-missing-dates:focus-visible, .work-gantt-child-count:focus-visible, .work-gantt-child-activity-summary:focus-visible, .work-gantt-child-proposed-summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .work-gantt-missing-dates-leaf { top: 8px; left: 6px; }
 .tracker-work-gantt[data-animations-paused="true"] .work-gantt-motion { animation: none; }
 .tracker-work-gantt-today { z-index: 20; color: var(--foreground); }
