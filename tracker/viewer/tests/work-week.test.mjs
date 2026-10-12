@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseWorkSearch } from '../src/routing-state.ts';
-import { shiftWorkWeek, workWeekForManilaDay, workflowSearch } from '../src/work-week.ts';
+import { shiftWorkWeek, workWeekForManilaDay, workWindowForFocusWeek, workflowSearch } from '../src/work-week.ts';
 
 test('Manila work weeks are Monday through Friday and navigate by seven days', () => {
   const current = workWeekForManilaDay('2026-10-12');
@@ -9,6 +9,15 @@ test('Manila work weeks are Monday through Friday and navigate by seven days', (
   assert.deepEqual(shiftWorkWeek(current, 1), { start: '2026-10-19', end: '2026-10-23' });
   assert.deepEqual(shiftWorkWeek(current, -1), { start: '2026-10-05', end: '2026-10-09' });
   assert.deepEqual(workWeekForManilaDay('2026-10-18'), current);
+});
+
+test('This week uses a four-work-week context while retaining the selected focus week', () => {
+  const focus = workWeekForManilaDay('2026-10-12');
+  assert.deepEqual(workWindowForFocusWeek(focus), {
+    start: '2026-10-05',
+    end: '2026-10-30',
+    focus,
+  });
 });
 
 test('workflow entry defaults preserve the current week for review and advance for planning', () => {

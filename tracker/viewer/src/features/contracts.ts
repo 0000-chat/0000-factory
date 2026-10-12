@@ -4,7 +4,7 @@ import type { WorkActivityControls } from '../work-activity-controller';
 import type { ParsedTaskContentDraft } from '../task-drafts';
 import type { TaskEditController } from '../router-context';
 import type { ManagerProjection } from '../work-manager-types';
-import type { WorkWeek } from '../work-week';
+import type { WorkWeek, WorkWeekWindow } from '../work-week';
 
 export type WorkMode = 'tree' | 'table' | 'calendar' | 'kanban' | 'gantt';
 
@@ -26,6 +26,7 @@ export interface WorkViewProps {
   navigationControls?: ReactNode;
   navigationDate?: string | null;
   selectedWeek?: WorkWeek;
+  focusWindow?: WorkWeekWindow | null;
   workflow?: 'standard' | 'this-week' | 'daily-review' | 'next-week';
   onWorkflowChange?: (workflow: 'standard' | 'this-week' | 'daily-review' | 'next-week') => void;
   onWeekChange?: (direction: -1 | 1) => void;
