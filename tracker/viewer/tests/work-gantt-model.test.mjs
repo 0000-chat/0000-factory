@@ -7,6 +7,8 @@ import {
   chartDateForDay,
   clampGanttZoom,
   directMarksForWorkEntry,
+  continuousTimelineForMarks,
+  continuousTimelineForWorkEntry,
   fitZoomForGanttDateRange,
   formatGanttZoom,
   groupWorkGanttRowsByOwner,
@@ -444,6 +446,63 @@ test('accepted proposed marks keep their kind and remain visible in parent rollu
     { sourceKind: 'proposed', proposedScheduleKind: 'checkpoint' },
     { sourceKind: 'proposed', proposedScheduleKind: 'slice' },
   ] }), 'Proposed schedules');
+});
+
+test('continuous timeline extends an early activity span through scheduled dates without darkening the gap', () => {
+  const timeline = continuousTimelineForMarks([
+    { sourceKind: 'observed', startDay: '2026-10-08', endDay: '2026-10-09' },
+    { sourceKind: 'approved', startDay: '2026-10-10', endDay: '2026-10-15' },
+    { sourceKind: 'observed', startDay: '2026-10-13', endDay: '2026-10-14' },
+  ]);
+
+  assert.deepEqual([timeline.startDay, timeline.endDay], ['2026-10-08', '2026-10-15']);
+  assert.deepEqual(timeline.observedIntervals, [
+    { startDay: '2026-10-08', endDay: '2026-10-09' },
+    { startDay: '2026-10-13', endDay: '2026-10-14' },
+  ]);
+  assert.deepEqual([timeline.scheduledStartDay, timeline.scheduledEndDay], ['2026-10-10', '2026-10-15']);
+});
+
+test('continuous timeline rolls up direct parent and child dates without inventing undated child activity', () => {
+  const parent = entry('continuous-parent', {}, {
+    own: { state: 'recent', firstDate: '2026-10-10', lastDate: '2026-10-11' },
+    childIds: ['continuous-child', 'continuous-undated'],
+  });
+  const child = entry('continuous-child', {
+    ownPlannedStart: '2026-10-15',
+    ownPlannedDue: '2026-10-16',
+  }, {
+    parentId: parent.id,
+    own: { state: 'recent', firstDate: '2026-10-06', lastDate: '2026-10-07' },
+  });
+  const undated = entry('continuous-undated', {}, { parentId: parent.id });
+  const projection = new Map([
+    [parent.id, parent],
+    [child.id, child],
+    [undated.id, undated],
+  ]);
+
+  const timeline = continuousTimelineForWorkEntry(parent, projection);
+  assert.deepEqual([timeline.startDay, timeline.endDay], ['2026-10-06', '2026-10-16']);
+  assert.deepEqual(timeline.observedIntervals, [
+    { startDay: '2026-10-06', endDay: '2026-10-07' },
+    { startDay: '2026-10-10', endDay: '2026-10-11' },
+  ]);
+  assert.deepEqual([timeline.scheduledStartDay, timeline.scheduledEndDay], ['2026-10-15', '2026-10-16']);
+});
+
+test('continuous timeline supports only observed and only scheduled tasks', () => {
+  const observedOnly = continuousTimelineForMarks([
+    { sourceKind: 'observed', startDay: '2026-10-05', endDay: '2026-10-06' },
+  ]);
+  const scheduledOnly = continuousTimelineForMarks([
+    { sourceKind: 'approved', startDay: '2026-10-12', endDay: '2026-10-16' },
+  ]);
+
+  assert.deepEqual([observedOnly.startDay, observedOnly.endDay], ['2026-10-05', '2026-10-06']);
+  assert.deepEqual(observedOnly.observedIntervals, [{ startDay: '2026-10-05', endDay: '2026-10-06' }]);
+  assert.deepEqual([scheduledOnly.startDay, scheduledOnly.endDay], ['2026-10-12', '2026-10-16']);
+  assert.deepEqual(scheduledOnly.observedIntervals, []);
 });
 
 test('missing approved due does not create a plan and keeps an explicit forecast source-backed', () => {

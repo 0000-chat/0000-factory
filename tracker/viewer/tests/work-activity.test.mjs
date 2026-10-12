@@ -129,6 +129,11 @@ test('activity age and streaks are per task, count weekdays once, and skip weeke
   assert.deepEqual(projection.get('child').own.streak, { days: 1, endDate: '2026-10-06' });
   assert.equal(projection.get('parent').descendants.streaks[0].days, 1);
   assert.deepEqual(projection.get('hole').own.streak, { days: 1, endDate: '2026-10-07' });
+  assert.deepEqual(projection.get('hole').own.observedIntervals, [
+    { startDay: '2026-10-05', endDay: '2026-10-05' },
+    { startDay: '2026-10-07', endDay: '2026-10-07' },
+    { startDay: '2026-10-10', endDay: '2026-10-10' },
+  ]);
   assert.equal(projection.get('hole').own.ageBusinessDays, 1);
   assert.deepEqual(projection.get('weekend-streak').own.streak, { days: 2, endDate: '2026-10-12' });
 });

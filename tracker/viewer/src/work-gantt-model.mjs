@@ -23,6 +23,7 @@ const MARK_STATUS = {
   observed: { id: 'observed', name: 'Observed activity', color: 'var(--activity-quiet)' },
   proposed: { id: 'proposed', name: 'Proposed plan', color: 'var(--proposed)' },
   forecast: { id: 'forecast', name: 'Forecast', color: 'var(--forecast)' },
+  timeline: { id: 'timeline', name: 'Work timeline', color: 'var(--work-gantt-plan-color)' },
 };
 
 export function proposedScheduleLabel(kind) {
@@ -192,6 +193,7 @@ function makeMark(entry, kind, startDay, endDay, {
   partial = entry.timeline.partial === true,
   proposedScheduleKind = null,
   acceptedProposal = false,
+  idSuffix = null,
 } = {}) {
   if (!inOrder(startDay, endDay)) return null;
   const chartEndDay = addCalendarDay(endDay);
@@ -203,11 +205,11 @@ function makeMark(entry, kind, startDay, endDay, {
     ? { ...MARK_STATUS.proposed, id: `proposed-${proposedScheduleKind ?? 'span'}`, name: proposedScheduleLabel(proposedScheduleKind) }
     : MARK_STATUS[kind];
   return {
-    id: entry.id + ':' + kind,
+    id: entry.id + ':' + kind + (idSuffix ? ':' + idSuffix : ''),
     itemId: entry.id,
     name: status.name,
     status,
-    kind: kind === 'observed' ? 'baseline' : kind,
+    kind: kind === 'observed' || kind === 'timeline' ? 'baseline' : kind,
     sourceKind: kind,
     laneKey: kind,
     dueDay: dueDay ?? (kind === 'approved' || kind === 'observed' ? entry.timeline.plannedDue ?? null : null),
@@ -249,13 +251,17 @@ export function directMarksForWorkEntry(entry) {
   const approved = approvedPlanMarkForWorkEntry(entry);
   if (approved) marks.push(approved);
 
-  const observedStart = entry.own?.firstDate ?? null;
-  const observedEnd = entry.own?.lastDate ?? null;
-  if (observedStart && observedEnd && observedStart <= observedEnd) {
-    marks.push(makeMark(entry, 'observed', observedStart, observedEnd, {
+  const observedIntervals = Array.isArray(entry.own?.observedIntervals) && entry.own.observedIntervals.length
+    ? entry.own.observedIntervals
+    : entry.own?.firstDate && entry.own?.lastDate
+      ? [{ startDay: entry.own.firstDate, endDay: entry.own.lastDate }]
+      : [];
+  observedIntervals.forEach((interval, index) => {
+    marks.push(makeMark(entry, 'observed', interval.startDay, interval.endDay, {
       dueDay: timeline.ownPlannedDue ?? null,
+      idSuffix: observedIntervals.length > 1 ? index + 1 : null,
     }));
-  }
+  });
   if (timeline.ownProposedStart && timeline.ownProposedDue) {
     marks.push(makeMark(entry, 'proposed', timeline.ownProposedStart, timeline.ownProposedDue, {
       proposedScheduleKind: timeline.ownProposedScheduleKind ?? null,
@@ -440,6 +446,86 @@ function sourceEnvelope(marks) {
   };
 }
 
+function nextCalendarDay(day) {
+  const ordinal = dayOrdinal(day);
+  return ordinal === null ? null : shiftedDay(day, 1);
+}
+
+function mergeDayIntervals(intervals) {
+  const sorted = intervals
+    .filter(interval => inOrder(interval?.startDay, interval?.endDay))
+    .sort((left, right) => left.startDay.localeCompare(right.startDay) || left.endDay.localeCompare(right.endDay));
+  const merged = [];
+  for (const interval of sorted) {
+    const previous = merged.at(-1);
+    if (!previous || (nextCalendarDay(previous.endDay) ?? '') < interval.startDay) {
+      merged.push({ startDay: interval.startDay, endDay: interval.endDay });
+    } else if (interval.endDay > previous.endDay) {
+      previous.endDay = interval.endDay;
+    }
+  }
+  return merged;
+}
+
+/**
+ * Collapse source marks into one continuous task span. Scheduled marks provide
+ * the light base range; observed marks remain separate intervals for dark
+ * overlays so gaps in recorded activity stay visible as planned-only time.
+ */
+export function continuousTimelineForMarks(marks = []) {
+  const dated = (Array.isArray(marks) ? marks : [])
+    .filter(mark => inOrder(mark?.startDay, mark?.endDay));
+  if (!dated.length) return null;
+
+  const startDay = dated.reduce((earliest, mark) => mark.startDay < earliest ? mark.startDay : earliest, dated[0].startDay);
+  const endDay = dated.reduce((latest, mark) => mark.endDay > latest ? mark.endDay : latest, dated[0].endDay);
+  const scheduled = dated.filter(mark => mark.sourceKind !== 'observed');
+  const observed = mergeDayIntervals(dated
+    .filter(mark => mark.sourceKind === 'observed')
+    .map(mark => ({ startDay: mark.startDay, endDay: mark.endDay })));
+  const sourceKinds = MARK_PRIORITY.filter(kind => dated.some(mark => mark.sourceKind === kind));
+
+  return {
+    startDay,
+    endDay,
+    scheduledStartDay: scheduled.length
+      ? scheduled.reduce((earliest, mark) => mark.startDay < earliest ? mark.startDay : earliest, scheduled[0].startDay)
+      : null,
+    scheduledEndDay: scheduled.length
+      ? scheduled.reduce((latest, mark) => mark.endDay > latest ? mark.endDay : latest, scheduled[0].endDay)
+      : null,
+    observedIntervals: observed,
+    sourceKinds,
+    marks: dated,
+  };
+}
+
+function directTimelineMarks(entry, showForecast = true) {
+  const direct = directMarksForWorkEntry(entry);
+  const hasChildren = childIdsOf(entry).length > 0;
+  if (hasChildren || direct.some(mark => mark.sourceKind !== 'observed')) {
+    return direct.filter(mark => showForecast || mark.sourceKind !== 'forecast');
+  }
+
+  // Fixtures and older projections may expose only aggregate timeline fields
+  // for a leaf. Preserve those leaf dates without using aggregate parent dates.
+  return marksForWorkEntry(entry).filter(mark => showForecast || mark.sourceKind !== 'forecast');
+}
+
+/** Build one connected timeline mark for an entry and its complete subtree. */
+export function continuousTimelineForWorkEntry(entry, projection, { showForecast = true } = {}) {
+  if (!entry?.id || !(projection instanceof Map)) return null;
+  const subtreeIds = projectionSubtreeIds(buildProjectionChildren(projection), entry.id);
+  const marks = subtreeIds.flatMap(id => directTimelineMarks(projection.get(id), showForecast));
+  const timeline = continuousTimelineForMarks(marks);
+  if (!timeline) return null;
+  const mark = makeMark(entry, 'timeline', timeline.startDay, timeline.endDay);
+  mark.name = 'Work timeline';
+  mark.status = MARK_STATUS.timeline;
+  mark.timeline = timeline;
+  return { ...timeline, mark };
+}
+
 function buildEligibleTree(projection, eligibleIds) {
   const requested = new Set([...eligibleIds].filter(id => projection.has(id)));
   const eligible = new Set([...projection.keys()].filter(id => requested.has(id)));
@@ -618,6 +704,7 @@ function rowPreorder(projection, tree, expandedIds, contextualIds, {
     row.ownApprovedMark = ownApprovedMark;
     row.ownApprovedIncomplete = row.hasChildren && Boolean(row.entry.timeline.ownPlannedStart) !== Boolean(row.entry.timeline.ownPlannedDue);
     row.parentEnvelope = envelope;
+    row.timelineBar = continuousTimelineForWorkEntry(row.entry, projection, { showForecast });
     row.envelopeStartDay = envelope?.startDay ?? null;
     row.envelopeEndDay = envelope?.endDay ?? null;
     row.envelopePrimaryKind = envelope?.primaryKind ?? null;
@@ -853,6 +940,15 @@ export function workMarkLabel(mark) {
 }
 
 export function workMarkDescription(mark) {
+  if (mark.sourceKind === 'timeline') {
+    const observed = (mark.timeline?.observedIntervals ?? [])
+      .map(interval => interval.startDay === interval.endDay
+        ? interval.startDay
+        : interval.startDay + ' to ' + interval.endDay)
+      .join(', ');
+    return 'Work timeline · ' + mark.startDay + ' to ' + mark.endDay
+      + (observed ? ' · recorded activity ' + observed : ' · no recorded activity');
+  }
   const label = mark.sourceKind === 'approved'
     ? mark.point ? 'Approved due date' : mark.inferred ? 'Approved plan with inferred display start' : 'Approved plan'
     : mark.sourceKind === 'observed'
