@@ -157,17 +157,31 @@ projection schema or create a publication channel. Its envelope is
 * `schedules` entries with a projected `taskId`, an approval-bound
   `approvedEnd`, and an optional approval-bound `approvedStart`;
 * `taskMetadata` entries with only the safe status, commitment, phase, and
-  health-state enums; and
+  health-state enums;
+* optional `activitySummaries` entries with a projected `taskId`, a count, and
+  the latest UTC timestamp; and
 * digest, audit, and disabled-publish fields that bind the supplement to the
   exact projection and approved roster.
 
-For a full current-task copy, a directory-only companion sets
-`mode: "directory-only-v3"`, keeps `schedules` and `taskMetadata` empty, and
-sets `audit.scheduleRule` to `directory-only-no-task-schedules`. Its
-`audit.sourceTaskCount` is the count of raw tasks in the bound full projection;
-it does not claim task metadata or schedule provenance. The full projection
-remains authoritative for every task field, status, and date. The companion
-contributes only the approved directory and its local avatar basenames.
+For a full current-task copy, a companion may use
+`mode: "full-current-v1"` (or omit `mode` for the compatible current
+producer). It may then carry approved schedule ranges, safe task metadata, and
+count-only activity summaries for the tasks in the bound projection. Activity
+summaries are normalized into generic recent-activity indicators; they contain
+no event text, source links, credentials, or private references. Approved
+schedule ranges remain the only companion source for schedule spans, while the
+projection remains authoritative for task identity and hierarchy. Context rows
+retain the projection's safe owner and health values; absent approved values
+remain unknown.
+
+For the legacy full current-task copy, a directory-only companion sets
+`mode: "directory-only-v3"`, keeps `schedules`, `taskMetadata`, and
+`activitySummaries` empty, and sets `audit.scheduleRule` to
+`directory-only-no-task-schedules`. Its `audit.sourceTaskCount` is the count
+of raw tasks in the bound full projection; it does not claim task metadata,
+schedule, or activity provenance. The full projection remains authoritative
+for every task field, status, and date. The companion contributes only the
+approved directory and its local avatar basenames.
 
 The `directoryRosterDigest` setting is a trusted constraint supplied by the
 consumer's approved roster configuration. The build must verify that its

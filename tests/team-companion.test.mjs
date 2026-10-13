@@ -121,6 +121,30 @@ function directoryOnlyCompanion(projectionValue) {
   return { ...value, companionDigest: digest(value) };
 }
 
+function fullCurrentCompanion(projectionValue) {
+  const value = {
+    schemaVersion: 1, kind: 'team-safe-companion',
+    projectionDigest: digest({ ...projectionValue, publish: { ...projectionValue.publish, initialProjectionDigest: null } }),
+    projectionRevision: projectionValue.revision, policyRevision: projectionValue.policyRevision, generatedAt: '2026-10-12T00:00:00Z',
+    directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }],
+    schedules: [{ taskId: 'full-approved', approvedStart: '2026-10-18', approvedEnd: '2026-10-20' }],
+    taskMetadata: [
+      { taskId: 'full-approved', status: 'active', commitment: 'accepted', phase: 'build', healthState: 'on-track' },
+      { taskId: 'full-forecast', status: 'queued', commitment: 'planned', phase: 'discovery', healthState: 'unknown' },
+    ],
+    activitySummaries: [
+      { taskId: 'full-approved', eventCount: 3, latestOccurredAt: '2026-10-20T03:00:00Z' },
+      { taskId: 'full-forecast', eventCount: 0, latestOccurredAt: null },
+    ],
+    audit: {
+      directoryRule: 'approved-roster-safe-display-metadata-only', scheduleRule: 'approved-endpoint-only-with-existing-task-proof',
+      sourceTaskCount: projectionValue.tasks.length, rosterDigest: digest(['person-1']),
+    },
+    publish: { reviewed: false, activationEnabled: false },
+  };
+  return { ...value, companionDigest: digest(value) };
+}
+
 test('companion metadata drives safe identity and approved endpoint rendering', () => {
   const value = companion();
   assert.equal(validateTeamCompanion(value).valid, true);
@@ -187,6 +211,53 @@ test('directory-only v3 binds full task input while preserving canonical task fi
     });
     assert.deepEqual(wrongRoster.directory, []);
     assert.equal(wrongRoster.trustedRosterMismatch, true);
+  } finally {
+    unlinkSync(join(root, 'projection.json'));
+    unlinkSync(join(root, 'companion.json'));
+  }
+});
+
+test('full-current companion normalizes approved ranges, safe health, hierarchy ownership, and redacted activity', () => {
+  const projectionValue = fullTaskProjection();
+  const companionValue = fullCurrentCompanion(projectionValue);
+  assert.equal(validateTeamCompanion(companionValue, projectionValue).valid, true);
+  const root = join(CHECK_ROOT, 'full-current-companion');
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, 'projection.json'), `${JSON.stringify(projectionValue)}\n`, { mode: 0o600 });
+  writeFileSync(join(root, 'companion.json'), `${JSON.stringify(companionValue)}\n`, { mode: 0o600 });
+  try {
+    const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'projection.json', linkPolicy: { allowedEvidenceHosts: [], forbiddenGitHubRepositories: [] } });
+    const companionRead = readTeamCompanion({ dataRoot: root, companionPath: 'companion.json', projection: loaded.rawProjection });
+    assert.equal(companionRead.directoryOnly, false);
+    assert.equal(companionRead.staleActivity, false);
+    const snapshot = buildTeamProjectionSnapshot(loaded.projection, {}, companionRead);
+    const approved = snapshot.items.find(item => item.id === 'full-approved');
+    const context = snapshot.items.find(item => item.id === 'full-project');
+    assert.deepEqual({
+      plannedStart: approved.schedule.plannedStart,
+      plannedEnd: approved.schedule.plannedEnd,
+      approved: approved.schedule.approved,
+      health: approved.health.state,
+      activityCount: approved.activitySummary.eventCount,
+      activityEvidence: snapshot.activityEvidence,
+    }, {
+      plannedStart: '2026-10-18',
+      plannedEnd: '2026-10-20',
+      approved: true,
+      health: 'on-track',
+      activityCount: 3,
+      activityEvidence: [{
+        id: 'team-activity-summary-full-approved', originalItemId: 'full-approved', originalUpdateId: null,
+        itemId: 'full-approved', sourceEventId: null, occurredAt: '2026-10-20T03:00:00Z', discoveredAt: '2026-10-20T03:00:00Z',
+        kind: 'work', summary: '3 team activity events recorded', attributionBasis: 'team-safe-activity-summary', evidenceRef: null,
+        included: true, amendmentIds: [], approvalDecisionIds: [],
+      }],
+    });
+    assert.equal(context.owner, null);
+    assert.equal(context.health.state, 'unknown');
+    assert.doesNotMatch(JSON.stringify(companionRead), /sourcePath|privateNotes|transcript|credential/u);
+    const workProjection = buildWorkProjection({ items: snapshot.items, evidence: snapshot.activityEvidence, now: '2026-10-21' });
+    assert.equal(workProjection.get('full-approved').own.state, 'recent');
   } finally {
     unlinkSync(join(root, 'projection.json'));
     unlinkSync(join(root, 'companion.json'));
@@ -299,6 +370,9 @@ test('stale companion schedules fail soft and unsafe paths never resolve', () =>
   mkdirSync(CHECK_ROOT, { recursive: true });
   const path = join(CHECK_ROOT, 'team-safe-companion-stale.json');
   const value = companion();
+  value.activitySummaries = [{ taskId: 'task-safe', eventCount: 2, latestOccurredAt: '2026-10-02T03:00:00Z' }];
+  delete value.companionDigest;
+  value.companionDigest = digest(value);
   writeFileSync(path, `${JSON.stringify(value)}\n`, { mode: 0o600 });
   try {
     const stale = readTeamCompanion({
@@ -309,6 +383,7 @@ test('stale companion schedules fail soft and unsafe paths never resolve', () =>
     assert.equal(stale.staleSchedule, true);
     assert.deepEqual(stale.schedules, []);
     assert.deepEqual(stale.taskMetadata, []);
+    assert.deepEqual(stale.activitySummaries, []);
     assert.deepEqual(stale.directory, []);
     const policyStale = readTeamCompanion({
       dataRoot: CHECK_ROOT,
@@ -341,6 +416,7 @@ test('stale companion schedules fail soft and unsafe paths never resolve', () =>
     assert.deepEqual(missingProjection.directory, []);
     assert.deepEqual(missingProjection.schedules, []);
     assert.deepEqual(missingProjection.taskMetadata, []);
+    assert.deepEqual(missingProjection.activitySummaries, []);
     assert.deepEqual(missingProjection.directory.flatMap(entry => entry.avatar ? [entry.avatar] : []), []);
     assert.throws(() => readTeamCompanion({ dataRoot: CHECK_ROOT, companionPath: '../secret.json', projection: null }), /safe relative path/);
   } finally {

@@ -7,11 +7,34 @@ import { taskCodeForId, taskCodeIndex } from '../tracker/task-codes.mjs';
 
 const EMPTY_SOURCE_DIGEST = `sha256:${'0'.repeat(64)}`;
 
+function safeActivityEvidence(companion) {
+  if (companion?.staleActivity === true || !Array.isArray(companion?.activitySummaries)) return [];
+  return companion.activitySummaries
+    .filter(summary => Number.isInteger(summary?.eventCount) && summary.eventCount > 0 && typeof summary.latestOccurredAt === 'string')
+    .map(summary => ({
+      id: `team-activity-summary-${summary.taskId}`,
+      originalItemId: summary.taskId,
+      originalUpdateId: null,
+      itemId: summary.taskId,
+      sourceEventId: null,
+      occurredAt: summary.latestOccurredAt,
+      discoveredAt: summary.latestOccurredAt,
+      kind: 'work',
+      summary: `${summary.eventCount} team activity event${summary.eventCount === 1 ? '' : 's'} recorded`,
+      attributionBasis: 'team-safe-activity-summary',
+      evidenceRef: null,
+      included: true,
+      amendmentIds: [],
+      approvalDecisionIds: [],
+    }));
+}
+
 export function buildTeamProjectionSnapshot(projection, source = {}, companion = null) {
   const initialized = projection.sourcePlanDigest !== EMPTY_SOURCE_DIGEST || projection.tasks.length > 0;
   const directory = Array.isArray(companion?.directory) ? companion.directory : [];
   const directoryById = new Map(directory.map(entry => [entry.id, entry]));
   const metadataByTaskId = new Map((Array.isArray(companion?.taskMetadata) ? companion.taskMetadata : []).map(entry => [entry.taskId, entry]));
+  const activityByTaskId = new Map((Array.isArray(companion?.activitySummaries) ? companion.activitySummaries : []).map(entry => [entry.taskId, entry]));
   const companionSchedulesAreAuthoritative = companion?.kind === 'team-safe-companion'
     && companion.directoryOnly !== true
     && companion.staleSchedule === false
@@ -43,7 +66,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     ...contextNodes.keys(),
   ])].map(([code, id]) => [id, code]));
 
-  const sharedItem = ({ id, title, type, status, owner = null, ownerName = null, parent = null, contextOnly = false, metadata = null }) => ({
+  const sharedItem = ({ id, title, type, status, owner = null, ownerName = null, parent = null, contextOnly = false, metadata = null, activitySummary = null }) => ({
     id,
     referenceCode: referenceCodes.get(id) ?? taskCodeForId(id),
     title: title ?? id,
@@ -61,6 +84,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     archived: false,
     completed: !contextOnly && status === 'done',
     commitment: metadata?.commitment ?? null,
+    activitySummary,
     plan: null,
     sourcePath: null,
     sections: {
@@ -126,6 +150,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
         ownerName: ownerProfile?.displayName ?? task.assignee ?? null,
         parent: task.parentId ?? null,
         metadata,
+        activitySummary: activityByTaskId.get(task.taskId) ?? null,
       }),
       target: plannedEnd,
       sections: {
@@ -220,7 +245,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     decisions: [],
     releases: [],
     updates: [],
-    activityEvidence: [],
+    activityEvidence: safeActivityEvidence(companion),
     team: teamProfiles,
   };
 }

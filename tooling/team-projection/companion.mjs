@@ -17,10 +17,12 @@ const SAFE_COMMITMENTS = new Set(['draft', 'planned', 'accepted']);
 const SAFE_PHASES = new Set(['discovery', 'build', 'verify']);
 const SAFE_HEALTH_STATES = new Set(['unknown', 'on-track', 'at-risk', 'blocked']);
 const DIRECTORY_ONLY_MODE = 'directory-only-v3';
+const FULL_CURRENT_MODE = 'full-current-v1';
 const DIRECTORY_ONLY_SCHEDULE_RULE = 'directory-only-no-task-schedules';
 const DIRECTORY_KEYS = ['id', 'displayName', 'avatar'];
 const SCHEDULE_KEYS = ['taskId', 'approvedStart', 'approvedEnd'];
 const METADATA_KEYS = ['taskId', 'status', 'commitment', 'phase', 'healthState'];
+const ACTIVITY_KEYS = ['taskId', 'eventCount', 'latestOccurredAt'];
 const PRIVATE_TEXT = /(?:https?:\/\/|\b(?:password|token|secret|credential)\s*[:=]|\bprivate(?:[ _-](?:note|data|history|source))?\b|\braw[ _-](?:evidence|source)\b)/iu;
 
 function isRecord(value) {
@@ -85,12 +87,12 @@ function projectionDigest(projection) {
 function validateCompanion(value, projection, { enforceTaskIds = Boolean(projection), expectedRosterDigest = null } = {}) {
   const errors = [];
   const topLevel = ['schemaVersion', 'kind', 'projectionDigest', 'projectionRevision', 'policyRevision', 'generatedAt', 'directory', 'schedules', 'taskMetadata', 'audit', 'publish', 'companionDigest'];
-  exactKeys(value, topLevel, '$', errors, ['mode']);
+  exactKeys(value, topLevel, '$', errors, ['mode', 'activitySummaries']);
   if (!isRecord(value)) return errors;
   if (value.schemaVersion !== 1) errors.push('schemaVersion: must be 1');
   if (value.kind !== 'team-safe-companion') errors.push('kind: invalid');
   const directoryOnly = value.mode === DIRECTORY_ONLY_MODE;
-  if (value.mode !== undefined && !directoryOnly) errors.push('mode: invalid');
+  if (value.mode !== undefined && value.mode !== DIRECTORY_ONLY_MODE && value.mode !== FULL_CURRENT_MODE) errors.push('mode: invalid');
   if (!DIGEST.test(String(value.projectionDigest ?? ''))) errors.push('projectionDigest: invalid');
   if (!ID.test(String(value.projectionRevision ?? ''))) errors.push('projectionRevision: invalid');
   if (typeof value.policyRevision !== 'string' || value.policyRevision.length === 0) errors.push('policyRevision: invalid');
@@ -142,6 +144,19 @@ function validateCompanion(value, projection, { enforceTaskIds = Boolean(project
     if (entry.phase !== null && !SAFE_PHASES.has(entry.phase)) errors.push(`${path}.phase: invalid safe phase`);
     if (entry.healthState !== null && !SAFE_HEALTH_STATES.has(entry.healthState)) errors.push(`${path}.healthState: invalid safe health state`);
   });
+  const activityIds = new Set();
+  if (value.activitySummaries === undefined) {
+    if (projection?.kind === 'full-task-projection' && value.mode !== DIRECTORY_ONLY_MODE) errors.push('activitySummaries: required for full-current companions');
+  } else if (!Array.isArray(value.activitySummaries)) errors.push('activitySummaries: must be an array');
+  else value.activitySummaries.forEach((entry, index) => {
+    const path = `activitySummaries[${index}]`;
+    exactKeys(entry, ACTIVITY_KEYS, path, errors);
+    if (!isRecord(entry)) return;
+    if (!ID.test(String(entry.taskId)) || activityIds.has(entry.taskId) || (enforceTaskIds && taskIds && !taskIds.has(entry.taskId))) errors.push(`${path}.taskId: must be a unique projected task ID`);
+    activityIds.add(entry.taskId);
+    if (!Number.isInteger(entry.eventCount) || entry.eventCount < 0) errors.push(`${path}.eventCount: must be a non-negative integer`);
+    if (entry.latestOccurredAt !== null && !isUtc(entry.latestOccurredAt)) errors.push(`${path}.latestOccurredAt: must be a UTC timestamp or null`);
+  });
   exactKeys(value.audit, ['directoryRule', 'scheduleRule', 'sourceTaskCount', 'rosterDigest'], '$.audit', errors);
   if (isRecord(value.audit)) {
     if (value.audit.directoryRule !== 'approved-roster-safe-display-metadata-only') errors.push('audit.directoryRule: invalid');
@@ -156,14 +171,17 @@ function validateCompanion(value, projection, { enforceTaskIds = Boolean(project
     if (Array.isArray(value.directory) && value.audit.rosterDigest !== digest(value.directory.map(entry => entry.id).sort())) errors.push('audit.rosterDigest: does not bind directory');
   }
   if (projection?.kind === 'full-task-projection') {
-    if (value.mode !== DIRECTORY_ONLY_MODE) errors.push('mode: full-task projections require directory-only-v3');
+    if (value.mode !== undefined && value.mode !== DIRECTORY_ONLY_MODE && value.mode !== FULL_CURRENT_MODE) errors.push('mode: invalid full-current companion mode');
     if (value.projectionDigest !== fullTaskProjectionDigest(projection)) errors.push('projectionDigest: does not bind the full task projection');
     if (value.projectionRevision !== projection.revision) errors.push('projectionRevision: does not bind the full task projection');
     if (value.policyRevision !== projection.policyRevision) errors.push('policyRevision: does not bind the full task projection');
     if (value.audit?.sourceTaskCount !== projection.tasks.length) errors.push('audit.sourceTaskCount: must match the raw full task projection');
-    if (!Array.isArray(value.schedules) || !Array.isArray(value.taskMetadata)
-      || value.schedules.length !== 0 || value.taskMetadata.length !== 0) {
+    if (value.mode === DIRECTORY_ONLY_MODE && (!Array.isArray(value.schedules) || !Array.isArray(value.taskMetadata)
+      || value.schedules.length !== 0 || value.taskMetadata.length !== 0)) {
       errors.push('directory-only companion: task metadata and schedules are not allowed');
+    }
+    if (value.mode !== DIRECTORY_ONLY_MODE && (!Array.isArray(value.activitySummaries) || value.activitySummaries.length !== projection.tasks.length)) {
+      errors.push('activitySummaries: full-current companion must cover every projected task');
     }
   }
   if (value.mode === DIRECTORY_ONLY_MODE && expectedRosterDigest !== null
@@ -220,7 +238,7 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
   const directoryOnly = value.mode === DIRECTORY_ONLY_MODE;
   const trustedRosterMismatch = directoryOnly
     && (!DIGEST.test(String(expectedRosterDigest ?? '')) || value.audit.rosterDigest !== expectedRosterDigest);
-  const unsupportedProjection = !standingProjection && !(fullTaskProjection && directoryOnly);
+  const unsupportedProjection = !standingProjection && !fullTaskProjection;
   const rosterMismatch = Boolean(standingProjection)
     && (!DIGEST.test(String(currentRosterDigest)) || currentRosterDigest !== value.audit.rosterDigest);
   const policyMismatch = Boolean(standingProjection || fullTaskProjection)
@@ -233,9 +251,11 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
     return Object.freeze({
       ...value,
       directoryOnly,
-      // Directory-only supplements never authorize task dates or metadata.
+      // Directory-only supplements never authorize task dates, metadata, or activity.
       staleSchedule: directoryOnly,
       staleMetadata: directoryOnly,
+      staleActivity: directoryOnly,
+      activitySummaries: directoryOnly ? [] : (value.activitySummaries ?? []),
       fileDigest: `sha256:${createHash('sha256').update(artifact.bytes).digest('hex')}`,
     });
   }
@@ -244,8 +264,10 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
     directory: [],
     schedules: [],
     taskMetadata: [],
+    activitySummaries: [],
     staleSchedule: true,
     staleMetadata: true,
+    staleActivity: true,
     ...(unsupportedProjection ? { unsupportedProjection: true } : {}),
     ...(rosterMismatch ? { rosterMismatch: true } : {}),
     ...(policyMismatch ? { policyMismatch: true } : {}),
@@ -258,8 +280,10 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
     ...(unsupportedProjection || rosterMismatch || policyMismatch || projectionMismatch ? { directory: [] } : {}),
     schedules: [],
     taskMetadata: [],
+    activitySummaries: [],
     staleSchedule: true,
     staleMetadata: true,
+    staleActivity: true,
     ...(unsupportedProjection ? { unsupportedProjection: true } : {}),
     ...(rosterMismatch ? { rosterMismatch: true } : {}),
     ...(policyMismatch ? { policyMismatch: true } : {}),
