@@ -16,6 +16,18 @@ function response(message, status) {
   });
 }
 
+function jsonResponse(body, status = 200, headers = {}, method = 'GET') {
+  return new Response(method === 'HEAD' ? null : JSON.stringify(body), {
+    status,
+    headers: {
+      'Cache-Control': 'private, no-store',
+      'Content-Type': 'application/json; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff',
+      ...headers,
+    },
+  });
+}
+
 function decodeBase64Url(value) {
   const text = String(value);
   if (!/^[A-Za-z0-9_-]+$/u.test(text)) throw new Error('invalid base64url');
@@ -136,6 +148,13 @@ function privateAssetResponse(assetResponse, isHead = false) {
   });
 }
 
+function meResponse(actor, method = 'GET') {
+  return jsonResponse({
+    schemaVersion: 1,
+    actor: typeof actor === 'string' ? { kind: 'human', email: actor } : { kind: 'service' },
+  }, 200, {}, method);
+}
+
 function invalidConfigurationWorker() {
   return {
     instance: null,
@@ -247,6 +266,12 @@ function createConfiguredWorker(instance, options) {
         return response('Access required.', 403);
       }
 
+      if (pathname === '/api/me') {
+        if (request.method !== 'GET' && request.method !== 'HEAD') {
+          return jsonResponse({ error: 'GET or HEAD is required.' }, 405, { Allow: 'GET, HEAD' }, request.method);
+        }
+        return meResponse(verifiedActor, request.method);
+      }
       if (apiRequest(pathname)) {
         if (!isPublishPath(pathname)) return apiJsonError('Not found.', 404, {}, request.method);
         if (typeof verifiedActor !== 'string') {

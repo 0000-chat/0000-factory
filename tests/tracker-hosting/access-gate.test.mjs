@@ -257,6 +257,54 @@ test('valid configured Access service JWT serves the private snapshot', async ()
   assert.equal(response.headers.get('cache-control'), 'private, no-store');
 });
 
+describe('authenticated identity endpoint', () => {
+  test('returns the verified human identity without invoking assets', async () => {
+    mockAccessKeys();
+    const token = await tokenFor();
+    const result = environment();
+    const response = await request(token, result.env, { path: '/api/me' });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      schemaVersion: 1,
+      actor: { kind: 'human', email: DON_EMAIL },
+    });
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+    assert.equal(response.headers.get('content-type'), 'application/json; charset=utf-8');
+    assert.equal(result.assetCalls(), 0);
+  });
+
+  test('returns a service identity without exposing its client ID', async () => {
+    mockAccessKeys();
+    const token = await serviceTokenFor();
+    const result = environment({ ACCESS_SERVICE_TOKEN_CLIENT_ID: SERVICE_CLIENT_ID });
+    const response = await request(token, result.env, { path: '/api/me' }, workerFor({ service: 'enabled' }));
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      schemaVersion: 1,
+      actor: { kind: 'service' },
+    });
+    assert.equal(result.assetCalls(), 0);
+  });
+
+  test('supports HEAD and rejects mutating methods without serving assets', async () => {
+    mockAccessKeys();
+    const token = await tokenFor();
+    const result = environment();
+    const headResponse = await request(token, result.env, { path: '/api/me', method: 'HEAD' });
+    const postResponse = await request(token, result.env, { path: '/api/me', method: 'POST' });
+
+    assert.equal(headResponse.status, 200);
+    assert.equal(headResponse.body, null);
+    assert.equal(headResponse.headers.get('content-type'), 'application/json; charset=utf-8');
+    assert.equal(postResponse.status, 405);
+    assert.deepEqual(await postResponse.json(), { error: 'GET or HEAD is required.' });
+    assert.equal(postResponse.headers.get('allow'), 'GET, HEAD');
+    assert.equal(result.assetCalls(), 0);
+  });
+});
+
 describe('service JWT identity must match the explicitly configured client ID', () => {
   const cases = [
     ['wrong client ID', { common_name: 'another-service-client-id' }],
