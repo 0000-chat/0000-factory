@@ -197,6 +197,60 @@ function fullTaskProjection(tasks = [
   return value;
 }
 
+function fullCurrentRecordProjection(tasks = [
+  {
+    kind: 'workstream', taskId: 'invoicing-ui', title: 'Invoicing UI', description: 'The public invoicing workstream.',
+    assignee: 'person-1', reviewer: null, status: 'active', nextStep: 'Review the public invoicing flow.',
+    completionCriteria: 'The public invoicing flow is reviewed.', deadline: null, parentId: 'project-alpha',
+  },
+  {
+    kind: 'task', taskId: 'invoicing-ui-task', title: 'Invoicing UI task', description: 'A task within the public invoicing workstream.',
+    assignee: null, reviewer: null, status: 'queued', nextStep: 'Choose an owner.',
+    completionCriteria: 'An owner is recorded.', deadline: null, parentId: 'invoicing-ui',
+  },
+]) {
+  const contextNodes = [{ id: 'project-alpha', kind: 'project', title: 'Project Alpha', parentId: null }];
+  const fields = ['kind', 'taskId', 'title', 'description', 'assignee', 'reviewer', 'status', 'nextStep', 'completionCriteria', 'deadline'];
+  const scope = {
+    mode: 'one-time-current-record-copy', scope: 'all-current-canonical-records', sourceRecordKinds: ['task', 'workstream'],
+    includesDonOwned: true, includesUnassigned: true, privateRule: 'private-true-excluded',
+  };
+  const policy = {
+    ...scope,
+    policyRevision: 'manual-full-current-record-copy-v2',
+    hierarchyVersion: 1,
+    hierarchyContextFields: ['id', 'kind', 'title', 'parentId'],
+    fields: [...fields].sort(),
+  };
+  const value = {
+    schemaVersion: 1,
+    kind: 'full-task-projection',
+    projectionId: 'full-current-record-projection',
+    revision: 'r-full-current-record-projection',
+    policyRevision: 'manual-full-current-record-copy-v2',
+    generatedAt: '2026-10-11T00:00:00Z',
+    hierarchyVersion: 1,
+    contextNodes,
+    tasks,
+    gaps: [],
+    audit: {
+      ...scope,
+      fieldsDigest: digest([...fields].sort()),
+      scopeDigest: digest(scope),
+      policyDigest: digest(policy),
+      selectionDigest: digest({ ...scope, taskIds: tasks.map(task => task.taskId).sort() }),
+      taskIdsDigest: digest(tasks.map(task => task.taskId).sort()),
+      taskCount: tasks.length,
+      contextNodeCount: contextNodes.length,
+      approvalState: 'preview',
+      decisionId: null,
+    },
+    publish: { initialProjectionDigest: null, reviewed: false, activationEnabled: false },
+  };
+  value.publish.initialProjectionDigest = digest({ ...value, publish: { ...value.publish, initialProjectionDigest: null } });
+  return value;
+}
+
 function directoryOnlyCompanion(projectionValue, overrides = {}) {
   const value = {
     schemaVersion: 1,
@@ -393,6 +447,42 @@ test('reader normalizes the explicit full current-task copy without applying the
   assert.equal(archive.entries[0].plan.outcomes.length, 2);
   assert.deepEqual(archive.entries[0].plan.outcomes.map(outcome => outcome.owner), [{ personId: 'person-1' }, null]);
   assert.equal(archive.latestApprovedId, null);
+});
+
+test('reader normalizes reportable workstreams while preserving legacy task-only copies', () => {
+  const root = writeFixture(fullCurrentRecordProjection());
+  const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'team/projection.json' });
+  assert.deepEqual(loaded.projection.tasks.map(({ taskId, kind }) => ({ taskId, kind })), [
+    { taskId: 'invoicing-ui', kind: 'workstream' },
+    { taskId: 'invoicing-ui-task', kind: 'task' },
+  ]);
+
+  const snapshot = buildTeamProjectionSnapshot(loaded.projection);
+  const workstream = snapshot.items.find(item => item.id === 'invoicing-ui');
+  const task = snapshot.items.find(item => item.id === 'invoicing-ui-task');
+  const project = snapshot.items.find(item => item.id === 'project-alpha');
+  assert.equal(workstream.type, 'workstream');
+  assert.equal(workstream.contextOnly, undefined);
+  assert.equal(workstream.teamProjection.kind, 'workstream');
+  assert.equal(task.type, 'task');
+  assert.equal(task.parent, 'invoicing-ui');
+  assert.equal(task.teamProjection.taskId, 'invoicing-ui-task');
+  assert.equal(task.teamProjection.parentId, 'invoicing-ui');
+  assert.equal(project.contextOnly, true);
+  assert.deepEqual(project.childIds, ['invoicing-ui']);
+
+  const legacyRoot = writeFixture(fullTaskProjection());
+  const legacy = readTeamProjection({ dataRoot: legacyRoot, projectionPath: 'team/projection.json' });
+  assert.deepEqual(legacy.projection.tasks.map(({ taskId, kind }) => ({ taskId, kind })), [
+    { taskId: 'owned-task', kind: 'task' },
+    { taskId: 'unassigned-task', kind: 'task' },
+  ]);
+
+  const invalid = fullCurrentRecordProjection();
+  invalid.tasks[0].kind = 'project';
+  invalid.publish.initialProjectionDigest = digest({ ...invalid, publish: { ...invalid.publish, initialProjectionDigest: null } });
+  const invalidRoot = writeFixture(invalid);
+  assert.throws(() => readTeamProjection({ dataRoot: invalidRoot, projectionPath: 'team/projection.json' }), /must be task or workstream/u);
 });
 
 test('full current-task copy keeps strict fields and team-text safety', () => {
