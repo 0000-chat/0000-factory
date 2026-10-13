@@ -35,26 +35,39 @@ const FULL_TASK_COPY_TOP_LEVEL_KEYS = [
   'schemaVersion', 'kind', 'projectionId', 'revision', 'policyRevision',
   'generatedAt', 'hierarchyVersion', 'contextNodes', 'tasks', 'gaps', 'audit', 'publish',
 ];
-const FULL_TASK_COPY_AUDIT_KEYS = [
+const FULL_TASK_COPY_LEGACY_AUDIT_KEYS = [
   'mode', 'scope', 'sourceTaskKind', 'includesDonOwned', 'includesUnassigned',
   'privateRule', 'fieldsDigest', 'scopeDigest', 'policyDigest', 'selectionDigest', 'taskIdsDigest', 'taskCount',
   'contextNodeCount', 'approvalState', 'decisionId',
 ];
+const FULL_TASK_COPY_RECORD_AUDIT_KEYS = [
+  'mode', 'scope', 'sourceRecordKinds', 'includesDonOwned', 'includesUnassigned',
+  'privateRule', 'fieldsDigest', 'scopeDigest', 'policyDigest', 'selectionDigest', 'taskIdsDigest', 'taskCount',
+  'contextNodeCount', 'approvalState', 'decisionId',
+];
+const FULL_TASK_COPY_AUDIT_KEYS = [...new Set([
+  ...FULL_TASK_COPY_LEGACY_AUDIT_KEYS,
+  ...FULL_TASK_COPY_RECORD_AUDIT_KEYS,
+])];
 const FULL_TASK_COPY_PUBLISH_KEYS = ['initialProjectionDigest', 'reviewed', 'activationEnabled'];
 const FULL_TASK_COPY_KIND = 'full-task-projection';
-const FULL_TASK_COPY_POLICY_REVISION = 'manual-full-current-task-copy-v1';
+const FULL_TASK_COPY_LEGACY_POLICY_REVISION = 'manual-full-current-task-copy-v1';
+const FULL_TASK_COPY_POLICY_REVISION = 'manual-full-current-record-copy-v2';
 const FULL_TASK_COPY_HIERARCHY_VERSION = 1;
 const FULL_TASK_COPY_STATUSES = new Set(['queued', 'started', 'active', 'blocked', 'done', 'unknown']);
-const FULL_TASK_COPY_FIELDS = Object.freeze([
+const FULL_TASK_COPY_LEGACY_FIELDS = Object.freeze([
   'taskId', 'title', 'description', 'assignee', 'reviewer', 'status',
   'nextStep', 'completionCriteria', 'deadline',
 ]);
-const FULL_TASK_COPY_SCOPE = 'all-current-canonical-task-records';
+const FULL_TASK_COPY_RECORD_KINDS = Object.freeze(['task', 'workstream']);
+const FULL_TASK_COPY_FIELDS = Object.freeze(['kind', ...FULL_TASK_COPY_LEGACY_FIELDS]);
+const FULL_TASK_COPY_LEGACY_SCOPE = 'all-current-canonical-task-records';
+const FULL_TASK_COPY_SCOPE = 'all-current-canonical-records';
 const FULL_TASK_COPY_POLICY_DESCRIPTOR = Object.freeze({
-  mode: 'one-time-current-task-copy',
+  mode: 'one-time-current-record-copy',
   policyRevision: FULL_TASK_COPY_POLICY_REVISION,
   scope: FULL_TASK_COPY_SCOPE,
-  sourceTaskKind: 'task',
+  sourceRecordKinds: [...FULL_TASK_COPY_RECORD_KINDS],
   includesDonOwned: true,
   includesUnassigned: true,
   privateRule: 'private-true-excluded',
@@ -196,7 +209,9 @@ function validateFullTaskProjection(value) {
   if (!isRecord(value)) return { valid: false, errors: ['projection: must be an object'] };
   if (value.schemaVersion !== 1) errors.push('schemaVersion: must be 1');
   if (value.kind !== FULL_TASK_COPY_KIND) errors.push(`kind: must be ${FULL_TASK_COPY_KIND}`);
-  if (value.policyRevision !== FULL_TASK_COPY_POLICY_REVISION) errors.push(`policyRevision: must be ${FULL_TASK_COPY_POLICY_REVISION}`);
+  if (![FULL_TASK_COPY_LEGACY_POLICY_REVISION, FULL_TASK_COPY_POLICY_REVISION].includes(value.policyRevision)) {
+    errors.push(`policyRevision: must be ${FULL_TASK_COPY_LEGACY_POLICY_REVISION} or ${FULL_TASK_COPY_POLICY_REVISION}`);
+  }
   if (value.hierarchyVersion !== FULL_TASK_COPY_HIERARCHY_VERSION) errors.push('hierarchyVersion: must be 1');
   if (!isId(value.projectionId)) errors.push('projectionId: must be an ID');
   if (!isId(value.revision)) errors.push('revision: must be an ID');
@@ -211,6 +226,7 @@ function validateFullTaskProjection(value) {
 
 function validateFullTaskMetadata(value) {
   const taskIds = new Set(value.tasks.map(task => task.taskId));
+  const currentRecordCopy = value.policyRevision === FULL_TASK_COPY_POLICY_REVISION;
   value.gaps.forEach((gap, index) => {
     const path = `gaps[${index}]`;
     exactKeys(gap, STANDING_GAP_KEYS, path);
@@ -220,34 +236,54 @@ function validateFullTaskMetadata(value) {
     safeText(gap.message, `${path}.message`, { nullable: false, max: 2_000 });
   });
 
-  exactKeys(value.audit, FULL_TASK_COPY_AUDIT_KEYS, 'audit');
-  if (value.audit.mode !== 'one-time-current-task-copy') fail('audit.mode', 'must describe the one-time current-task copy');
-  if (value.audit.scope !== FULL_TASK_COPY_SCOPE) fail('audit.scope', 'must describe all current canonical task records');
-  if (value.audit.sourceTaskKind !== 'task') fail('audit.sourceTaskKind', 'must be task');
+  exactKeys(value.audit, currentRecordCopy ? FULL_TASK_COPY_RECORD_AUDIT_KEYS : FULL_TASK_COPY_LEGACY_AUDIT_KEYS, 'audit');
+  if (currentRecordCopy) {
+    if (value.audit.mode !== 'one-time-current-record-copy') fail('audit.mode', 'must describe the one-time current-record copy');
+    if (value.audit.scope !== FULL_TASK_COPY_SCOPE) fail('audit.scope', 'must describe all current canonical records');
+    if (JSON.stringify(value.audit.sourceRecordKinds) !== JSON.stringify(FULL_TASK_COPY_RECORD_KINDS)) fail('audit.sourceRecordKinds', 'must be task and workstream');
+  } else {
+    if (value.audit.mode !== 'one-time-current-task-copy') fail('audit.mode', 'must describe the one-time current-task copy');
+    if (value.audit.scope !== FULL_TASK_COPY_LEGACY_SCOPE) fail('audit.scope', 'must describe all current canonical task records');
+    if (value.audit.sourceTaskKind !== 'task') fail('audit.sourceTaskKind', 'must be task');
+  }
   if (value.audit.includesDonOwned !== true || value.audit.includesUnassigned !== true) fail('audit', 'must include Don-owned and unassigned tasks');
   if (value.audit.privateRule !== 'private-true-excluded') fail('audit.privateRule', 'must exclude only private:true tasks');
   if (!Number.isInteger(value.audit.taskCount) || value.audit.taskCount !== value.tasks.length) fail('audit.taskCount', 'must match tasks');
   if (!Number.isInteger(value.audit.contextNodeCount) || value.audit.contextNodeCount !== value.contextNodes.length) fail('audit.contextNodeCount', 'must match contextNodes');
   if (value.audit.approvalState !== 'preview' || value.audit.decisionId !== null) fail('audit', 'must remain an unreviewed preview');
-  if (value.audit.fieldsDigest !== canonicalDigest([...FULL_TASK_COPY_FIELDS].sort())) fail('audit.fieldsDigest', 'does not match the full field contract');
+  if (value.audit.fieldsDigest !== canonicalDigest([...(currentRecordCopy ? FULL_TASK_COPY_FIELDS : FULL_TASK_COPY_LEGACY_FIELDS)].sort())) fail('audit.fieldsDigest', 'does not match the full field contract');
   if (!DIGEST.test(value.audit.scopeDigest)) fail('audit.scopeDigest', 'must be a digest');
-  const scopeInput = {
-    mode: 'one-time-current-task-copy',
+  const scopeInput = currentRecordCopy ? {
+    mode: 'one-time-current-record-copy',
     scope: FULL_TASK_COPY_SCOPE,
+    sourceRecordKinds: [...FULL_TASK_COPY_RECORD_KINDS],
+    includesDonOwned: true,
+    includesUnassigned: true,
+    privateRule: 'private-true-excluded',
+  } : {
+    mode: 'one-time-current-task-copy',
+    scope: FULL_TASK_COPY_LEGACY_SCOPE,
     sourceTaskKind: 'task',
     includesDonOwned: true,
     includesUnassigned: true,
     privateRule: 'private-true-excluded',
   };
   if (value.audit.scopeDigest !== canonicalDigest(scopeInput)) fail('audit.scopeDigest', 'does not match the full-copy scope');
-  if (value.audit.policyDigest !== canonicalDigest(FULL_TASK_COPY_POLICY_DESCRIPTOR)) fail('audit.policyDigest', 'does not match the full-copy policy');
-  const selectionInput = {
+  const policyDescriptor = currentRecordCopy ? FULL_TASK_COPY_POLICY_DESCRIPTOR : {
     mode: 'one-time-current-task-copy',
-    scope: FULL_TASK_COPY_SCOPE,
+    policyRevision: FULL_TASK_COPY_LEGACY_POLICY_REVISION,
+    scope: FULL_TASK_COPY_LEGACY_SCOPE,
     sourceTaskKind: 'task',
     includesDonOwned: true,
     includesUnassigned: true,
     privateRule: 'private-true-excluded',
+    hierarchyVersion: FULL_TASK_COPY_HIERARCHY_VERSION,
+    hierarchyContextFields: ['id', 'kind', 'title', 'parentId'],
+    fields: [...FULL_TASK_COPY_LEGACY_FIELDS].sort(),
+  };
+  if (value.audit.policyDigest !== canonicalDigest(policyDescriptor)) fail('audit.policyDigest', 'does not match the full-copy policy');
+  const selectionInput = {
+    ...scopeInput,
     taskIds: [...value.tasks].map(task => task.taskId).sort(),
   };
   if (value.audit.selectionDigest !== canonicalDigest(selectionInput)) fail('audit.selectionDigest', 'does not match the exact current task selection');
@@ -539,6 +575,7 @@ function normalizeFullTaskProjection(value, rawDigest) {
     generatedAt: value.generatedAt,
     contextNodes: value.contextNodes.map(node => ({ ...node })),
     tasks: value.tasks.map(task => ({
+      kind: task.kind ?? 'task',
       taskId: task.taskId,
       title: task.title,
       scope: task.description,
@@ -578,11 +615,13 @@ function validateStrictProjection(value, linkPolicy) {
   const ids = new Set();
   value.tasks.forEach((task, index) => {
     const path = `tasks[${index}]`;
-    exactKeys(task, fullTaskCopy || hierarchical ? STANDING_HIERARCHY_TASK_KEYS : standing ? STANDING_TASK_KEYS : TASK_KEYS, path);
+    const currentRecordCopy = fullTaskCopy && value.policyRevision === FULL_TASK_COPY_POLICY_REVISION;
+    exactKeys(task, fullTaskCopy && currentRecordCopy ? [...STANDING_HIERARCHY_TASK_KEYS, 'kind'] : fullTaskCopy || hierarchical ? STANDING_HIERARCHY_TASK_KEYS : standing ? STANDING_TASK_KEYS : TASK_KEYS, path);
     if ((fullTaskCopy || standing) && task.deadline !== null) exactKeys(task.deadline, ['label', 'date'], `${path}.deadline`);
     if (ids.has(task.taskId)) fail(`${path}.taskId`, `duplicate task ID ${task.taskId}`);
     if (fullTaskCopy) {
       if (!isId(task.taskId)) fail(`${path}.taskId`, 'must be an ID');
+      if (currentRecordCopy && !FULL_TASK_COPY_RECORD_KINDS.includes(task.kind)) fail(`${path}.kind`, 'must be task or workstream');
       if (task.assignee !== null && !isId(task.assignee)) fail(`${path}.assignee`, 'must be an exact canonical ID or null');
       if (task.reviewer !== null && !isId(task.reviewer)) fail(`${path}.reviewer`, 'must be an exact canonical ID or null');
       if (!FULL_TASK_COPY_STATUSES.has(task.status)) fail(`${path}.status`, 'is invalid');

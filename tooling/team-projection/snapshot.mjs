@@ -160,11 +160,12 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     const approvedDate = companionSchedulesAreAuthoritative ? plannedEnd : task.approvedDate ?? null;
     const forecastEnd = task.forecastDate ?? null;
     const ownerProfile = directoryById.get(task.assignee);
+    const recordKind = task.kind === 'workstream' ? 'workstream' : 'task';
     return {
       ...sharedItem({
         id: task.taskId,
         title: task.title,
-        type: 'task',
+        type: recordKind,
         status: task.status,
         owner: task.assignee ?? null,
         ownerName: ownerProfile?.displayName ?? safeOwnerLabel(task.assignee) ?? null,
@@ -184,6 +185,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
         blocker: task.status === 'blocked' ? (task.nextStep ?? 'Blocked') : null,
       },
       teamProjection: {
+        kind: recordKind,
         taskId: task.taskId,
         assignee: task.assignee ?? null,
         reviewer: task.reviewer ?? null,
