@@ -6,20 +6,32 @@
 import { taskCodeForId, taskCodeIndex } from '../tracker/task-codes.mjs';
 
 const EMPTY_SOURCE_DIGEST = `sha256:${'0'.repeat(64)}`;
+const SAFE_REVIEWER_LABELS = new Map([['don', 'Don'], ['donmasakayan', 'Don']]);
+
+function safeOwnerLabel(value) {
+  if (value === null || value === undefined) return value;
+  return SAFE_REVIEWER_LABELS.get(String(value).trim().toLowerCase()) ?? value;
+}
 
 function safeActivityEvidence(companion) {
   if (companion?.staleActivity === true || !Array.isArray(companion?.activitySummaries)) return [];
-  return companion.activitySummaries
-    .filter(summary => Number.isInteger(summary?.eventCount) && summary.eventCount > 0 && typeof summary.latestOccurredAt === 'string')
-    .map(summary => ({
-      id: `team-activity-summary-${summary.taskId}`,
+  return companion.activitySummaries.flatMap(summary => {
+    if (!Number.isInteger(summary?.eventCount) || summary.eventCount <= 0) return [];
+    const dates = Array.isArray(summary.occurredDates) && summary.occurredDates.length
+      ? summary.occurredDates
+      : (typeof summary.latestOccurredAt === 'string' ? [summary.latestOccurredAt] : []);
+    const kind = Array.isArray(summary.activityKinds) && summary.activityKinds.length
+      ? summary.activityKinds[0]
+      : 'work';
+    return dates.map((occurredAt, index) => ({
+      id: `team-activity-summary-${summary.taskId}-${index + 1}`,
       originalItemId: summary.taskId,
       originalUpdateId: null,
       itemId: summary.taskId,
-      sourceEventId: null,
-      occurredAt: summary.latestOccurredAt,
-      discoveredAt: summary.latestOccurredAt,
-      kind: 'work',
+      sourceEventId: `team-activity-summary-${summary.taskId}-${occurredAt}`,
+      occurredAt,
+      discoveredAt: occurredAt,
+      kind,
       summary: `${summary.eventCount} team activity event${summary.eventCount === 1 ? '' : 's'} recorded`,
       attributionBasis: 'team-safe-activity-summary',
       evidenceRef: null,
@@ -27,6 +39,7 @@ function safeActivityEvidence(companion) {
       amendmentIds: [],
       approvalDecisionIds: [],
     }));
+  });
 }
 
 export function buildTeamProjectionSnapshot(projection, source = {}, companion = null) {
@@ -41,6 +54,8 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     && companion.staleSchedule === false
     && Array.isArray(companion.schedules);
   const schedulesByTaskId = new Map((companionSchedulesAreAuthoritative ? companion.schedules : []).map(entry => [entry.taskId, entry]));
+  const proposedSchedulesByTaskId = new Map((companionSchedulesAreAuthoritative && Array.isArray(companion.proposedSchedules)
+    ? companion.proposedSchedules : []).map(entry => [entry.taskId, entry]));
   const teamProfiles = directory.map(entry => ({
     id: entry.id,
     slug: entry.id,
@@ -75,7 +90,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     status,
     phase: metadata?.phase ?? null,
     owner,
-    ownerName: ownerName ?? owner,
+    ownerName: ownerName ?? contextMetadata?.ownerName ?? safeOwnerLabel(owner),
     parent,
     dependsOn: [],
     updatedAt: null,
@@ -114,6 +129,9 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     schedule: {
       plannedStart: null,
       plannedEnd: null,
+      proposedStart: null,
+      proposedEnd: null,
+      proposedScheduleKind: null,
       forecastStart: null,
       forecastEndMin: null,
       forecastEndMax: null,
@@ -133,6 +151,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     const evidence = task.evidenceLinks.join('\n');
     const metadata = metadataByTaskId.get(task.taskId) ?? null;
     const schedule = schedulesByTaskId.get(task.taskId) ?? null;
+    const proposedSchedule = proposedSchedulesByTaskId.get(task.taskId) ?? null;
     const plannedStart = schedule?.approvedStart ?? null;
     // A validated companion is an allowlist: omitted tasks have no current
     // approved endpoint. Keep the anchored projection deadline only for the
@@ -148,7 +167,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
         type: 'task',
         status: task.status,
         owner: task.assignee ?? null,
-        ownerName: ownerProfile?.displayName ?? task.assignee ?? null,
+        ownerName: ownerProfile?.displayName ?? safeOwnerLabel(task.assignee) ?? null,
         parent: task.parentId ?? null,
         metadata,
         activitySummary: activityByTaskId.get(task.taskId) ?? null,
@@ -183,6 +202,9 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
       schedule: {
         plannedStart,
         plannedEnd,
+        proposedStart: proposedSchedule?.proposedStart ?? null,
+        proposedEnd: proposedSchedule?.proposedEnd ?? null,
+        proposedScheduleKind: proposedSchedule?.proposedScheduleKind ?? null,
         forecastStart: null,
         forecastEndMin: forecastEnd,
         forecastEndMax: forecastEnd,
@@ -198,17 +220,34 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     if (taskIds.has(node.id)) throw new Error(`context node ID ${node.id} collides with a task ID`);
     const metadata = metadataByContextId.get(node.id) ?? null;
     const ownerProfile = metadata?.owner ? directoryById.get(metadata.owner) : null;
-    items.push(sharedItem({
+    const schedule = schedulesByTaskId.get(node.id) ?? null;
+    const proposedSchedule = proposedSchedulesByTaskId.get(node.id) ?? null;
+    const activitySummary = activityByTaskId.get(node.id) ?? null;
+    const contextItem = sharedItem({
       id: node.id,
       title: node.title,
       type: node.kind,
       status: '',
       owner: metadata?.owner ?? null,
-      ownerName: ownerProfile?.displayName ?? metadata?.owner ?? null,
+      ownerName: ownerProfile?.displayName ?? metadata?.ownerName ?? safeOwnerLabel(metadata?.owner) ?? null,
       parent: node.parentId,
       contextOnly: true,
       contextMetadata: metadata,
-    }));
+      activitySummary,
+    });
+    contextItem.schedule = {
+      plannedStart: schedule?.approvedStart ?? null,
+      plannedEnd: schedule?.approvedEnd ?? null,
+      proposedStart: proposedSchedule?.proposedStart ?? null,
+      proposedEnd: proposedSchedule?.proposedEnd ?? null,
+      proposedScheduleKind: proposedSchedule?.proposedScheduleKind ?? null,
+      forecastStart: null,
+      forecastEndMin: null,
+      forecastEndMax: null,
+      provisional: schedule?.provisional ?? (schedule?.approvedEnd === undefined),
+      approved: schedule?.approvedEnd !== undefined,
+    };
+    items.push(contextItem);
   }
 
   const itemsById = new Map(items.map(item => [item.id, item]));
@@ -219,6 +258,16 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
   for (const item of items) item.childIds.sort((a, b) => a.localeCompare(b));
   const rootIds = items.filter(item => !item.parent || !itemsById.has(item.parent)).map(item => item.id);
   const expandedIds = items.filter(item => item.childIds.length > 0).map(item => item.id);
+  const releases = (Array.isArray(companion?.releaseMetadata) ? companion.releaseMetadata : []).map(release => ({
+    id: release.releaseId,
+    title: release.title,
+    project: release.projectId,
+    owner: release.owner,
+    ownerName: release.ownerName ?? safeOwnerLabel(release.owner),
+    status: release.status,
+    target: release.target,
+    sourcePath: null,
+  }));
 
   return {
     schemaVersion: 4,
@@ -249,7 +298,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     migrations: [],
     capacities: [],
     decisions: [],
-    releases: [],
+    releases,
     updates: [],
     activityEvidence: safeActivityEvidence(companion),
     team: teamProfiles,

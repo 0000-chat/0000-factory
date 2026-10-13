@@ -34,8 +34,10 @@ function companion() {
     generatedAt: '2026-10-12T00:00:00.000Z',
     directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }],
     schedules: [{ taskId: 'task-safe', approvedStart: '2026-10-01', approvedEnd: '2026-10-02' }],
+    proposedSchedules: [],
     taskMetadata: [{ taskId: 'task-safe', status: 'active', commitment: 'accepted', phase: 'build', healthState: 'on-track' }],
     contextMetadata: [],
+    releaseMetadata: [],
     audit: {
       directoryRule: 'approved-roster-safe-display-metadata-only',
       scheduleRule: 'approved-endpoint-only-with-existing-task-proof',
@@ -113,7 +115,7 @@ function directoryOnlyCompanion(projectionValue) {
     schemaVersion: 1, kind: 'team-safe-companion', mode: 'directory-only-v3',
     projectionDigest: digest({ ...projectionValue, publish: { ...projectionValue.publish, initialProjectionDigest: null } }),
     projectionRevision: projectionValue.revision, policyRevision: projectionValue.policyRevision, generatedAt: '2026-10-12T00:00:00Z',
-    directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }], schedules: [], taskMetadata: [], contextMetadata: [],
+    directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }], schedules: [], proposedSchedules: [], taskMetadata: [], contextMetadata: [],
     audit: {
       directoryRule: 'approved-roster-safe-display-metadata-only', scheduleRule: 'directory-only-no-task-schedules',
       sourceTaskCount: projectionValue.tasks.length, rosterDigest: digest(['person-1']),
@@ -128,15 +130,21 @@ function fullCurrentCompanion(projectionValue) {
     projectionDigest: digest({ ...projectionValue, publish: { ...projectionValue.publish, initialProjectionDigest: null } }),
     projectionRevision: projectionValue.revision, policyRevision: projectionValue.policyRevision, generatedAt: '2026-10-12T00:00:00Z',
     directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }],
-    schedules: [{ taskId: 'full-approved', approvedStart: '2026-10-18', approvedEnd: '2026-10-20' }],
+    schedules: [
+      { taskId: 'full-approved', approvedStart: '2026-10-18', approvedEnd: '2026-10-20' },
+      { taskId: 'full-project', approvedStart: '2026-09-30', approvedEnd: '2026-10-23', provisional: true },
+    ],
+    proposedSchedules: [{ taskId: 'full-forecast', proposedStart: '2026-10-21', proposedEnd: '2026-10-27', proposedScheduleKind: 'span' }],
     taskMetadata: [
       { taskId: 'full-approved', status: 'active', commitment: 'accepted', phase: 'build', healthState: 'on-track' },
       { taskId: 'full-forecast', status: 'queued', commitment: 'planned', phase: 'discovery', healthState: 'unknown' },
     ],
-    contextMetadata: [{ contextId: 'full-project', owner: 'person-1', healthState: 'on-track', target: '2026-11-15' }],
+    contextMetadata: [{ contextId: 'full-project', owner: 'person-1', ownerName: 'Synthetic Person', healthState: 'on-track', target: '2026-11-15' }],
+    releaseMetadata: [{ releaseId: 'full-release', projectId: 'full-project', title: 'Synthetic release', owner: 'person-1', ownerName: 'Synthetic Person', status: 'scoping', target: '2026-11-15' }],
     activitySummaries: [
-      { taskId: 'full-approved', eventCount: 3, latestOccurredAt: '2026-10-20T03:00:00Z' },
-      { taskId: 'full-forecast', eventCount: 0, latestOccurredAt: null },
+      { taskId: 'full-approved', eventCount: 3, latestOccurredAt: '2026-10-20T03:00:00Z', occurredDates: ['2026-10-18', '2026-10-20'], activityKinds: ['work'] },
+      { taskId: 'full-forecast', eventCount: 0, latestOccurredAt: null, occurredDates: [], activityKinds: [] },
+      { taskId: 'full-project', eventCount: 0, latestOccurredAt: null, occurredDates: [], activityKinds: [] },
     ],
     audit: {
       directoryRule: 'approved-roster-safe-display-metadata-only', scheduleRule: 'approved-endpoint-only-with-existing-task-proof',
@@ -160,6 +168,8 @@ test('companion metadata drives safe identity and approved endpoint rendering', 
   assert.equal(item.phase, 'build');
   assert.equal(item.health.state, 'on-track');
   assert.equal(snapshot.team[0].avatarUrl, '/avatars/person-1.webp');
+  const donorSnapshot = buildTeamProjectionSnapshot({ ...projection(), tasks: [{ ...projection().tasks[0], assignee: 'don' }] }, {}, { ...value, staleSchedule: false });
+  assert.equal(donorSnapshot.items[0].ownerName, 'Don');
 });
 
 test('directory-only v3 binds full task input while preserving canonical task fields and dates', () => {
@@ -235,6 +245,7 @@ test('full-current companion normalizes approved ranges, safe health, hierarchy 
     const snapshot = buildTeamProjectionSnapshot(loaded.projection, {}, companionRead);
     const approved = snapshot.items.find(item => item.id === 'full-approved');
     const context = snapshot.items.find(item => item.id === 'full-project');
+    const forecast = snapshot.items.find(item => item.id === 'full-forecast');
     assert.deepEqual({
       plannedStart: approved.schedule.plannedStart,
       plannedEnd: approved.schedule.plannedEnd,
@@ -248,16 +259,29 @@ test('full-current companion normalizes approved ranges, safe health, hierarchy 
       approved: true,
       health: 'on-track',
       activityCount: 3,
-      activityEvidence: [{
-        id: 'team-activity-summary-full-approved', originalItemId: 'full-approved', originalUpdateId: null,
-        itemId: 'full-approved', sourceEventId: null, occurredAt: '2026-10-20T03:00:00Z', discoveredAt: '2026-10-20T03:00:00Z',
+        activityEvidence: [{
+        id: 'team-activity-summary-full-approved-1', originalItemId: 'full-approved', originalUpdateId: null,
+        itemId: 'full-approved', sourceEventId: 'team-activity-summary-full-approved-2026-10-18', occurredAt: '2026-10-18', discoveredAt: '2026-10-18',
+        kind: 'work', summary: '3 team activity events recorded', attributionBasis: 'team-safe-activity-summary', evidenceRef: null,
+        included: true, amendmentIds: [], approvalDecisionIds: [],
+      }, {
+        id: 'team-activity-summary-full-approved-2', originalItemId: 'full-approved', originalUpdateId: null,
+        itemId: 'full-approved', sourceEventId: 'team-activity-summary-full-approved-2026-10-20', occurredAt: '2026-10-20', discoveredAt: '2026-10-20',
         kind: 'work', summary: '3 team activity events recorded', attributionBasis: 'team-safe-activity-summary', evidenceRef: null,
         included: true, amendmentIds: [], approvalDecisionIds: [],
       }],
     });
     assert.equal(context.owner, 'person-1');
+    assert.equal(context.ownerName, 'Synthetic Person');
     assert.equal(context.health.state, 'on-track');
     assert.equal(context.target, '2026-11-15');
+    assert.deepEqual({ proposedStart: forecast.schedule.proposedStart, proposedEnd: forecast.schedule.proposedEnd, proposedScheduleKind: forecast.schedule.proposedScheduleKind }, {
+      proposedStart: '2026-10-21', proposedEnd: '2026-10-27', proposedScheduleKind: 'span',
+    });
+    assert.deepEqual(snapshot.releases, [{ id: 'full-release', title: 'Synthetic release', project: 'full-project', owner: 'person-1', ownerName: 'Synthetic Person', status: 'scoping', target: '2026-11-15', sourcePath: null }]);
+    assert.deepEqual({ plannedStart: context.schedule.plannedStart, plannedEnd: context.schedule.plannedEnd, provisional: context.schedule.provisional, approved: context.schedule.approved }, {
+      plannedStart: '2026-09-30', plannedEnd: '2026-10-23', provisional: true, approved: true,
+    });
     assert.doesNotMatch(JSON.stringify(companionRead), /sourcePath|privateNotes|transcript|credential/u);
     const workProjection = buildWorkProjection({ items: snapshot.items, evidence: snapshot.activityEvidence, now: '2026-10-21' });
     assert.equal(workProjection.get('full-approved').own.state, 'recent');
@@ -274,6 +298,7 @@ test('full-current companion normalizes approved ranges, safe health, hierarchy 
     assert.deepEqual(mismatched.taskMetadata, []);
     assert.deepEqual(mismatched.activitySummaries, []);
     assert.deepEqual(mismatched.contextMetadata, []);
+    assert.deepEqual(mismatched.releaseMetadata, []);
   } finally {
     unlinkSync(join(root, 'projection.json'));
     unlinkSync(join(root, 'companion.json'));
@@ -366,7 +391,61 @@ test('migrates v1 directory-only companions without context metadata to an empty
     const read = readTeamCompanion({ dataRoot: root, companionPath: 'companion.json', projection: fullTaskProjection(), expectedRosterDigest: digest(['person-1']) });
     assert.deepEqual(read.contextMetadata, []);
     const { companionDigest: _legacyDigest, ...legacyWithoutDigest } = legacy;
-    assert.equal(read.companionDigest, digest({ ...legacyWithoutDigest, contextMetadata: [] }));
+    assert.equal(read.companionDigest, digest({ ...legacyWithoutDigest, contextMetadata: [], releaseMetadata: [] }));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('legacy full-current context rows may omit the additive owner display label', () => {
+  const projectionValue = fullTaskProjection();
+  const legacy = fullCurrentCompanion(projectionValue);
+  delete legacy.contextMetadata[0].ownerName;
+  delete legacy.companionDigest;
+  legacy.companionDigest = digest(legacy);
+  assert.equal(validateTeamCompanion(legacy, projectionValue).valid, true);
+  const viewerProjection = {
+    ...projectionValue,
+    tasks: projectionValue.tasks.map(task => ({
+      ...task,
+      scope: task.description,
+      completionCondition: task.completionCriteria,
+      approvedDate: task.deadline?.label === 'approved' ? task.deadline.date : null,
+      forecastDate: task.deadline?.label === 'forecast' ? task.deadline.date : null,
+      checkpoint: null,
+      dependencies: [],
+      evidenceLinks: [],
+    })),
+  };
+  const snapshot = buildTeamProjectionSnapshot(viewerProjection, {}, { ...legacy, staleSchedule: false, staleActivity: false });
+  assert.equal(snapshot.items.find(item => item.id === 'full-project').ownerName, 'Synthetic Person');
+});
+
+test('migrates legacy full-current payloads before enforcing context and activity coverage', () => {
+  const projectionValue = fullTaskProjection();
+  const legacy = fullCurrentCompanion(projectionValue);
+  legacy.mode = 'full-current-v1';
+  legacy.schedules = legacy.schedules.map(({ provisional: _provisional, ...entry }) => entry);
+  legacy.activitySummaries = legacy.activitySummaries.map(({ occurredDates: _dates, activityKinds: _kinds, ...entry }) => entry);
+  delete legacy.contextMetadata;
+  delete legacy.releaseMetadata;
+  delete legacy.proposedSchedules;
+  delete legacy.companionDigest;
+  legacy.companionDigest = digest(legacy);
+  const root = join(CHECK_ROOT, 'legacy-full-current-companion');
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, 'projection.json'), `${JSON.stringify(projectionValue)}\n`, { mode: 0o600 });
+  writeFileSync(join(root, 'companion.json'), `${JSON.stringify(legacy)}\n`, { mode: 0o600 });
+  try {
+    const loaded = readTeamCompanion({ dataRoot: root, companionPath: 'companion.json', projection: projectionValue, expectedRosterDigest: digest(['person-1']) });
+    assert.equal(loaded.legacyContract, true);
+    assert.equal(loaded.legacyCompanionDigest, legacy.companionDigest);
+    assert.deepEqual(loaded.contextMetadata, []);
+    assert.deepEqual(loaded.releaseMetadata, []);
+    assert.deepEqual(loaded.proposedSchedules, []);
+    assert.equal(loaded.schedules[0].provisional, false);
+    assert.deepEqual(loaded.activitySummaries[0].occurredDates, []);
+    assert.deepEqual(loaded.activitySummaries[0].activityKinds, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -419,6 +498,9 @@ test('stale companion schedules fail soft and unsafe paths never resolve', () =>
   mkdirSync(CHECK_ROOT, { recursive: true });
   const path = join(CHECK_ROOT, 'team-safe-companion-stale.json');
   const value = companion();
+  value.contextMetadata = [{ contextId: 'task-safe', owner: 'person-1', ownerName: 'Synthetic Person', healthState: 'on-track', target: '2026-10-02' }];
+  value.releaseMetadata = [{ releaseId: 'release-safe', projectId: 'task-safe', title: 'Synthetic release', owner: 'person-1', ownerName: 'Synthetic Person', status: 'planned', target: '2026-10-02' }];
+  value.proposedSchedules = [{ taskId: 'task-safe', proposedStart: '2026-10-01', proposedEnd: '2026-10-03', proposedScheduleKind: 'span' }];
   value.activitySummaries = [{ taskId: 'task-safe', eventCount: 2, latestOccurredAt: '2026-10-02T03:00:00Z' }];
   delete value.companionDigest;
   value.companionDigest = digest(value);
@@ -432,6 +514,9 @@ test('stale companion schedules fail soft and unsafe paths never resolve', () =>
     assert.equal(stale.staleSchedule, true);
     assert.deepEqual(stale.schedules, []);
     assert.deepEqual(stale.taskMetadata, []);
+    assert.deepEqual(stale.contextMetadata, []);
+    assert.deepEqual(stale.releaseMetadata, []);
+    assert.deepEqual(stale.proposedSchedules, []);
     assert.deepEqual(stale.activitySummaries, []);
     assert.deepEqual(stale.directory, []);
     const policyStale = readTeamCompanion({
