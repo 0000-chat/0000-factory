@@ -21,9 +21,15 @@ const FULL_CURRENT_MODE = 'full-current-v1';
 const DIRECTORY_ONLY_SCHEDULE_RULE = 'directory-only-no-task-schedules';
 const DIRECTORY_KEYS = ['id', 'displayName', 'avatar'];
 const SCHEDULE_KEYS = ['taskId', 'approvedStart', 'approvedEnd'];
+const SCHEDULE_OPTIONAL_KEYS = ['provisional'];
+const PROPOSED_SCHEDULE_KEYS = ['taskId', 'proposedStart', 'proposedEnd', 'proposedScheduleKind'];
+const PROPOSED_SCHEDULE_KINDS = new Set(['span', 'slice', 'checkpoint']);
 const METADATA_KEYS = ['taskId', 'status', 'commitment', 'phase', 'healthState'];
 const CONTEXT_KEYS = ['contextId', 'owner', 'healthState', 'target'];
+const RELEASE_KEYS = ['releaseId', 'projectId', 'title', 'owner', 'ownerName', 'status', 'target'];
 const ACTIVITY_KEYS = ['taskId', 'eventCount', 'latestOccurredAt'];
+const ACTIVITY_OPTIONAL_KEYS = ['occurredDates', 'activityKinds'];
+const QUALIFYING_ACTIVITY_KINDS = new Set(['work', 'result', 'decision']);
 const PRIVATE_TEXT = /(?:https?:\/\/|\b(?:password|token|secret|credential)\s*[:=]|\bprivate(?:[ _-](?:note|data|history|source))?\b|\braw[ _-](?:evidence|source)\b)/iu;
 
 function isRecord(value) {
@@ -65,14 +71,49 @@ function companionWithoutDigest(value) {
   return rest;
 }
 
-function normalizeLegacyDirectoryOnly(value) {
-  if (value?.mode !== DIRECTORY_ONLY_MODE || Object.hasOwn(value, 'contextMetadata')) return value;
-  // v1 directory-only artifacts predate bounded context metadata. Verify the
-  // legacy digest before adding the empty field, then rebind the normalized
-  // in-memory shape for downstream readers.
-  if (!DIGEST.test(String(value.companionDigest ?? '')) || value.companionDigest !== digest(companionWithoutDigest(value))) return value;
-  const migrated = { ...value, contextMetadata: [] };
-  return { ...migrated, companionDigest: digest(companionWithoutDigest(migrated)) };
+function normalizeLegacyCompanion(value) {
+  if (!isRecord(value)) return value;
+  const directoryOnly = value.mode === DIRECTORY_ONLY_MODE;
+  const fullCurrent = value.mode === FULL_CURRENT_MODE || value.mode === undefined;
+  const legacyDirectory = directoryOnly && (!Object.hasOwn(value, 'contextMetadata') || !Object.hasOwn(value, 'releaseMetadata'));
+  const legacyFull = fullCurrent && (!Object.hasOwn(value, 'contextMetadata')
+    || !Object.hasOwn(value, 'releaseMetadata')
+    || (Array.isArray(value.contextMetadata) && value.contextMetadata.some(entry => !Object.hasOwn(entry, 'ownerName')))
+    || (Array.isArray(value.schedules) && value.schedules.some(entry => !Object.hasOwn(entry, 'provisional')))
+    || (Array.isArray(value.activitySummaries) && value.activitySummaries.some(entry => !Object.hasOwn(entry, 'occurredDates') || !Object.hasOwn(entry, 'activityKinds')))
+    || !Object.hasOwn(value, 'activitySummaries')
+    || !Object.hasOwn(value, 'proposedSchedules'));
+  if (!legacyDirectory && !legacyFull) return value;
+  // Legacy migration is permitted only after validating the raw artifact's
+  // digest and roster binding. Keep both digests on the in-memory value so a
+  // receipt can prove which old bytes were normalized; neither field is
+  // serialized back into the public companion artifact.
+  if (!DIGEST.test(String(value.companionDigest ?? ''))
+    || value.companionDigest !== digest(companionWithoutDigest(value))
+    || !isRecord(value.audit)
+    || !DIGEST.test(String(value.audit.rosterDigest ?? ''))
+    || !Array.isArray(value.directory)
+    || value.audit.rosterDigest !== digest(value.directory.map(entry => entry?.id).sort())) return value;
+  const migrated = {
+    ...value,
+    contextMetadata: (value.contextMetadata ?? []).map(entry => ({ ownerName: null, ...entry })),
+    releaseMetadata: value.releaseMetadata ?? [],
+    proposedSchedules: value.proposedSchedules ?? [],
+  };
+  if (legacyFull) {
+    migrated.schedules = (value.schedules ?? []).map(entry => ({ ...entry, provisional: entry.provisional ?? false }));
+    migrated.activitySummaries = (value.activitySummaries ?? []).map(entry => ({
+      ...entry,
+      occurredDates: entry.occurredDates ?? [],
+      activityKinds: entry.activityKinds ?? [],
+    }));
+  }
+  const normalized = { ...migrated, companionDigest: digest(companionWithoutDigest(migrated)) };
+  Object.defineProperties(normalized, {
+    legacyContract: { value: true, enumerable: false },
+    legacyCompanionDigest: { value: value.companionDigest, enumerable: false },
+  });
+  return normalized;
 }
 
 function standingProjectionDigest(projection) {
@@ -96,10 +137,10 @@ function projectionDigest(projection) {
 }
 
 function validateCompanion(value, projection, { enforceTaskIds = Boolean(projection), expectedRosterDigest = null } = {}) {
-  value = normalizeLegacyDirectoryOnly(value);
+  value = normalizeLegacyCompanion(value);
   const errors = [];
-  const topLevel = ['schemaVersion', 'kind', 'projectionDigest', 'projectionRevision', 'policyRevision', 'generatedAt', 'directory', 'schedules', 'taskMetadata', 'contextMetadata', 'audit', 'publish', 'companionDigest'];
-  exactKeys(value, topLevel, '$', errors, ['mode', 'activitySummaries']);
+  const topLevel = ['schemaVersion', 'kind', 'projectionDigest', 'projectionRevision', 'policyRevision', 'generatedAt', 'directory', 'schedules', 'proposedSchedules', 'taskMetadata', 'contextMetadata', 'audit', 'publish', 'companionDigest'];
+  exactKeys(value, topLevel, '$', errors, ['mode', 'activitySummaries', 'releaseMetadata']);
   if (!isRecord(value)) return errors;
   if (value.schemaVersion !== 1) errors.push('schemaVersion: must be 1');
   if (value.kind !== 'team-safe-companion') errors.push('kind: invalid');
@@ -120,7 +161,12 @@ function validateCompanion(value, projection, { enforceTaskIds = Boolean(project
     if (typeof entry.displayName !== 'string' || entry.displayName.trim().length === 0 || entry.displayName.length > 160 || /[\u0000-\u001f\u007f]/u.test(entry.displayName) || PRIVATE_TEXT.test(entry.displayName)) errors.push(`${path}.displayName: unsafe display text`);
     if (entry.avatar !== null && (!AVATAR.test(String(entry.avatar)) || String(entry.avatar).includes('..'))) errors.push(`${path}.avatar: must be a local avatar basename or null`);
   });
-  const taskIds = projection && Array.isArray(projection.tasks) ? new Set(projection.tasks.map(task => task.taskId)) : null;
+  const taskIds = projection && Array.isArray(projection.tasks)
+    ? new Set([
+      ...projection.tasks.map(task => task.taskId),
+      ...(projection.contextNodes ?? []).map(node => node.id),
+    ])
+    : null;
   const projectedTasks = projection && Array.isArray(projection.tasks)
     ? new Map(projection.tasks.map(task => [task.taskId, task]))
     : null;
@@ -128,12 +174,13 @@ function validateCompanion(value, projection, { enforceTaskIds = Boolean(project
   if (!Array.isArray(value.schedules)) errors.push('schedules: must be an array');
   else value.schedules.forEach((entry, index) => {
     const path = `schedules[${index}]`;
-    exactKeys(entry, SCHEDULE_KEYS, path, errors);
+    exactKeys(entry, SCHEDULE_KEYS, path, errors, SCHEDULE_OPTIONAL_KEYS);
     if (!isRecord(entry)) return;
     if (!ID.test(String(entry.taskId)) || scheduleIds.has(entry.taskId) || (enforceTaskIds && taskIds && !taskIds.has(entry.taskId))) errors.push(`${path}.taskId: must be a unique projected task ID`);
     scheduleIds.add(entry.taskId);
     if (entry.approvedStart !== null && !isDate(entry.approvedStart)) errors.push(`${path}.approvedStart: must be a date or null`);
     if (!isDate(entry.approvedEnd)) errors.push(`${path}.approvedEnd: must be a date`);
+    if (entry.provisional !== undefined && typeof entry.provisional !== 'boolean') errors.push(`${path}.provisional: must be boolean`);
     if (isDate(entry.approvedStart) && entry.approvedEnd < entry.approvedStart) errors.push(`${path}: approved end precedes start`);
     if (enforceTaskIds && projectedTasks?.has(entry.taskId)) {
       const projectedTask = projectedTasks.get(entry.taskId);
@@ -141,6 +188,19 @@ function validateCompanion(value, projection, { enforceTaskIds = Boolean(project
         ?? (projectedTask.deadline?.label === 'approved' ? projectedTask.deadline.date : null);
       if (projectedEnd !== entry.approvedEnd) errors.push(`${path}.approvedEnd: must match the existing approved projection deadline`);
     }
+  });
+  const proposedScheduleIds = new Set();
+  if (!Array.isArray(value.proposedSchedules)) errors.push('proposedSchedules: must be an array');
+  else value.proposedSchedules.forEach((entry, index) => {
+    const path = `proposedSchedules[${index}]`;
+    exactKeys(entry, PROPOSED_SCHEDULE_KEYS, path, errors);
+    if (!isRecord(entry)) return;
+    if (!ID.test(String(entry.taskId)) || proposedScheduleIds.has(entry.taskId) || (enforceTaskIds && taskIds && !taskIds.has(entry.taskId))) errors.push(`${path}.taskId: must be a unique projected task ID`);
+    proposedScheduleIds.add(entry.taskId);
+    if (!isDate(entry.proposedStart)) errors.push(`${path}.proposedStart: must be a calendar date`);
+    if (!isDate(entry.proposedEnd)) errors.push(`${path}.proposedEnd: must be a calendar date`);
+    if (isDate(entry.proposedStart) && isDate(entry.proposedEnd) && entry.proposedEnd < entry.proposedStart) errors.push(`${path}: proposed end precedes start`);
+    if (!PROPOSED_SCHEDULE_KINDS.has(entry.proposedScheduleKind)) errors.push(`${path}.proposedScheduleKind: invalid typed proposal kind`);
   });
   const metadataIds = new Set();
   if (!Array.isArray(value.taskMetadata)) errors.push('taskMetadata: must be an array');
@@ -163,12 +223,29 @@ function validateCompanion(value, projection, { enforceTaskIds = Boolean(project
   if (!Array.isArray(value.contextMetadata)) errors.push('contextMetadata: must be an array');
   else value.contextMetadata.forEach((entry, index) => {
     const path = `contextMetadata[${index}]`;
-    exactKeys(entry, CONTEXT_KEYS, path, errors);
+    exactKeys(entry, CONTEXT_KEYS, path, errors, ['ownerName']);
     if (!isRecord(entry)) return;
     if (!ID.test(String(entry.contextId)) || contextIds.has(entry.contextId) || (enforceTaskIds && projectedContextIds && !projectedContextIds.has(entry.contextId))) errors.push(`${path}.contextId: must be a unique projected context ID`);
     contextIds.add(entry.contextId);
     if (entry.owner !== null && !ID.test(String(entry.owner))) errors.push(`${path}.owner: must be a safe identity ID or null`);
+    if (entry.ownerName !== undefined && entry.ownerName !== null && (typeof entry.ownerName !== 'string' || entry.ownerName.trim().length === 0 || entry.ownerName.length > 160 || /[\u0000-\u001f\u007f]/u.test(entry.ownerName) || PRIVATE_TEXT.test(entry.ownerName))) errors.push(`${path}.ownerName: unsafe display text`);
     if (!SAFE_HEALTH_STATES.has(entry.healthState)) errors.push(`${path}.healthState: invalid safe health state`);
+    if (entry.target !== null && !isDate(entry.target)) errors.push(`${path}.target: must be a date or null`);
+  });
+  const releaseIds = new Set();
+  if (value.releaseMetadata !== undefined && !Array.isArray(value.releaseMetadata)) errors.push('releaseMetadata: must be an array');
+  else (value.releaseMetadata ?? []).forEach((entry, index) => {
+    const path = `releaseMetadata[${index}]`;
+    exactKeys(entry, RELEASE_KEYS, path, errors);
+    if (!isRecord(entry)) return;
+    if (!ID.test(String(entry.releaseId)) || releaseIds.has(entry.releaseId)) errors.push(`${path}.releaseId: must be a unique release ID`);
+    releaseIds.add(entry.releaseId);
+    if (enforceTaskIds && taskIds && !taskIds.has(entry.projectId)) errors.push(`${path}.projectId: must be a projected task or context ID`);
+    if (!ID.test(String(entry.projectId))) errors.push(`${path}.projectId: must be a projected item ID`);
+    if (typeof entry.title !== 'string' || entry.title.trim().length === 0 || entry.title.length > 240 || /[\u0000-\u001f\u007f]/u.test(entry.title) || PRIVATE_TEXT.test(entry.title)) errors.push(`${path}.title: unsafe display text`);
+    if (entry.owner !== null && !ID.test(String(entry.owner))) errors.push(`${path}.owner: must be a safe identity ID or null`);
+    if (entry.ownerName !== null && (typeof entry.ownerName !== 'string' || entry.ownerName.trim().length === 0 || entry.ownerName.length > 160 || /[\u0000-\u001f\u007f]/u.test(entry.ownerName) || PRIVATE_TEXT.test(entry.ownerName))) errors.push(`${path}.ownerName: unsafe display text`);
+    if (entry.status !== null && (typeof entry.status !== 'string' || entry.status.trim().length === 0 || entry.status.length > 80 || /[\u0000-\u001f\u007f]/u.test(entry.status) || PRIVATE_TEXT.test(entry.status))) errors.push(`${path}.status: unsafe status`);
     if (entry.target !== null && !isDate(entry.target)) errors.push(`${path}.target: must be a date or null`);
   });
   const activityIds = new Set();
@@ -177,12 +254,20 @@ function validateCompanion(value, projection, { enforceTaskIds = Boolean(project
   } else if (!Array.isArray(value.activitySummaries)) errors.push('activitySummaries: must be an array');
   else value.activitySummaries.forEach((entry, index) => {
     const path = `activitySummaries[${index}]`;
-    exactKeys(entry, ACTIVITY_KEYS, path, errors);
+    exactKeys(entry, ACTIVITY_KEYS, path, errors, ACTIVITY_OPTIONAL_KEYS);
     if (!isRecord(entry)) return;
     if (!ID.test(String(entry.taskId)) || activityIds.has(entry.taskId) || (enforceTaskIds && taskIds && !taskIds.has(entry.taskId))) errors.push(`${path}.taskId: must be a unique projected task ID`);
     activityIds.add(entry.taskId);
     if (!Number.isInteger(entry.eventCount) || entry.eventCount < 0) errors.push(`${path}.eventCount: must be a non-negative integer`);
     if (entry.latestOccurredAt !== null && !isUtc(entry.latestOccurredAt)) errors.push(`${path}.latestOccurredAt: must be a UTC timestamp or null`);
+    if (entry.occurredDates !== undefined) {
+      if (!Array.isArray(entry.occurredDates) || entry.occurredDates.some(value => !isDate(value))) errors.push(`${path}.occurredDates: must contain calendar dates`);
+      else if (new Set(entry.occurredDates).size !== entry.occurredDates.length) errors.push(`${path}.occurredDates: must not contain duplicates`);
+    }
+    if (entry.activityKinds !== undefined) {
+      if (!Array.isArray(entry.activityKinds) || entry.activityKinds.some(value => !QUALIFYING_ACTIVITY_KINDS.has(value))) errors.push(`${path}.activityKinds: must contain qualifying activity kinds`);
+      else if (new Set(entry.activityKinds).size !== entry.activityKinds.length) errors.push(`${path}.activityKinds: must not contain duplicates`);
+    }
   });
   exactKeys(value.audit, ['directoryRule', 'scheduleRule', 'sourceTaskCount', 'rosterDigest'], '$.audit', errors);
   if (isRecord(value.audit)) {
@@ -191,8 +276,9 @@ function validateCompanion(value, projection, { enforceTaskIds = Boolean(project
     if (value.audit.scheduleRule !== expectedScheduleRule) errors.push('audit.scheduleRule: invalid');
     if (!Number.isInteger(value.audit.sourceTaskCount) || value.audit.sourceTaskCount < 0) errors.push('audit.sourceTaskCount: invalid');
     if (directoryOnly && (!Array.isArray(value.schedules) || !Array.isArray(value.taskMetadata) || !Array.isArray(value.contextMetadata)
-      || value.schedules.length !== 0 || value.taskMetadata.length !== 0 || value.contextMetadata.length !== 0)) {
-      errors.push('directory-only companion: schedules, taskMetadata, and contextMetadata must be empty');
+      || (value.releaseMetadata !== undefined && !Array.isArray(value.releaseMetadata))
+      || value.schedules.length !== 0 || value.proposedSchedules.length !== 0 || value.taskMetadata.length !== 0 || value.contextMetadata.length !== 0 || (value.releaseMetadata ?? []).length !== 0)) {
+      errors.push('directory-only companion: schedules, taskMetadata, contextMetadata, and releaseMetadata must be empty');
     }
     if (!DIGEST.test(String(value.audit.rosterDigest ?? ''))) errors.push('audit.rosterDigest: invalid');
     if (Array.isArray(value.directory) && value.audit.rosterDigest !== digest(value.directory.map(entry => entry.id).sort())) errors.push('audit.rosterDigest: does not bind directory');
@@ -204,14 +290,15 @@ function validateCompanion(value, projection, { enforceTaskIds = Boolean(project
     if (value.policyRevision !== projection.policyRevision) errors.push('policyRevision: does not bind the full task projection');
     if (value.audit?.sourceTaskCount !== projection.tasks.length) errors.push('audit.sourceTaskCount: must match the raw full task projection');
     if (value.mode === DIRECTORY_ONLY_MODE && (!Array.isArray(value.schedules) || !Array.isArray(value.taskMetadata) || !Array.isArray(value.contextMetadata)
-      || value.schedules.length !== 0 || value.taskMetadata.length !== 0 || value.contextMetadata.length !== 0)) {
-      errors.push('directory-only companion: task metadata, context metadata, and schedules are not allowed');
+      || (value.releaseMetadata !== undefined && !Array.isArray(value.releaseMetadata))
+      || value.schedules.length !== 0 || value.proposedSchedules.length !== 0 || value.taskMetadata.length !== 0 || value.contextMetadata.length !== 0 || (value.releaseMetadata ?? []).length !== 0)) {
+      errors.push('directory-only companion: task metadata, context metadata, release metadata, and schedules are not allowed');
     }
-    if (value.mode !== DIRECTORY_ONLY_MODE && (!Array.isArray(value.contextMetadata) || value.contextMetadata.length !== (projection.contextNodes?.length ?? 0))) {
+    if (value.mode !== DIRECTORY_ONLY_MODE && value.legacyContract !== true && (!Array.isArray(value.contextMetadata) || value.contextMetadata.length !== (projection.contextNodes?.length ?? 0))) {
       errors.push('contextMetadata: full-current companion must cover every projected context');
     }
-    if (value.mode !== DIRECTORY_ONLY_MODE && (!Array.isArray(value.activitySummaries) || value.activitySummaries.length !== projection.tasks.length)) {
-      errors.push('activitySummaries: full-current companion must cover every projected task');
+    if (value.mode !== DIRECTORY_ONLY_MODE && value.legacyContract !== true && (!Array.isArray(value.activitySummaries) || value.activitySummaries.length !== (projection.tasks.length + (projection.contextNodes?.length ?? 0)))) {
+      errors.push('activitySummaries: full-current companion must cover every projected task and context');
     }
   }
   if (expectedRosterDigest !== null
@@ -259,7 +346,7 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
   } catch (error) {
     throw new Error(`team companion: invalid JSON (${error instanceof Error ? error.message : String(error)})`);
   }
-  value = normalizeLegacyDirectoryOnly(value);
+  value = normalizeLegacyCompanion(value);
   const errors = validateCompanion(value, null);
   if (errors.length) throw new Error(`team companion is invalid: ${errors.join('; ')}`);
   const currentDigest = projectionDigest(projection);
@@ -287,7 +374,10 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
       staleMetadata: directoryOnly,
       staleActivity: directoryOnly,
       contextMetadata: directoryOnly ? [] : (value.contextMetadata ?? []),
+      releaseMetadata: directoryOnly ? [] : (value.releaseMetadata ?? []),
+      proposedSchedules: directoryOnly ? [] : (value.proposedSchedules ?? []),
       activitySummaries: directoryOnly ? [] : (value.activitySummaries ?? []),
+      ...(value.legacyContract ? { legacyContract: true, legacyCompanionDigest: value.legacyCompanionDigest } : {}),
       fileDigest: `sha256:${createHash('sha256').update(artifact.bytes).digest('hex')}`,
     });
   }
@@ -297,6 +387,8 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
     schedules: [],
     taskMetadata: [],
     contextMetadata: [],
+    releaseMetadata: [],
+    proposedSchedules: [],
     activitySummaries: [],
     staleSchedule: true,
     staleMetadata: true,
@@ -306,6 +398,7 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
     ...(policyMismatch ? { policyMismatch: true } : {}),
     ...(trustedRosterMismatch ? { trustedRosterMismatch: true } : {}),
     ...(projectionMismatch ? { projectionMismatch: true } : {}),
+    ...(value.legacyContract ? { legacyContract: true, legacyCompanionDigest: value.legacyCompanionDigest } : {}),
     fileDigest: `sha256:${createHash('sha256').update(artifact.bytes).digest('hex')}`,
   });
   return Object.freeze({
@@ -314,6 +407,8 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
     schedules: [],
     taskMetadata: [],
     contextMetadata: [],
+    releaseMetadata: [],
+    proposedSchedules: [],
     activitySummaries: [],
     staleSchedule: true,
     staleMetadata: true,
@@ -323,6 +418,7 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
     ...(policyMismatch ? { policyMismatch: true } : {}),
     ...(trustedRosterMismatch ? { trustedRosterMismatch: true } : {}),
     ...(projectionMismatch ? { projectionMismatch: true } : {}),
+    ...(value.legacyContract ? { legacyContract: true, legacyCompanionDigest: value.legacyCompanionDigest } : {}),
     currentProjectionDigest: currentDigest,
     fileDigest: `sha256:${createHash('sha256').update(artifact.bytes).digest('hex')}`,
   });
