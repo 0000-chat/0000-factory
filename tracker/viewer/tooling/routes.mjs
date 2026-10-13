@@ -7,7 +7,7 @@ const VIEWER_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const ROUTE_TREE = join(VIEWER_DIR, 'src', 'routeTree.gen.ts');
 
 function generateRoutes() {
-  const result = spawnSync('bun', ['x', 'tsr', 'generate'], {
+  const result = spawnSync('bun', ['x', '--no-install', '-p', '@tanstack/router-cli', 'tsr', 'generate'], {
     cwd: VIEWER_DIR,
     stdio: 'inherit',
   });

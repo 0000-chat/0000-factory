@@ -7,11 +7,35 @@ import { taskCodeForId, taskCodeIndex } from '../tracker/task-codes.mjs';
 
 const EMPTY_SOURCE_DIGEST = `sha256:${'0'.repeat(64)}`;
 
+function safeActivityEvidence(companion) {
+  if (companion?.staleActivity === true || !Array.isArray(companion?.activitySummaries)) return [];
+  return companion.activitySummaries
+    .filter(summary => Number.isInteger(summary?.eventCount) && summary.eventCount > 0 && typeof summary.latestOccurredAt === 'string')
+    .map(summary => ({
+      id: `team-activity-summary-${summary.taskId}`,
+      originalItemId: summary.taskId,
+      originalUpdateId: null,
+      itemId: summary.taskId,
+      sourceEventId: null,
+      occurredAt: summary.latestOccurredAt,
+      discoveredAt: summary.latestOccurredAt,
+      kind: 'work',
+      summary: `${summary.eventCount} team activity event${summary.eventCount === 1 ? '' : 's'} recorded`,
+      attributionBasis: 'team-safe-activity-summary',
+      evidenceRef: null,
+      included: true,
+      amendmentIds: [],
+      approvalDecisionIds: [],
+    }));
+}
+
 export function buildTeamProjectionSnapshot(projection, source = {}, companion = null) {
   const initialized = projection.sourcePlanDigest !== EMPTY_SOURCE_DIGEST || projection.tasks.length > 0;
   const directory = Array.isArray(companion?.directory) ? companion.directory : [];
   const directoryById = new Map(directory.map(entry => [entry.id, entry]));
   const metadataByTaskId = new Map((Array.isArray(companion?.taskMetadata) ? companion.taskMetadata : []).map(entry => [entry.taskId, entry]));
+  const metadataByContextId = new Map((Array.isArray(companion?.contextMetadata) ? companion.contextMetadata : []).map(entry => [entry.contextId, entry]));
+  const activityByTaskId = new Map((Array.isArray(companion?.activitySummaries) ? companion.activitySummaries : []).map(entry => [entry.taskId, entry]));
   const companionSchedulesAreAuthoritative = companion?.kind === 'team-safe-companion'
     && companion.directoryOnly !== true
     && companion.staleSchedule === false
@@ -43,7 +67,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     ...contextNodes.keys(),
   ])].map(([code, id]) => [id, code]));
 
-  const sharedItem = ({ id, title, type, status, owner = null, ownerName = null, parent = null, contextOnly = false, metadata = null }) => ({
+  const sharedItem = ({ id, title, type, status, owner = null, ownerName = null, parent = null, contextOnly = false, metadata = null, contextMetadata = null, activitySummary = null }) => ({
     id,
     referenceCode: referenceCodes.get(id) ?? taskCodeForId(id),
     title: title ?? id,
@@ -56,11 +80,12 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     dependsOn: [],
     updatedAt: null,
     completedAt: null,
-    target: null,
+    target: contextMetadata?.target ?? null,
     bucket: 'other',
     archived: false,
     completed: !contextOnly && status === 'done',
     commitment: metadata?.commitment ?? null,
+    activitySummary,
     plan: null,
     sourcePath: null,
     sections: {
@@ -79,9 +104,9 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     linked: { decisions: [], releases: [], updates: [] },
     progress: { scoped: false, percent: null, milestones: [] },
     health: {
-      state: metadata?.healthState ?? 'unknown',
-      reason: contextOnly ? 'Structural context only.' : 'Team projection has no health assessment.',
-      missingInformation: contextOnly ? 'Only structural context is shared.' : 'Health evidence is outside this projection.',
+      state: contextMetadata?.healthState ?? metadata?.healthState ?? 'unknown',
+      reason: contextOnly ? 'Team-safe context health state.' : 'Team projection has no health assessment.',
+      missingInformation: contextOnly ? 'Health reason is outside this projection.' : 'Health evidence is outside this projection.',
       suggestedAction: contextOnly ? 'Select a shared task to view actionable work.' : 'Coordinate the next step with the assigned owner.',
       actor: 'team',
       reviewedAt: null,
@@ -126,6 +151,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
         ownerName: ownerProfile?.displayName ?? task.assignee ?? null,
         parent: task.parentId ?? null,
         metadata,
+        activitySummary: activityByTaskId.get(task.taskId) ?? null,
       }),
       target: plannedEnd,
       sections: {
@@ -170,13 +196,18 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
   const taskIds = new Set(items.map(item => item.id));
   for (const node of contextNodes.values()) {
     if (taskIds.has(node.id)) throw new Error(`context node ID ${node.id} collides with a task ID`);
+    const metadata = metadataByContextId.get(node.id) ?? null;
+    const ownerProfile = metadata?.owner ? directoryById.get(metadata.owner) : null;
     items.push(sharedItem({
       id: node.id,
       title: node.title,
       type: node.kind,
       status: '',
+      owner: metadata?.owner ?? null,
+      ownerName: ownerProfile?.displayName ?? metadata?.owner ?? null,
       parent: node.parentId,
       contextOnly: true,
+      contextMetadata: metadata,
     }));
   }
 
@@ -220,7 +251,7 @@ export function buildTeamProjectionSnapshot(projection, source = {}, companion =
     decisions: [],
     releases: [],
     updates: [],
-    activityEvidence: [],
+    activityEvidence: safeActivityEvidence(companion),
     team: teamProfiles,
   };
 }

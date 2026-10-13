@@ -209,6 +209,7 @@ function directoryOnlyCompanion(projectionValue, overrides = {}) {
     directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }],
     schedules: [],
     taskMetadata: [],
+    contextMetadata: [],
     audit: {
       directoryRule: 'approved-roster-safe-display-metadata-only',
       scheduleRule: 'directory-only-no-task-schedules',
@@ -232,6 +233,7 @@ function standingCompanion(projectionValue, overrides = {}) {
     directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }],
     schedules: [],
     taskMetadata: [],
+    contextMetadata: [],
     audit: {
       directoryRule: 'approved-roster-safe-display-metadata-only',
       scheduleRule: 'approved-endpoint-only-with-existing-task-proof',
