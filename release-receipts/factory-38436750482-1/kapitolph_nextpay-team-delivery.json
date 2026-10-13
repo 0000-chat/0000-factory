@@ -1,0 +1,16 @@
+{
+  "schema_version": "1",
+  "release_id": "factory-38436750482-1",
+  "consumer_repository": "kapitolph/nextpay-team-delivery",
+  "factory_repository": "https://github.com/0000-chat/0000-factory.git",
+  "factory_branch": "codex/weekly-planning-archive",
+  "factory_sha": "c5b4a5a9086eb768789f5c9b8e4bdf46ccda2b0f",
+  "status": "triggered",
+  "sync_state": "pending-deployment",
+  "deployment_status": "pending-public-provenance",
+  "runtime_factory_sha": null,
+  "live_status": "pending",
+  "live_http_status": 200,
+  "live_url": "https://tracker.nextfinancial.xyz",
+  "runtime_request_cache_busted": true
+}
