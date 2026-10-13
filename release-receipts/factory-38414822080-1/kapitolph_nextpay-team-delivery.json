@@ -5,12 +5,18 @@
   "factory_repository": "https://github.com/0000-chat/0000-factory.git",
   "factory_branch": "codex/weekly-planning-archive",
   "factory_sha": "dd79943f2b32a173b7b486815fe4ac0e03f34496",
-  "status": "triggered",
-  "sync_state": "pending-deployment",
-  "deployment_status": "pending-public-provenance",
-  "runtime_factory_sha": null,
-  "live_status": "pending",
+  "status": "deployed",
+  "sync_state": "runtime-verified",
+  "deployment_status": "verified-public-provenance",
+  "runtime_factory_sha": "dd79943f2b32a173b7b486815fe4ac0e03f34496",
+  "live_status": "verified",
   "live_http_status": 200,
   "live_url": "https://tracker.nextfinancial.xyz",
-  "runtime_request_cache_busted": true
+  "runtime_request_cache_busted": true,
+  "runtime_proof": {
+    "kind": "public-provenance",
+    "status": 200,
+    "factory_sha": "dd79943f2b32a173b7b486815fe4ac0e03f34496",
+    "url": "https://tracker.nextfinancial.xyz/factory-provenance.json?release_id=factory-38414822080-1"
+  }
 }
