@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -352,6 +352,39 @@ test('companion rejects private fields and avatar traversal', () => {
   assert.equal(validateTeamCompanion({ ...value, privateNotes: 'secret' }).valid, false);
   assert.equal(validateTeamCompanion({ ...value, directory: [{ ...value.directory[0], avatar: '../../secret.webp' }] }).valid, false);
   assert.equal(validateTeamCompanion({ ...value, taskMetadata: [{ ...value.taskMetadata[0], healthState: 'private' }] }).valid, false);
+});
+
+test('migrates v1 directory-only companions without context metadata to an empty bounded section', () => {
+  const root = join(CHECK_ROOT, 'legacy-directory-only-companion');
+  mkdirSync(root, { recursive: true });
+  const legacy = directoryOnlyCompanion(fullTaskProjection());
+  delete legacy.contextMetadata;
+  delete legacy.companionDigest;
+  legacy.companionDigest = digest(legacy);
+  writeFileSync(join(root, 'companion.json'), `${JSON.stringify(legacy)}\n`, { mode: 0o600 });
+  try {
+    const read = readTeamCompanion({ dataRoot: root, companionPath: 'companion.json', projection: fullTaskProjection(), expectedRosterDigest: digest(['person-1']) });
+    assert.deepEqual(read.contextMetadata, []);
+    const { companionDigest: _legacyDigest, ...legacyWithoutDigest } = legacy;
+    assert.equal(read.companionDigest, digest({ ...legacyWithoutDigest, contextMetadata: [] }));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects context metadata in a directory-only companion', () => {
+  const root = join(CHECK_ROOT, 'directory-only-context-metadata');
+  mkdirSync(root, { recursive: true });
+  const invalid = directoryOnlyCompanion(fullTaskProjection());
+  invalid.contextMetadata = [{ contextId: 'full-project', owner: null, healthState: 'unknown', target: null }];
+  delete invalid.companionDigest;
+  invalid.companionDigest = digest(invalid);
+  writeFileSync(join(root, 'companion.json'), `${JSON.stringify(invalid)}\n`, { mode: 0o600 });
+  try {
+    assert.throws(() => readTeamCompanion({ dataRoot: root, companionPath: 'companion.json', projection: fullTaskProjection(), expectedRosterDigest: digest(['person-1']) }), /directory-only companion/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('roster binding is data-driven and status metadata cannot contradict the projection', () => {

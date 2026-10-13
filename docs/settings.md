@@ -175,8 +175,8 @@ retain hierarchy; ownership comes only from proven descendant tasks, and absent
 health values remain unknown.
 
 For the legacy full current-task copy, a directory-only companion sets
-`mode: "directory-only-v3"`, keeps `schedules`, `taskMetadata`, and
-`activitySummaries` empty, and sets `audit.scheduleRule` to
+`mode: "directory-only-v3"`, keeps `schedules`, `taskMetadata`,
+`contextMetadata`, and `activitySummaries` empty, and sets `audit.scheduleRule` to
 `directory-only-no-task-schedules`. Its `audit.sourceTaskCount` is the count
 of raw tasks in the bound full projection; it does not claim task metadata,
 schedule, or activity provenance. The full projection remains authoritative

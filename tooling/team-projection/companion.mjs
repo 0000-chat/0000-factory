@@ -65,6 +65,16 @@ function companionWithoutDigest(value) {
   return rest;
 }
 
+function normalizeLegacyDirectoryOnly(value) {
+  if (value?.mode !== DIRECTORY_ONLY_MODE || Object.hasOwn(value, 'contextMetadata')) return value;
+  // v1 directory-only artifacts predate bounded context metadata. Verify the
+  // legacy digest before adding the empty field, then rebind the normalized
+  // in-memory shape for downstream readers.
+  if (!DIGEST.test(String(value.companionDigest ?? '')) || value.companionDigest !== digest(companionWithoutDigest(value))) return value;
+  const migrated = { ...value, contextMetadata: [] };
+  return { ...migrated, companionDigest: digest(companionWithoutDigest(migrated)) };
+}
+
 function standingProjectionDigest(projection) {
   if (!isRecord(projection) || projection.kind !== 'standing-team-projection') return null;
   return digest({
@@ -86,6 +96,7 @@ function projectionDigest(projection) {
 }
 
 function validateCompanion(value, projection, { enforceTaskIds = Boolean(projection), expectedRosterDigest = null } = {}) {
+  value = normalizeLegacyDirectoryOnly(value);
   const errors = [];
   const topLevel = ['schemaVersion', 'kind', 'projectionDigest', 'projectionRevision', 'policyRevision', 'generatedAt', 'directory', 'schedules', 'taskMetadata', 'contextMetadata', 'audit', 'publish', 'companionDigest'];
   exactKeys(value, topLevel, '$', errors, ['mode', 'activitySummaries']);
@@ -179,9 +190,9 @@ function validateCompanion(value, projection, { enforceTaskIds = Boolean(project
     const expectedScheduleRule = directoryOnly ? DIRECTORY_ONLY_SCHEDULE_RULE : 'approved-endpoint-only-with-existing-task-proof';
     if (value.audit.scheduleRule !== expectedScheduleRule) errors.push('audit.scheduleRule: invalid');
     if (!Number.isInteger(value.audit.sourceTaskCount) || value.audit.sourceTaskCount < 0) errors.push('audit.sourceTaskCount: invalid');
-    if (directoryOnly && (!Array.isArray(value.schedules) || !Array.isArray(value.taskMetadata)
-      || value.schedules.length !== 0 || value.taskMetadata.length !== 0)) {
-      errors.push('directory-only companion: schedules and taskMetadata must be empty');
+    if (directoryOnly && (!Array.isArray(value.schedules) || !Array.isArray(value.taskMetadata) || !Array.isArray(value.contextMetadata)
+      || value.schedules.length !== 0 || value.taskMetadata.length !== 0 || value.contextMetadata.length !== 0)) {
+      errors.push('directory-only companion: schedules, taskMetadata, and contextMetadata must be empty');
     }
     if (!DIGEST.test(String(value.audit.rosterDigest ?? ''))) errors.push('audit.rosterDigest: invalid');
     if (Array.isArray(value.directory) && value.audit.rosterDigest !== digest(value.directory.map(entry => entry.id).sort())) errors.push('audit.rosterDigest: does not bind directory');
@@ -192,9 +203,9 @@ function validateCompanion(value, projection, { enforceTaskIds = Boolean(project
     if (value.projectionRevision !== projection.revision) errors.push('projectionRevision: does not bind the full task projection');
     if (value.policyRevision !== projection.policyRevision) errors.push('policyRevision: does not bind the full task projection');
     if (value.audit?.sourceTaskCount !== projection.tasks.length) errors.push('audit.sourceTaskCount: must match the raw full task projection');
-    if (value.mode === DIRECTORY_ONLY_MODE && (!Array.isArray(value.schedules) || !Array.isArray(value.taskMetadata)
-      || value.schedules.length !== 0 || value.taskMetadata.length !== 0)) {
-      errors.push('directory-only companion: task metadata and schedules are not allowed');
+    if (value.mode === DIRECTORY_ONLY_MODE && (!Array.isArray(value.schedules) || !Array.isArray(value.taskMetadata) || !Array.isArray(value.contextMetadata)
+      || value.schedules.length !== 0 || value.taskMetadata.length !== 0 || value.contextMetadata.length !== 0)) {
+      errors.push('directory-only companion: task metadata, context metadata, and schedules are not allowed');
     }
     if (value.mode !== DIRECTORY_ONLY_MODE && (!Array.isArray(value.contextMetadata) || value.contextMetadata.length !== (projection.contextNodes?.length ?? 0))) {
       errors.push('contextMetadata: full-current companion must cover every projected context');
@@ -248,6 +259,7 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
   } catch (error) {
     throw new Error(`team companion: invalid JSON (${error instanceof Error ? error.message : String(error)})`);
   }
+  value = normalizeLegacyDirectoryOnly(value);
   const errors = validateCompanion(value, null);
   if (errors.length) throw new Error(`team companion is invalid: ${errors.join('; ')}`);
   const currentDigest = projectionDigest(projection);
