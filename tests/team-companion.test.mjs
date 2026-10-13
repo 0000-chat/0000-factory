@@ -305,6 +305,51 @@ test('full-current companion normalizes approved ranges, safe health, hierarchy 
   }
 });
 
+test('legacy context rows gain a null owner label and stale reads retain raw provenance', () => {
+  const projectionValue = fullTaskProjection();
+  const legacy = fullCurrentCompanion(projectionValue);
+  legacy.contextMetadata = [{ contextId: 'full-project', owner: 'person-1', healthState: 'on-track', target: '2026-11-15' }];
+  delete legacy.contextMetadata[0].ownerName;
+  delete legacy.proposedSchedules;
+  const { companionDigest: _ignored, ...withoutDigest } = legacy;
+  legacy.companionDigest = digest(withoutDigest);
+  const root = join(CHECK_ROOT, 'legacy-owner-provenance');
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, 'projection.json'), `${JSON.stringify(projectionValue)}\n`, { mode: 0o600 });
+  writeFileSync(join(root, 'companion.json'), `${JSON.stringify(legacy)}\n`, { mode: 0o600 });
+  try {
+    const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'projection.json', linkPolicy: { allowedEvidenceHosts: [], forbiddenGitHubRepositories: [] } });
+    const read = readTeamCompanion({ dataRoot: root, companionPath: 'companion.json', projection: loaded.rawProjection, expectedRosterDigest: digest(['person-1']) });
+    assert.equal(read.contextMetadata[0].ownerName, null);
+    assert.equal(read.legacyCompanionDigest, legacy.companionDigest);
+    const stale = readTeamCompanion({ dataRoot: root, companionPath: 'companion.json', projection: { ...loaded.rawProjection, revision: 'r-stale' }, expectedRosterDigest: digest(['person-1']) });
+    assert.equal(stale.projectionMismatch, true);
+    assert.equal(stale.legacyCompanionDigest, legacy.companionDigest);
+  } finally {
+    unlinkSync(join(root, 'projection.json'));
+    unlinkSync(join(root, 'companion.json'));
+  }
+});
+
+test('rejects a digest-valid directory-only companion with an orphan schedule', () => {
+  const projectionValue = fullTaskProjection();
+  const invalid = directoryOnlyCompanion(projectionValue);
+  invalid.schedules = [{ taskId: 'orphan-task', approvedStart: null, approvedEnd: '2026-10-20', provisional: false }];
+  const { companionDigest: _ignored, ...withoutDigest } = invalid;
+  invalid.companionDigest = digest(withoutDigest);
+  const root = join(CHECK_ROOT, 'directory-only-orphan-schedule');
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, 'projection.json'), `${JSON.stringify(projectionValue)}\n`, { mode: 0o600 });
+  writeFileSync(join(root, 'companion.json'), `${JSON.stringify(invalid)}\n`, { mode: 0o600 });
+  try {
+    const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'projection.json', linkPolicy: { allowedEvidenceHosts: [], forbiddenGitHubRepositories: [] } });
+    assert.throws(() => readTeamCompanion({ dataRoot: root, companionPath: 'companion.json', projection: loaded.rawProjection, expectedRosterDigest: digest(['person-1']) }), /directory-only companion/u);
+  } finally {
+    unlinkSync(join(root, 'projection.json'));
+    unlinkSync(join(root, 'companion.json'));
+  }
+});
+
 test('a valid companion schedule allowlist clears omitted baseline deadlines', () => {
   const base = projection();
   const value = companion();

@@ -78,6 +78,7 @@ function normalizeLegacyCompanion(value) {
   const legacyDirectory = directoryOnly && (!Object.hasOwn(value, 'contextMetadata') || !Object.hasOwn(value, 'releaseMetadata'));
   const legacyFull = fullCurrent && (!Object.hasOwn(value, 'contextMetadata')
     || !Object.hasOwn(value, 'releaseMetadata')
+    || (Array.isArray(value.contextMetadata) && value.contextMetadata.some(entry => !Object.hasOwn(entry, 'ownerName')))
     || (Array.isArray(value.schedules) && value.schedules.some(entry => !Object.hasOwn(entry, 'provisional')))
     || (Array.isArray(value.activitySummaries) && value.activitySummaries.some(entry => !Object.hasOwn(entry, 'occurredDates') || !Object.hasOwn(entry, 'activityKinds')))
     || !Object.hasOwn(value, 'activitySummaries')
@@ -95,7 +96,7 @@ function normalizeLegacyCompanion(value) {
     || value.audit.rosterDigest !== digest(value.directory.map(entry => entry?.id).sort())) return value;
   const migrated = {
     ...value,
-    contextMetadata: value.contextMetadata ?? [],
+    contextMetadata: (value.contextMetadata ?? []).map(entry => ({ ownerName: null, ...entry })),
     releaseMetadata: value.releaseMetadata ?? [],
     proposedSchedules: value.proposedSchedules ?? [],
   };
@@ -397,6 +398,7 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
     ...(policyMismatch ? { policyMismatch: true } : {}),
     ...(trustedRosterMismatch ? { trustedRosterMismatch: true } : {}),
     ...(projectionMismatch ? { projectionMismatch: true } : {}),
+    ...(value.legacyContract ? { legacyContract: true, legacyCompanionDigest: value.legacyCompanionDigest } : {}),
     fileDigest: `sha256:${createHash('sha256').update(artifact.bytes).digest('hex')}`,
   });
   return Object.freeze({
@@ -416,6 +418,7 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
     ...(policyMismatch ? { policyMismatch: true } : {}),
     ...(trustedRosterMismatch ? { trustedRosterMismatch: true } : {}),
     ...(projectionMismatch ? { projectionMismatch: true } : {}),
+    ...(value.legacyContract ? { legacyContract: true, legacyCompanionDigest: value.legacyCompanionDigest } : {}),
     currentProjectionDigest: currentDigest,
     fileDigest: `sha256:${createHash('sha256').update(artifact.bytes).digest('hex')}`,
   });
