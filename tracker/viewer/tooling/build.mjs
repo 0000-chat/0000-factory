@@ -712,7 +712,10 @@ function runFrontendBuild(assetsPath, instance) {
 function ensureGeneratedRoutes() {
   const routeTree = join(VIEWER_DIR, 'src', 'routeTree.gen.ts');
   if (existsSync(routeTree)) return;
-  execFileSync('bun', ['x', 'tsr', 'generate'], {
+  // Use the reviewed @tanstack/router-cli dependency from this checkout.
+  // `bun x tsr` resolves an unrelated registry package named `tsr`, which
+  // breaks route generation under current Node/Bun runtimes.
+  execFileSync('bun', ['x', '--no-install', '-p', '@tanstack/router-cli', 'tsr', 'generate'], {
     cwd: VIEWER_DIR,
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',

@@ -184,9 +184,9 @@ function validateCompanion(value, projection, { enforceTaskIds = Boolean(project
       errors.push('activitySummaries: full-current companion must cover every projected task');
     }
   }
-  if (value.mode === DIRECTORY_ONLY_MODE && expectedRosterDigest !== null
+  if (expectedRosterDigest !== null
     && (!DIGEST.test(String(expectedRosterDigest)) || value.audit?.rosterDigest !== expectedRosterDigest)) {
-    errors.push('audit.rosterDigest: does not match the trusted directory roster constraint');
+    errors.push('audit.rosterDigest: does not match the trusted directory roster constraint in every companion mode');
   }
   exactKeys(value.publish, ['reviewed', 'activationEnabled'], '$.publish', errors);
   if (!isRecord(value.publish) || value.publish.reviewed !== false || value.publish.activationEnabled !== false) errors.push('publish: must remain disabled');
@@ -236,8 +236,8 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
   const standingProjection = projection?.kind === 'standing-team-projection';
   const fullTaskProjection = projection?.kind === 'full-task-projection';
   const directoryOnly = value.mode === DIRECTORY_ONLY_MODE;
-  const trustedRosterMismatch = directoryOnly
-    && (!DIGEST.test(String(expectedRosterDigest ?? '')) || value.audit.rosterDigest !== expectedRosterDigest);
+  const trustedRosterMismatch = !DIGEST.test(String(expectedRosterDigest ?? ''))
+    || value.audit.rosterDigest !== expectedRosterDigest;
   const unsupportedProjection = !standingProjection && !fullTaskProjection;
   const rosterMismatch = Boolean(standingProjection)
     && (!DIGEST.test(String(currentRosterDigest)) || currentRosterDigest !== value.audit.rosterDigest);

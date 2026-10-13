@@ -227,7 +227,7 @@ test('full-current companion normalizes approved ranges, safe health, hierarchy 
   writeFileSync(join(root, 'companion.json'), `${JSON.stringify(companionValue)}\n`, { mode: 0o600 });
   try {
     const loaded = readTeamProjection({ dataRoot: root, projectionPath: 'projection.json', linkPolicy: { allowedEvidenceHosts: [], forbiddenGitHubRepositories: [] } });
-    const companionRead = readTeamCompanion({ dataRoot: root, companionPath: 'companion.json', projection: loaded.rawProjection });
+    const companionRead = readTeamCompanion({ dataRoot: root, companionPath: 'companion.json', projection: loaded.rawProjection, expectedRosterDigest: digest(['person-1']) });
     assert.equal(companionRead.directoryOnly, false);
     assert.equal(companionRead.staleActivity, false);
     const snapshot = buildTeamProjectionSnapshot(loaded.projection, {}, companionRead);
@@ -258,6 +258,18 @@ test('full-current companion normalizes approved ranges, safe health, hierarchy 
     assert.doesNotMatch(JSON.stringify(companionRead), /sourcePath|privateNotes|transcript|credential/u);
     const workProjection = buildWorkProjection({ items: snapshot.items, evidence: snapshot.activityEvidence, now: '2026-10-21' });
     assert.equal(workProjection.get('full-approved').own.state, 'recent');
+
+    const mismatched = readTeamCompanion({
+      dataRoot: root,
+      companionPath: 'companion.json',
+      projection: loaded.rawProjection,
+      expectedRosterDigest: digest(['different-person']),
+    });
+    assert.equal(mismatched.trustedRosterMismatch, true);
+    assert.deepEqual(mismatched.directory, []);
+    assert.deepEqual(mismatched.schedules, []);
+    assert.deepEqual(mismatched.taskMetadata, []);
+    assert.deepEqual(mismatched.activitySummaries, []);
   } finally {
     unlinkSync(join(root, 'projection.json'));
     unlinkSync(join(root, 'companion.json'));
@@ -293,7 +305,7 @@ test('a valid companion schedule allowlist clears omitted baseline deadlines', (
   mkdirSync(CHECK_ROOT, { recursive: true });
   writeFileSync(path, `${JSON.stringify(allowlisted)}\n`, { mode: 0o600 });
   try {
-    const read = readTeamCompanion({ dataRoot: CHECK_ROOT, companionPath: 'team-safe-companion-allowlist.json', projection: boundProjection });
+    const read = readTeamCompanion({ dataRoot: CHECK_ROOT, companionPath: 'team-safe-companion-allowlist.json', projection: boundProjection, expectedRosterDigest: digest(['person-1']) });
     assert.equal(read.staleSchedule, false);
     const snapshot = buildTeamProjectionSnapshot(boundProjection, {}, read);
     const omitted = snapshot.items.find(item => item.id === 'task-safe');
