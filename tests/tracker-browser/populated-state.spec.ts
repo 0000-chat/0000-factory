@@ -121,7 +121,15 @@ test('Gantt keeps schedule controls compact and opens row investigation', async 
   await expect(showActivityToggle).toHaveAttribute('aria-pressed', 'false');
   await showActivityToggle.click();
   await expect(page.getByRole('button', { name: 'Hide recorded activity', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'Show forecast', exact: true })).toBeVisible();
+  const forecastToggle = page.getByRole('button', { name: 'Include forecast dates', exact: true });
+  await expect(forecastToggle).toBeVisible();
+  await expect(forecastToggle).toHaveAttribute('aria-pressed', 'false');
+  await forecastToggle.click();
+  const hideForecastToggle = page.getByRole('button', { name: 'Hide forecast dates', exact: true });
+  await expect(hideForecastToggle).toBeVisible();
+  await expect(hideForecastToggle).toHaveAttribute('aria-pressed', 'true');
+  await hideForecastToggle.click();
+  await expect(page.getByRole('button', { name: 'Include forecast dates', exact: true })).toHaveAttribute('aria-pressed', 'false');
 
   const row = page.getByRole('button', { name: /Open details for Synthetic foundation task/ }).first();
   await expect(row).toBeVisible();
