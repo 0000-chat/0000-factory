@@ -22,6 +22,7 @@ const DIRECTORY_ONLY_SCHEDULE_RULE = 'directory-only-no-task-schedules';
 const DIRECTORY_KEYS = ['id', 'displayName', 'avatar'];
 const SCHEDULE_KEYS = ['taskId', 'approvedStart', 'approvedEnd'];
 const METADATA_KEYS = ['taskId', 'status', 'commitment', 'phase', 'healthState'];
+const CONTEXT_KEYS = ['contextId', 'owner', 'healthState', 'target'];
 const ACTIVITY_KEYS = ['taskId', 'eventCount', 'latestOccurredAt'];
 const PRIVATE_TEXT = /(?:https?:\/\/|\b(?:password|token|secret|credential)\s*[:=]|\bprivate(?:[ _-](?:note|data|history|source))?\b|\braw[ _-](?:evidence|source)\b)/iu;
 
@@ -86,7 +87,7 @@ function projectionDigest(projection) {
 
 function validateCompanion(value, projection, { enforceTaskIds = Boolean(projection), expectedRosterDigest = null } = {}) {
   const errors = [];
-  const topLevel = ['schemaVersion', 'kind', 'projectionDigest', 'projectionRevision', 'policyRevision', 'generatedAt', 'directory', 'schedules', 'taskMetadata', 'audit', 'publish', 'companionDigest'];
+  const topLevel = ['schemaVersion', 'kind', 'projectionDigest', 'projectionRevision', 'policyRevision', 'generatedAt', 'directory', 'schedules', 'taskMetadata', 'contextMetadata', 'audit', 'publish', 'companionDigest'];
   exactKeys(value, topLevel, '$', errors, ['mode', 'activitySummaries']);
   if (!isRecord(value)) return errors;
   if (value.schemaVersion !== 1) errors.push('schemaVersion: must be 1');
@@ -144,6 +145,21 @@ function validateCompanion(value, projection, { enforceTaskIds = Boolean(project
     if (entry.phase !== null && !SAFE_PHASES.has(entry.phase)) errors.push(`${path}.phase: invalid safe phase`);
     if (entry.healthState !== null && !SAFE_HEALTH_STATES.has(entry.healthState)) errors.push(`${path}.healthState: invalid safe health state`);
   });
+  const contextIds = new Set();
+  const projectedContextIds = projection && Array.isArray(projection.contextNodes)
+    ? new Set(projection.contextNodes.map(node => node.id))
+    : null;
+  if (!Array.isArray(value.contextMetadata)) errors.push('contextMetadata: must be an array');
+  else value.contextMetadata.forEach((entry, index) => {
+    const path = `contextMetadata[${index}]`;
+    exactKeys(entry, CONTEXT_KEYS, path, errors);
+    if (!isRecord(entry)) return;
+    if (!ID.test(String(entry.contextId)) || contextIds.has(entry.contextId) || (enforceTaskIds && projectedContextIds && !projectedContextIds.has(entry.contextId))) errors.push(`${path}.contextId: must be a unique projected context ID`);
+    contextIds.add(entry.contextId);
+    if (entry.owner !== null && !ID.test(String(entry.owner))) errors.push(`${path}.owner: must be a safe identity ID or null`);
+    if (!SAFE_HEALTH_STATES.has(entry.healthState)) errors.push(`${path}.healthState: invalid safe health state`);
+    if (entry.target !== null && !isDate(entry.target)) errors.push(`${path}.target: must be a date or null`);
+  });
   const activityIds = new Set();
   if (value.activitySummaries === undefined) {
     if (projection?.kind === 'full-task-projection' && value.mode !== DIRECTORY_ONLY_MODE) errors.push('activitySummaries: required for full-current companions');
@@ -179,6 +195,9 @@ function validateCompanion(value, projection, { enforceTaskIds = Boolean(project
     if (value.mode === DIRECTORY_ONLY_MODE && (!Array.isArray(value.schedules) || !Array.isArray(value.taskMetadata)
       || value.schedules.length !== 0 || value.taskMetadata.length !== 0)) {
       errors.push('directory-only companion: task metadata and schedules are not allowed');
+    }
+    if (value.mode !== DIRECTORY_ONLY_MODE && (!Array.isArray(value.contextMetadata) || value.contextMetadata.length !== (projection.contextNodes?.length ?? 0))) {
+      errors.push('contextMetadata: full-current companion must cover every projected context');
     }
     if (value.mode !== DIRECTORY_ONLY_MODE && (!Array.isArray(value.activitySummaries) || value.activitySummaries.length !== projection.tasks.length)) {
       errors.push('activitySummaries: full-current companion must cover every projected task');
@@ -255,6 +274,7 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
       staleSchedule: directoryOnly,
       staleMetadata: directoryOnly,
       staleActivity: directoryOnly,
+      contextMetadata: directoryOnly ? [] : (value.contextMetadata ?? []),
       activitySummaries: directoryOnly ? [] : (value.activitySummaries ?? []),
       fileDigest: `sha256:${createHash('sha256').update(artifact.bytes).digest('hex')}`,
     });
@@ -264,6 +284,7 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
     directory: [],
     schedules: [],
     taskMetadata: [],
+    contextMetadata: [],
     activitySummaries: [],
     staleSchedule: true,
     staleMetadata: true,
@@ -280,6 +301,7 @@ export function readTeamCompanion({ dataRoot, companionPath, projection, expecte
     ...(unsupportedProjection || rosterMismatch || policyMismatch || projectionMismatch ? { directory: [] } : {}),
     schedules: [],
     taskMetadata: [],
+    contextMetadata: [],
     activitySummaries: [],
     staleSchedule: true,
     staleMetadata: true,

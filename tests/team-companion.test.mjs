@@ -35,6 +35,7 @@ function companion() {
     directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }],
     schedules: [{ taskId: 'task-safe', approvedStart: '2026-10-01', approvedEnd: '2026-10-02' }],
     taskMetadata: [{ taskId: 'task-safe', status: 'active', commitment: 'accepted', phase: 'build', healthState: 'on-track' }],
+    contextMetadata: [],
     audit: {
       directoryRule: 'approved-roster-safe-display-metadata-only',
       scheduleRule: 'approved-endpoint-only-with-existing-task-proof',
@@ -112,7 +113,7 @@ function directoryOnlyCompanion(projectionValue) {
     schemaVersion: 1, kind: 'team-safe-companion', mode: 'directory-only-v3',
     projectionDigest: digest({ ...projectionValue, publish: { ...projectionValue.publish, initialProjectionDigest: null } }),
     projectionRevision: projectionValue.revision, policyRevision: projectionValue.policyRevision, generatedAt: '2026-10-12T00:00:00Z',
-    directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }], schedules: [], taskMetadata: [],
+    directory: [{ id: 'person-1', displayName: 'Synthetic Person', avatar: 'person-1.webp' }], schedules: [], taskMetadata: [], contextMetadata: [],
     audit: {
       directoryRule: 'approved-roster-safe-display-metadata-only', scheduleRule: 'directory-only-no-task-schedules',
       sourceTaskCount: projectionValue.tasks.length, rosterDigest: digest(['person-1']),
@@ -132,6 +133,7 @@ function fullCurrentCompanion(projectionValue) {
       { taskId: 'full-approved', status: 'active', commitment: 'accepted', phase: 'build', healthState: 'on-track' },
       { taskId: 'full-forecast', status: 'queued', commitment: 'planned', phase: 'discovery', healthState: 'unknown' },
     ],
+    contextMetadata: [{ contextId: 'full-project', owner: 'person-1', healthState: 'on-track', target: '2026-11-15' }],
     activitySummaries: [
       { taskId: 'full-approved', eventCount: 3, latestOccurredAt: '2026-10-20T03:00:00Z' },
       { taskId: 'full-forecast', eventCount: 0, latestOccurredAt: null },
@@ -253,8 +255,9 @@ test('full-current companion normalizes approved ranges, safe health, hierarchy 
         included: true, amendmentIds: [], approvalDecisionIds: [],
       }],
     });
-    assert.equal(context.owner, null);
-    assert.equal(context.health.state, 'unknown');
+    assert.equal(context.owner, 'person-1');
+    assert.equal(context.health.state, 'on-track');
+    assert.equal(context.target, '2026-11-15');
     assert.doesNotMatch(JSON.stringify(companionRead), /sourcePath|privateNotes|transcript|credential/u);
     const workProjection = buildWorkProjection({ items: snapshot.items, evidence: snapshot.activityEvidence, now: '2026-10-21' });
     assert.equal(workProjection.get('full-approved').own.state, 'recent');
@@ -270,6 +273,7 @@ test('full-current companion normalizes approved ranges, safe health, hierarchy 
     assert.deepEqual(mismatched.schedules, []);
     assert.deepEqual(mismatched.taskMetadata, []);
     assert.deepEqual(mismatched.activitySummaries, []);
+    assert.deepEqual(mismatched.contextMetadata, []);
   } finally {
     unlinkSync(join(root, 'projection.json'));
     unlinkSync(join(root, 'companion.json'));
