@@ -1,0 +1,16 @@
+{
+  "schema_version": "1",
+  "release_id": "factory-38345870285-1",
+  "consumer_repository": "donmasakayan/nextpay-strategy",
+  "factory_repository": "https://github.com/0000-chat/0000-factory.git",
+  "factory_branch": "codex/weekly-planning-archive",
+  "factory_sha": "3e7ae35c2555e4c44252d26d557ac6876b1ac769",
+  "status": "triggered",
+  "sync_state": "pending-deployment",
+  "deployment_status": "pending-public-provenance",
+  "runtime_factory_sha": null,
+  "live_status": "pending",
+  "live_http_status": 200,
+  "live_url": "https://tracker.nextpay.0000.gold",
+  "runtime_request_cache_busted": true
+}
