@@ -171,8 +171,8 @@ summaries are normalized into generic recent-activity indicators; they contain
 no event text, source links, credentials, or private references. Approved
 schedule ranges remain the only companion source for schedule spans, while the
 projection remains authoritative for task identity and hierarchy. Context rows
-retain the projection's safe owner and health values; absent approved values
-remain unknown.
+retain hierarchy; ownership comes only from proven descendant tasks, and absent
+health values remain unknown.
 
 For the legacy full current-task copy, a directory-only companion sets
 `mode: "directory-only-v3"`, keeps `schedules`, `taskMetadata`, and
