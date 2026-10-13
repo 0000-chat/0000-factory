@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "releaseId": "factory-38340943049-1",
+  "factorySha": "541de7ec6ae057fb949ab62cd41260f5fc20e542",
+  "state": "pending",
+  "repositories": [
+    "kapitolph/nextpay-team-delivery",
+    "donmasakayan/nextpay-strategy"
+  ]
+}
