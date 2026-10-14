@@ -8,6 +8,7 @@ import { archiveCandidates } from './model.mjs';
 import { acceptedTaskDigest, isAccepted, milestonePlanApprovalDigest, taskApprovalDigest } from './planning.mjs';
 import { DataSourceError, validateDataSource } from './source-validation.mjs';
 import { renderViews } from './views.mjs';
+import { resolveTaskReference } from './task-codes.mjs';
 
 const RUNNING_ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -17,7 +18,7 @@ function usage() {
     '',
     'COMMAND is build, check, validate-only, archive, or digest.',
     'The output directory is required for build and optional for check/validate-only.',
-    'archive accepts --apply; digest accepts a plan or item ID.',
+    'archive accepts --apply; digest accepts a plan, item ID, or task reference code.',
   ].join('\n');
 }
 
@@ -70,7 +71,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
   requiredOption(options, 'settings');
   if (options.command === 'build' && options.out === null) throw new Error('out is required for build');
   if (options.apply && options.command !== 'archive') throw new Error('--apply is only valid for archive');
-  if (options.command === 'digest' && options.id === null) throw new Error('digest requires a plan or item ID');
+  if (options.command === 'digest' && options.id === null) throw new Error('digest requires a plan, item ID, or task reference code');
   return options;
 }
 
@@ -141,15 +142,16 @@ function archive(dataRepo, instance, records, apply) {
   console.log(`archived ${moves.length} tasks; run build to refresh views`);
 }
 
-function printDigest(id, records) {
-  const plan = records.plans.find(record => record.data.id === id);
+function printDigest(reference, records) {
+  const plan = records.plans.find(record => record.data.id === reference);
   if (plan) {
-    const milestones = records.milestones.filter(record => record.data.plan_id === id);
-    console.log(`plan ${id} approval_digest ${milestonePlanApprovalDigest(plan, milestones)}`);
+    const milestones = records.milestones.filter(record => record.data.plan_id === reference);
+    console.log(`plan ${reference} approval_digest ${milestonePlanApprovalDigest(plan, milestones)}`);
     return;
   }
+  const id = resolveTaskReference(reference, records.items);
   const item = records.items.find(record => record.data.id === id);
-  if (!item) throw new Error(`unknown plan or item: ${id}`);
+  if (!item) throw new Error(`unknown plan, item, or task reference code: ${reference}`);
   if (isAccepted(item)) console.log(`item ${id} accepted_task_digest ${acceptedTaskDigest(item)}`);
   else console.log(`item ${id} task_approval_digest ${taskApprovalDigest(item)}`);
 }

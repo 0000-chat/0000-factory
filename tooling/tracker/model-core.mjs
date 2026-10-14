@@ -19,6 +19,7 @@ import {
 import { extractMarkdownSections, scanMarkdownHeadings } from './markdown.mjs';
 import { validateActivityEvidence } from './activity-evidence.mjs';
 import { validateDeliveryRecords } from './delivery-records.mjs';
+import { taskCodeIndex } from './task-codes.mjs';
 
 export const ITEM_STATUSES = new Set(['queued', 'active', 'blocked', 'done']);
 export const PHASES = new Set(['discovery', 'build', 'verify']);
@@ -443,6 +444,12 @@ function validateItems(records, issues) {
       || (!approvalParts.includes('task') && !scopeFreeAssignmentApproval(item) && (approval.anyApproval || hasDeclaredParts))) {
       issues.push(`${item.path}: approved_parts must contain task and may include assignment or schedule, unless an exact assignment approval records owner attribution`);
     }
+  }
+  const validItems = records.items.filter(item => idPattern.test(item.data?.id ?? '') && item.name === item.data.id);
+  try {
+    taskCodeIndex(validItems);
+  } catch (error) {
+    issues.push(`task reference code validation failed: ${error instanceof Error ? error.message : String(error)}`);
   }
   return byId;
 }

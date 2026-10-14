@@ -81,6 +81,16 @@ test('uses stable IDs for duplicate title ties and creates encoded canonical lin
   assert.equal(groups.find(group => group.kind === 'person')?.results[0]?.href, `/team/${encodeURIComponent(memberSlug)}`);
 });
 
+test('searches work by short reference code and exposes it in the result', () => {
+  const data = snapshot({
+    items: [item('fixture-reference-target', 'Synthetic target', { referenceCode: 'T-9WAB7B' })],
+  });
+  const result = groupResults('t-9wab7b', { items: [item('fixture-reference-target', 'Synthetic target', { referenceCode: 'T-9WAB7B' })] }, 'work')[0];
+  assert.equal(result?.id, 'fixture-reference-target');
+  assert.equal(result?.referenceCode, 'T-9WAB7B');
+  assert.equal(searchSnapshot(data, 't-9wab7b').find(group => group.kind === 'work')?.results[0]?.referenceCode, 'T-9WAB7B');
+});
+
 test('handles missing optional metadata and gives work lifecycle states explicit subtitles', () => {
   const data = snapshot({
     items: [

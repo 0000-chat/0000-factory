@@ -10,6 +10,7 @@ export interface SearchResult {
   title: string;
   subtitle: string;
   href: string;
+  referenceCode?: string;
 }
 
 export interface SearchGroup {
@@ -96,10 +97,11 @@ function candidate(
 
 function workCandidate(item: TrackerItem): SearchCandidate {
   const id = text(item.id);
+  const referenceCode = text(item.referenceCode);
   const title = firstText(item.title, id) || 'Untitled work';
   const ownerFields = [...recordText(item, 'ownerName', 'owner')];
   const nameFields = [...recordText(item, 'name')];
-  const exactFields = [id, title, ...nameFields, ...ownerFields];
+  const exactFields = [id, referenceCode, title, ...nameFields, ...ownerFields];
 
   return candidate({
     kind: 'work',
@@ -107,7 +109,8 @@ function workCandidate(item: TrackerItem): SearchCandidate {
     title,
     subtitle: workSubtitle(item),
     href: workItemPath(id),
-  }, [id, title, ...nameFields, ...ownerFields], exactFields, [title, ...nameFields]);
+    ...(referenceCode ? { referenceCode } : {}),
+  }, [id, referenceCode, title, ...nameFields, ...ownerFields], exactFields, [title, ...nameFields]);
 }
 
 function planCandidate(plan: TrackerPlan): SearchCandidate {

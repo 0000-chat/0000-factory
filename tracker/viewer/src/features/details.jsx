@@ -570,7 +570,7 @@ function CompactItemDetail({ item, data, onSelectItem }) {
   const linked = item.linked ?? {};
   const historicalRecords = (data?.history ?? []).filter(entry => entry.supersededBy === item.id);
   return <div className="detail-body">
-    <div className="detail-title-row"><div><p className="eyebrow">Selected work</p><h2>{item.title}</h2><p className="detail-id">{item.id}</p></div><ItemChips item={item} /></div>
+    <div className="detail-title-row"><div><p className="eyebrow">Selected work</p><h2>{item.title}</h2><p className="detail-id">{item.referenceCode ? <><span>{item.referenceCode}</span> · </> : null}{item.id}</p></div><ItemChips item={item} /></div>
     <ProgressSummary item={item} />
     <HealthSummary health={item.health} />
     <ApprovalSummary item={item} />
@@ -639,7 +639,7 @@ function ItemPageHeader({ item, data, canonicalData, renderItemLink, returnLink,
         canonicalAtStart={canonicalFieldBaseline(canonicalData, item, 'title', item.title)}
         taskEdit={taskEdit}
         onEditingChange={setTitleEditing}
-      /></h1><p className="detail-id">{item.id}</p></div>
+      /></h1><p className="detail-id">{item.referenceCode ? <><span>{item.referenceCode}</span> · </> : null}{item.id}</p></div>
       <ItemChips item={item} />
     </div>
     <ItemBreadcrumbs item={item} data={data} renderItemLink={renderItemLink} />

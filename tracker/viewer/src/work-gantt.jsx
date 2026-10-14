@@ -407,6 +407,7 @@ function WorkGanttSidebarRow({
         title={title}
         onClick={() => onSelect(row.id)}
       >
+        {item?.referenceCode ? <code className="work-reference-code work-gantt-reference-code">{item.referenceCode}</code> : null}
         <span className="work-gantt-title">{title}</span>
         <span className="work-gantt-title-meta">
           <span className="work-gantt-row-meta work-gantt-status" title={'Lifecycle status · ' + status}>{status}</span>
@@ -795,6 +796,8 @@ function WorkGanttTimelineContent({
           {rows.map(row => {
             const item = data?.itemById?.get(row.id) ?? row.entry;
             const title = item.title ?? row.entry.title;
+            const referenceCode = item.referenceCode;
+            const titleWithReference = referenceCode ? `${referenceCode} · ${title}` : title;
             const primaryId = row.primaryMark?.id;
             const rollups = row.collapsed && row.hasChildren
               ? placeWorkGanttRollups(row.childSummaryIntervals?.length ? row.childSummaryIntervals : row.childRollups ?? [])
@@ -849,7 +852,7 @@ function WorkGanttTimelineContent({
                 style={{ left: `${envelopeLeft}px`, width: `${envelopeWidth}px` }}
                 onClick={() => onSelect(row.id)}
                 onPointerDown={event => event.stopPropagation()}
-              ><span className="work-gantt-parent-envelope-label">{title} · {shortWorkDate(row.parentEnvelope.startDay)}–{shortWorkDate(row.parentEnvelope.endDay)}</span></button> : null}
+              ><span className="work-gantt-parent-envelope-label">{referenceCode ? <code className="work-reference-code">{referenceCode}</code> : null}{title} · {shortWorkDate(row.parentEnvelope.startDay)}–{shortWorkDate(row.parentEnvelope.endDay)}</span></button> : null}
               {row.isExpanded && row.parentEnvelope && parentEnvelopeLeft !== null && parentEnvelopeWidth > 0 ? <button
                 className="work-gantt-expanded-parent-label"
                 type="button"
@@ -869,8 +872,8 @@ function WorkGanttTimelineContent({
                 overlapMode="overlay"
                 hitTesting="lanes"
                 getInteractionLane={feature => workGanttInteractionLane(row, feature)}
-                getAriaLabel={feature => title + ' · ' + accessibleMarkDescription(feature)}
-                getTitle={feature => title + ' · ' + accessibleMarkDescription(feature)}
+                getAriaLabel={feature => titleWithReference + ' · ' + accessibleMarkDescription(feature)}
+                getTitle={feature => titleWithReference + ' · ' + accessibleMarkDescription(feature)}
                 getClassName={feature => {
                   const classes = ['work-gantt-mark', 'work-gantt-mark-' + feature.sourceKind];
                   if (row.hasChildren && row.collapsed) classes.push('work-gantt-summary');
@@ -917,7 +920,7 @@ function WorkGanttTimelineContent({
                       aria-hidden="true"
                       style={{ '--motion-left': String(motion.left) + '%', '--motion-width': String(motion.width) + '%' }}
                     /> : null}
-                    {label && feature.id === primaryId ? <span className="gantt-feature-label work-gantt-label">{label}</span> : null}
+                    {label && feature.id === primaryId ? <span className="gantt-feature-label work-gantt-label">{referenceCode ? <code className="work-reference-code">{referenceCode}</code> : null}{label}</span> : null}
                   </span>;
                 }}
               </GanttFeatureRow> : null}

@@ -10,6 +10,7 @@ import { loadTrackerFromFiles, validateTracker as validateTrackerCore } from './
 import { extractMarkdownSections, extractMarkdownTitle, scanMarkdownHeadings } from './markdown.mjs';
 import { acceptedTaskDigest, canTransitionCommitment, taskApprovalDigest } from './planning.mjs';
 import { renderViews } from './views.mjs';
+import { resolveTaskReference, taskCodeForId, taskCodeIndex } from './task-codes.mjs';
 import { fixtureInstance, writeFixtureData } from '../../tests/helpers/fixture-data.mjs';
 import './activity-evidence.test.mjs';
 import './delivery-records.test.mjs';
@@ -165,6 +166,32 @@ test('the unified loader validates planned and accepted items and renders planne
   assert.match(views['tracker/views/now.md'], /accepted-child/);
   assert.doesNotMatch(views['tracker/views/owners.md'], /planned-parent/);
   assert.match(views['tracker/views/dependencies.md'], /planned-parent.*planned/);
+});
+
+test('task reference codes are frozen, searchable, and collision-safe', () => {
+  const first = record('fixture-code-first');
+  const second = record('fixture-code-second');
+  const code = taskCodeForId('fixture-code-first');
+  assert.equal(taskCodeForId('fixture-project'), 'T-RTUDWH');
+  assert.match(code, /^T-[A-Z2-9]{6}$/);
+  assert.equal(resolveTaskReference(code.toLowerCase(), [first, second]), 'fixture-code-first');
+  assert.equal(resolveTaskReference('fixture-code-second', [first, second]), 'fixture-code-second');
+  const changedFirst = record('fixture-code-first', { owner: 'fixture-owner' }, '# Renamed synthetic task\n\n## Outcome\n\nChanged description.');
+  assert.equal(taskCodeForId(changedFirst.data.id), code);
+  assert.equal(resolveTaskReference(code, [changedFirst, second, record('fixture-code-new')]), 'fixture-code-first');
+  assert.deepEqual(
+    [...taskCodeIndex([first, second])],
+    [...taskCodeIndex([second, first])].reverse(),
+  );
+
+  const collisionIds = ['collision-canonical-13753', 'collision-canonical-34460'];
+  assert.equal(taskCodeForId(collisionIds[0]), taskCodeForId(collisionIds[1]));
+  assert.throws(
+    () => taskCodeIndex(collisionIds.map(id => record(id))),
+    /task reference code collision: T-47XGK6/,
+  );
+  const issues = validateTracker({ items: collisionIds.map(id => record(id)) }).join('\n');
+  assert.match(issues, /task reference code validation failed: task reference code collision: T-47XGK6/);
 });
 
 test('the filesystem adapter and pure file-map loader share full populated fixture validation', () => {

@@ -73,6 +73,13 @@ test('matches all query tokens across fields and restores only needed graph cont
   assert.deepEqual(result.items[0]?.childSummary, data.itemById.get('project')?.childSummary);
 });
 
+test('matches Work search by short reference code', () => {
+  const data = snapshot([workItem('fixture-reference-target', null, { referenceCode: 'T-9WAB7B' })]);
+  const result = projectFilteredWork(data, parseWorkSearch({ q: 't-9wab7b' }, projectFilterOptions(data)));
+  assert.equal(result.matchCount, 1);
+  assert.deepEqual(result.items.map(item => item.id), ['fixture-reference-target']);
+});
+
 test('date ranges overlap separate baseline and forecast features and preserve undated work', () => {
   const data = snapshot([
     workItem('baseline-overlap', null, {

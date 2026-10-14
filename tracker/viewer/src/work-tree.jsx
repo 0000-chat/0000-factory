@@ -195,6 +195,7 @@ function TreeItem({
         </span>
         <div className={`tracker-tree-label ${contextual ? 'tree-contextual' : ''}`}>
           <span className="work-tree-title">
+            {item.referenceCode ? <code className="work-reference-code">{item.referenceCode}</code> : null}
             <strong>{item.title}</strong>
             {!isAccepted(item) ? <BadgeChip tone={isDraft(item) ? 'slate' : 'amber'} className="tree-planned-chip">{commitmentLabel(item)}</BadgeChip> : null}
           </span>

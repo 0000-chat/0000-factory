@@ -76,7 +76,7 @@ function scheduleSortValue(item) {
 
 function WorkTable({ items, contextualIds = new Set(), onSelect }) {
   const columns = useMemo(() => [
-    { accessorKey: 'title', header: 'Work', cell: ({ row }) => { const item = row.original; return <span className="work-title-cell"><span>{item.title}</span>{!isAccepted(item) ? <BadgeChip tone={isDraft(item) ? 'slate' : 'amber'}>{commitmentLabel(item)}</BadgeChip> : null}</span>; } },
+    { accessorKey: 'title', header: 'Work', cell: ({ row }) => { const item = row.original; return <span className="work-title-cell">{item.referenceCode ? <code className="work-reference-code">{item.referenceCode}</code> : null}<span>{item.title}</span>{!isAccepted(item) ? <BadgeChip tone={isDraft(item) ? 'slate' : 'amber'}>{commitmentLabel(item)}</BadgeChip> : null}</span>; } },
     { accessorKey: 'status', header: 'Status', sortingAccessor: item => item.status, cell: ({ row }) => humanize(row.original.status) },
     { id: 'health', header: 'Health', sortingAccessor: item => item.health?.state ?? null, cell: ({ row }) => healthLabel(row.original.health?.state) },
     { id: 'owner', header: 'Owner', sortingAccessor: item => item.ownerName || item.owner || null, cell: ({ row }) => row.original.owner && row.original.owner !== 'unassigned' ? <PersonLink value={row.original.owner} name={row.original.ownerName} avatar className="work-table-owner-link" /> : 'Unassigned' },
